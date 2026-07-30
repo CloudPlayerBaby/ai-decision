@@ -1,0 +1,331 @@
+package qg.po.midterm.workflow.listener;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import qg.po.midterm.common.enums.ErrorCode;
+import qg.po.midterm.entity.AnalysisStep;
+import qg.po.midterm.entity.AnalysisTask;
+import qg.po.midterm.entity.Decision;
+import qg.po.midterm.mapper.AnalysisStepMapper;
+import qg.po.midterm.mapper.AnalysisTaskMapper;
+import qg.po.midterm.mapper.DecisionMapper;
+import qg.po.midterm.service.AnalysisEventService;
+import qg.po.midterm.workflow.event.NodeExecutionEvent;
+
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 把 Workflow 节点事件转换成数据库状态和 SSE 事件
+ */
+@Component
+@RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
+public class NodeExecutionEventListener {
+
+    private final AnalysisTaskMapper taskMapper;
+    private final AnalysisStepMapper stepMapper;
+    private final DecisionMapper decisionMapper;
+    private final AnalysisEventService eventService;
+
+    @EventListener
+    @Transactional
+    public void handle(NodeExecutionEvent event) {
+        // 通过event里面的taskId找到对应的task
+        AnalysisTask task = findDatabaseTask(event);
+        if (task == null) {
+            return;
+        }
+        Long taskDbId = task.getId();
+
+        // 如果是修复节点，不展示，但是如果判断修复失败，直接标记为任务失败
+        if ("Repair".equals(event.getNodeName())) {
+            if ("FAILED".equals(event.getStatus())) {
+                failTask(task, null, event.getErrorMessage());
+            }
+            return;
+        }
+
+        // 当前 Workflow 的 ReportGeneration 是最后一个节点，不展示
+        if ("ReportGeneration".equals(event.getNodeName())) {
+            if ("SUCCEEDED".equals(event.getStatus())) {
+                task.setStatus("SUCCEEDED");
+                task.setCurrentStep(task.getTotalSteps());
+                task.setFinishedAt(LocalDateTime.now());
+                task.setUpdatedAt(LocalDateTime.now());
+                taskMapper.updateById(task);
+
+                // TODO 结果处理模块完成 analysis_result 入库后调用 sendResultReady。
+
+
+            } else if ("FAILED".equals(event.getStatus())) {
+                // 如果是失败了，就标记为失败
+                failTask(task, null, event.getErrorMessage());
+            }
+            return;
+        }
+
+        // 把 workflow 里面的名转换成我们需要的名称
+        String stepName = getStepName(event.getNodeName());
+        // 没有的话就是 tool call 节点
+        if (stepName == null) {
+            if ("ToolCall".equals(event.getNodeName())) {
+                try {
+                    Map<String, Object> toolData = new com.fasterxml.jackson.databind.ObjectMapper().readValue(event.getOutputData(), Map.class);
+                    Map<String, Object> sseData = new LinkedHashMap<>();
+                    sseData.put("taskId", "t_" + task.getId());
+                    sseData.put("toolName", toolData.get("toolName"));
+                    sseData.put("status", event.getStatus());
+                    sseData.put("inputSummary", toolData.get("inputSummary"));
+                    sseData.put("outputSummary", toolData.get("outputSummary"));
+                    
+                    eventService.sendToolCall("t_" + task.getId(), sseData);
+                } catch (Exception e) {
+                    log.error("Failed to parse tool call event data", e);
+                }
+            }
+            return;
+        }
+
+        // 从数据库查询 step
+        AnalysisStep step = stepMapper.selectOne(
+                new LambdaQueryWrapper<AnalysisStep>()
+                        .eq(AnalysisStep::getRunId, taskDbId)
+                        .eq(AnalysisStep::getStepName, stepName)
+                        .last("LIMIT 1")
+        );
+        if (step == null) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if ("RUNNING".equals(event.getStatus())) {
+            step.setStatus("RUNNING");
+            step.setStartedAt(now);
+            step.setUpdatedAt(now);
+            stepMapper.updateById(step);
+
+            task.setStatus("RUNNING");
+            task.setCurrentStep(step.getStepOrder());
+            task.setUpdatedAt(now);
+            taskMapper.updateById(task);
+        } else if ("SUCCEEDED".equals(event.getStatus())) {
+            step.setStatus("SUCCEEDED");
+            step.setFinishedAt(now);
+            step.setUpdatedAt(now);
+            if (event.getOutputData() != null) {
+                step.setOutputData(event.getOutputData());
+            }
+            stepMapper.updateById(step);
+        } else if ("FAILED".equals(event.getStatus())) {
+            failTask(task, step, event.getErrorMessage());
+        } else {
+            return;
+        }
+
+        sendStepUpdate(task, step);
+    }
+
+    /**
+     * 同时标记步骤和任务失败，并通知前端
+     */
+    private void failTask(
+            AnalysisTask task,
+            AnalysisStep step,
+            String message) {
+        LocalDateTime now = LocalDateTime.now();
+
+        if (step != null) {
+            step.setStatus("FAILED");
+            step.setErrorMessage(message);
+            step.setFinishedAt(now);
+            step.setUpdatedAt(now);
+            stepMapper.updateById(step);
+        }
+
+        task.setStatus("FAILED");
+        task.setErrorMessage(message);
+        task.setFinishedAt(now);
+        task.setUpdatedAt(now);
+        taskMapper.updateById(task);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("errorCode", ErrorCode.INTERNAL_ERROR.getCode());
+        data.put("message", message);
+        data.put("failedStepId", step == null ? null : "s_" + step.getId());
+        data.put("retryable", step != null);
+        eventService.sendTaskFailed("t_" + task.getId(), data);
+    }
+
+    /**
+     * 发送文档规定的 step_update
+     */
+    private void sendStepUpdate(AnalysisTask task, AnalysisStep step) {
+        List<AnalysisStep> steps = stepMapper.selectList(
+                new LambdaQueryWrapper<AnalysisStep>()
+                        .eq(AnalysisStep::getRunId, task.getId())
+        );
+
+        long successCount = steps.stream()
+                .filter(item -> "SUCCEEDED".equals(item.getStatus()))
+                .count();
+        int progress = steps.isEmpty()
+                ? 0
+                : (int) (successCount * 100 / steps.size());
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("taskId", "t_" + task.getId());
+        data.put("stepId", "s_" + step.getId());
+        data.put("status", step.getStatus());
+        
+        // 解析 summary 和 content
+        String summary = "";
+        String content = "";
+        if ("RUNNING".equals(step.getStatus())) {
+            summary = getRunningSummary(step.getStepName());
+            content = "AI 正在深度思考中，请稍候...";
+        } else if ("SUCCEEDED".equals(step.getStatus())) {
+            summary = getSucceededSummary(step.getStepName());
+            content = parseContentFromOutputData(step.getStepName(), step.getOutputData());
+        } else if ("FAILED".equals(step.getStatus())) {
+            summary = "执行失败";
+            content = step.getErrorMessage() != null ? step.getErrorMessage() : "未知错误";
+        }
+
+        data.put("summary", summary);
+        data.put("content", content);
+        data.put("progress", progress);
+        data.put("occurredAt", OffsetDateTime.now());
+        eventService.sendStepUpdate("t_" + task.getId(), data);
+    }
+
+    private String getRunningSummary(String stepName) {
+        return switch (stepName) {
+            case "UNDERSTAND" -> "正在理解问题上下文";
+            case "EXTRACT_FACTORS" -> "正在分析关键因素";
+            case "GENERATE_OPTIONS" -> "正在生成候选方案";
+            case "COMPARE_OPTIONS" -> "正在进行风险与收益对比";
+            default -> "正在执行";
+        };
+    }
+
+    private String getSucceededSummary(String stepName) {
+        return switch (stepName) {
+            case "UNDERSTAND" -> "问题理解完成";
+            case "EXTRACT_FACTORS" -> "关键因素提取完成";
+            case "GENERATE_OPTIONS" -> "候选方案生成完成";
+            case "COMPARE_OPTIONS" -> "评估与对比完成";
+            default -> "执行完成";
+        };
+    }
+
+    private String parseContentFromOutputData(String stepName, String outputData) {
+        if (outputData == null || outputData.isBlank()) {
+            return "无输出内容";
+        }
+        try {
+            Map<String, Object> map = new com.fasterxml.jackson.databind.ObjectMapper().readValue(outputData, Map.class);
+            return switch (stepName) {
+                case "UNDERSTAND" -> (String) map.getOrDefault("understanding", outputData);
+                case "EXTRACT_FACTORS" -> {
+                    List<Map<String, Object>> factors = (List<Map<String, Object>>) map.get("factors");
+                    if (factors != null) {
+                        StringBuilder sb = new StringBuilder("关键因素包括：");
+                        for (Map<String, Object> f : factors) {
+                            sb.append(f.get("name")).append("、");
+                        }
+                        yield sb.substring(0, sb.length() - 1);
+                    }
+                    yield outputData;
+                }
+                case "GENERATE_OPTIONS" -> {
+                    List<Map<String, Object>> options = (List<Map<String, Object>>) map.get("options");
+                    if (options != null) {
+                        StringBuilder sb = new StringBuilder("生成了 " + options.size() + " 个候选方案：");
+                        for (Map<String, Object> o : options) {
+                            sb.append(o.get("name")).append("、");
+                        }
+                        yield sb.substring(0, sb.length() - 1);
+                    }
+                    yield outputData;
+                }
+                case "COMPARE_OPTIONS" -> {
+                    Map<String, Object> recommendation = (Map<String, Object>) map.get("recommendation");
+                    if (recommendation != null) {
+                        yield "最终推荐：方案 " + recommendation.get("optionId") + "。\n理由：" + recommendation.get("reason");
+                    }
+                    yield (String) map.getOrDefault("reportSummary", outputData);
+                }
+                default -> outputData;
+            };
+        } catch (Exception e) {
+            return outputData; // 解析失败则返回原始内容
+        }
+    }
+
+    /**
+     * Workflow 节点名转换为 API 步骤名
+     */
+    private String getStepName(String nodeName) {
+        return switch (nodeName) {
+            case "RequirementAnalysis" -> "UNDERSTAND";
+            case "FactorAnalysis" -> "EXTRACT_FACTORS";
+            case "OptionGeneration" -> "GENERATE_OPTIONS";
+            case "RiskAnalysis" -> "COMPARE_OPTIONS";
+            default -> null;
+        };
+    }
+
+    private Long parseTaskId(String taskId) {
+        if (taskId == null || !taskId.startsWith("t_")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(taskId.substring(2));
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Workflow 的 taskId 是它自己生成的 UUID
+     * 数据库任务通过 decision.latestTaskId 找回，不要求修改 Workflow 接口
+     */
+    private AnalysisTask findDatabaseTask(NodeExecutionEvent event) {
+        // 获取taskId
+        Long taskDbId = parseTaskId(event.getTaskId());
+        if (taskDbId != null) {
+            return taskMapper.selectById(taskDbId);
+        }
+
+        // 找不到就用决策 ID
+        Long decisionDbId = parseDecisionId(event.getDecisionId());
+        if (decisionDbId == null) {
+            return null;
+        }
+        Decision decision = decisionMapper.selectById(decisionDbId);
+        if (decision == null || decision.getLatestTaskId() == null) {
+            return null;
+        }
+        return taskMapper.selectById(decision.getLatestTaskId());
+    }
+
+    // 转化决策 ID，去除前面的 d_
+    private Long parseDecisionId(String decisionId) {
+        if (decisionId == null || !decisionId.startsWith("d_")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(decisionId.substring(2));
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+}

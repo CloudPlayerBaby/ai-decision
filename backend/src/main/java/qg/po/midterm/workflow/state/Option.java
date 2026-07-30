@@ -1,5 +1,7 @@
 package qg.po.midterm.workflow.state;
 
+import java.io.Serializable;
+
 import java.util.Map;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -10,7 +12,7 @@ import lombok.AllArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Schema(description = "候选决策方案")
-public class Option {
+public class Option implements Serializable {
     @Schema(description = "方案唯一标识")
     private String id;
     
@@ -20,6 +22,15 @@ public class Option {
     @Schema(description = "方案详细描述")
     private String description;
     
-    @Schema(description = "五维打分结果")
+    @Schema(description = "优点列表")
+    private java.util.List<String> pros;
+
+    @Schema(description = "缺点列表")
+    private java.util.List<String> cons;
+
+    @Schema(description = "风险列表")
+    private java.util.List<String> risks;
+
+    @Schema(description = "五维打分结果(cost, time, benefit, risk, feasibility)")
     private Map<String, Integer> scores;
 }
