@@ -44,4 +44,11 @@ public interface WorkflowExecutor {
      * @param initialState 初始状态，全自动时传入数据。为 null 则内部初始化。
      */
     void runGraph(String taskId, DecisionState initialState);
+
+    /**
+     * 获取编译后的 LangGraph4j 核心图实例。
+     * B 同学可以直接调用此方法获取图，然后使用 graph.stream(...) 获取 AsyncGenerator，
+     * 从而遍历每个节点的输出（NodeOutput），实现向前端推送 SSE 流式事件！
+     */
+    org.bsc.langgraph4j.CompiledGraph<DecisionState> getCompiledGraph();
 }
