@@ -2,15 +2,13 @@ package qg.po.midterm.common.enums;
 
 import lombok.Getter;
 
-/**
- * 工作流节点的执行状态。
- */
 @Getter
 public enum NodeStatus {
 
-    WAITING("尚未执行，等待前置节点"),
+    PENDING("待执行"),
     RUNNING("执行中"),
-    SUCCEEDED("已成功"),
+    COMPLETED("已完成"),
+    SKIPPED("已跳过"),
     FAILED("失败");
 
     private final String description;
