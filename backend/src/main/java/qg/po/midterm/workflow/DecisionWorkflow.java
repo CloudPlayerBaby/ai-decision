@@ -28,6 +28,7 @@ public class DecisionWorkflow {
     private final RiskAnalysisNode riskAnalysisNode;
     private final ReportGenerationNode reportGenerationNode;
     private final RepairNode repairNode;
+    private final ValidateNode validateNode;
 
     @Autowired(required = false)
     private BaseCheckpointSaver checkpointSaver;
@@ -44,6 +45,7 @@ public class DecisionWorkflow {
         graph.addNode("COMPARE_OPTIONS", node_async(riskAnalysisNode));
         graph.addNode("GENERATE_REPORT", node_async(reportGenerationNode));
         graph.addNode("REPAIR", node_async(repairNode));
+        graph.addNode("VALIDATE", node_async(validateNode));
 
         // 支持局部重推：根据 state 里的 startNode 决定入口
         graph.addConditionalEdges(START,
@@ -61,8 +63,13 @@ public class DecisionWorkflow {
         graph.addEdge("EXTRACT_FACTORS", "GENERATE_OPTIONS");
         graph.addEdge("GENERATE_OPTIONS", "COMPARE_OPTIONS");
 
-        // 引入“一次修复”逻辑。若经过外部校验发现有 ErrorMsg，则走到 REPAIR
-        graph.addConditionalEdges("COMPARE_OPTIONS",
+        // 方案对比后，必须经过内部校验节点
+        graph.addEdge("COMPARE_OPTIONS", "VALIDATE");
+        // 修复后，也必须重新回到校验节点进行核对
+        graph.addEdge("REPAIR", "VALIDATE");
+
+        // 在验证节点之后，根据 errorMsg 分流
+        graph.addConditionalEdges("VALIDATE",
             state -> {
                 String errorMsg = state.getErrorMsg();
                 return java.util.concurrent.CompletableFuture.completedFuture((errorMsg != null && !errorMsg.isEmpty()) ? "REPAIR" : "GENERATE_REPORT");
@@ -73,7 +80,6 @@ public class DecisionWorkflow {
             )
         );
 
-        graph.addEdge("REPAIR", "GENERATE_REPORT");
         graph.addEdge("GENERATE_REPORT", END);
 
         if (checkpointSaver != null) {

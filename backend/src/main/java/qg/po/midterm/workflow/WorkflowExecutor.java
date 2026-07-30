@@ -67,6 +67,27 @@ public interface WorkflowExecutor {
     String startPartialAnalysis(String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState);
 
     /**
+     * 【给 B 同学 / C 同学使用】：全新发起一次全量决策推演任务
+     * @param taskId      外部传入的唯一任务ID
+     * @param decisionId  所属的决策问题唯一标识
+     * @param background  用户填写的补充背景
+     * @param goal        用户填写的核心决策目标
+     * @param constraints 用户填写的约束条件
+     * @return 引擎执行的推演 taskId
+     */
+    String startAnalysis(String taskId, String decisionId, String background, String goal, String constraints);
+
+    /**
+     * 【给 C 同学使用】：基于用户修改画布触发的“局部重推”
+     * @param taskId         外部传入的新任务ID
+     * @param decisionId     当前决策问题 ID
+     * @param changedNodeIds 前端提交上来的被修改节点 ID 集合
+     * @param currentState   修改后包含历史数据的当前状态
+     * @return 引擎执行的推演 taskId
+     */
+    String startPartialAnalysis(String taskId, String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState);
+
+    /**
      * 【给 A 组内部使用，未来可对外暴露】：JSON 强校验与修复钩子
      * <p>
      * 对应 PRD 12 节。验证 AI 吐出的非结构化文本是否符合 DTO，如果缺胳膊少腿，自动重试。
