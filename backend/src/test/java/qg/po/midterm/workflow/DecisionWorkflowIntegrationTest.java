@@ -30,21 +30,44 @@ public class DecisionWorkflowIntegrationTest {
     private qg.po.midterm.mapper.DecisionMapper decisionMapper;
 
     @Test
-    public void testFullWorkflow() throws Exception {
-        String decisionId = "TEST-" + UUID.randomUUID().toString().substring(0, 8);
-        String background = "大三学生，准备秋招。";
-        String goal = "我应该优先学习 Redis 还是 Docker？";
-        String constraints = "只有2周时间，每天2小时。Java基础扎实，无中间件或容器经验。";
+    public void testTravelScenario() throws Exception {
+        runWorkflow(
+            "【个人规划】周末三亚穷游规划",
+            "我准备这周末去三亚旅行，预算仅仅只有 3000 块，帮我规划下方案，一定要算清楚每笔钱够不够。",
+            "只能花3000元，不能超支。需要列出交通和住宿等花销。"
+        );
+    }
 
+    @Test
+    public void testInvestmentScenario() throws Exception {
+        runWorkflow(
+            "【商业决策】是否投资固态电池初创公司",
+            "公司账上有 5000 万闲置资金，有一家叫‘超能固态’的初创企业在寻求融资，请出具风险回报推演。",
+            "需要客观的行业数据支撑，严格进行风险收益期望计算。"
+        );
+    }
+
+    @Test
+    public void testTechArchitectureScenario() throws Exception {
+        runWorkflow(
+            "【技术选型】Vue 3 还是 React 18",
+            "我们要重构一个拥有 200 多个表单的复杂企业级中后台，技术栈选 Vue 3 还是 React 18？",
+            "需要长期维护，团队大多是刚毕业的后端开发转全栈。请给出可维护性和性能评估。"
+        );
+    }
+
+    private void runWorkflow(String title, String goal, String constraints) throws Exception {
+        String decisionId = "TEST-" + UUID.randomUUID().toString().substring(0, 8);
         log.info("=================================================");
-        log.info("🚀 开始执行 AI 决策工作流端到端集成测试");
+        log.info("🚀 开始执行 AI 决策工作流场景测试: {}", title);
         log.info("目标: {}", goal);
+        log.info("约束: {}", constraints);
         log.info("=================================================");
         
         Map<String, Object> initData = new HashMap<>();
         initData.put("decisionId", decisionId);
         initData.put("taskId", UUID.randomUUID().toString());
-        initData.put("background", background);
+        initData.put("background", title);
         initData.put("goal", goal);
         initData.put("constraints", constraints);
         
