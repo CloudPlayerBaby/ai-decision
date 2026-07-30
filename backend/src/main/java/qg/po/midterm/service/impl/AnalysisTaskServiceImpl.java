@@ -246,7 +246,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         // 将数据库实体转换为接口 VO
         List<NodeProgressVO> stepVOList = new ArrayList<>();
         for (AnalysisStep step : steps) {
-            StepText stepText = readStepText(step.getOutputData());
+            StepText stepText = readStepText(step.getStepName(), step.getOutputData());
             String summary = stepText.summary() == null
                     ? getDefaultSummary(
                     step.getStepName(),
@@ -749,16 +749,60 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         );
     }
 
-    private StepText readStepText(String outputData) {
+    private StepText readStepText(String stepName, String outputData) {
         if (outputData == null || outputData.isBlank()) {
             return new StepText(null, null);
         }
         try {
             JsonNode node = objectMapper.readTree(outputData);
-            return new StepText(
-                    textOrNull(node.get("summary")),
-                    textOrNull(node.get("content"))
-            );
+            
+            String summary = switch (stepName) {
+                case "UNDERSTAND" -> "问题理解完成";
+                case "EXTRACT_FACTORS" -> "关键因素提取完成";
+                case "GENERATE_OPTIONS" -> "候选方案生成完成";
+                case "COMPARE_OPTIONS" -> "评估与对比完成";
+                default -> "执行完成";
+            };
+
+            String content = switch (stepName) {
+                case "UNDERSTAND" -> textOrNull(node.get("understanding"));
+                case "EXTRACT_FACTORS" -> {
+                    JsonNode factors = node.get("factors");
+                    if (factors != null && factors.isArray()) {
+                        StringBuilder sb = new StringBuilder("关键因素包括：");
+                        for (JsonNode f : factors) {
+                            sb.append(textOrNull(f.get("name"))).append("、");
+                        }
+                        yield sb.substring(0, sb.length() - 1);
+                    }
+                    yield outputData;
+                }
+                case "GENERATE_OPTIONS" -> {
+                    JsonNode options = node.get("options");
+                    if (options != null && options.isArray()) {
+                        StringBuilder sb = new StringBuilder("生成了 " + options.size() + " 个候选方案：");
+                        for (JsonNode o : options) {
+                            sb.append(textOrNull(o.get("name"))).append("、");
+                        }
+                        yield sb.substring(0, sb.length() - 1);
+                    }
+                    yield outputData;
+                }
+                case "COMPARE_OPTIONS" -> {
+                    JsonNode recommendation = node.get("recommendation");
+                    if (recommendation != null) {
+                        yield "最终推荐：方案 " + textOrNull(recommendation.get("optionId")) + "。\n理由：" + textOrNull(recommendation.get("reason"));
+                    }
+                    yield textOrNull(node.get("reportSummary"));
+                }
+                default -> outputData;
+            };
+
+            if (content == null) {
+                content = outputData;
+            }
+
+            return new StepText(summary, content);
         } catch (JacksonException exception) {
             // 兼容旧数据：旧版本曾直接把文本放进 output_data
             return new StepText(outputData, outputData);
