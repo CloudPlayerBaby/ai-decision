@@ -10,57 +10,85 @@ import {
 import type { Node, Edge, NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useLayoutStore } from '../../stores/layoutStore'
+import { mockCanvas } from '../../mocks/canvas.mock'
+import type {
+  DecisionNodeData,
+  FactorNodeData,
+  OptionNodeData,
+} from '../../types/canvas'
 
-type PlaceholderNodeData = {
-  title: string
-  subtitle?: string
-  badge?: string
-  lines?: string[]
-  weight?: string
-}
+type FlowNode = Node<DecisionNodeData | FactorNodeData | OptionNodeData>
 
-function DecisionNode({ data }: NodeProps<Node<PlaceholderNodeData>>) {
+/** 决策问题节点 */
+function DecisionNode({ data }: NodeProps<FlowNode>) {
+  const nodeData = data as DecisionNodeData
   return (
     <div className="canvas-node canvas-node--decision">
       <div className="canvas-node__label">决策问题</div>
-      <div className="canvas-node__title">{data.title}</div>
+      <div className="canvas-node__title">{nodeData.label}</div>
       <Handle type="source" position={Position.Right} />
     </div>
   )
 }
 
-function FactorNode({ data }: NodeProps<Node<PlaceholderNodeData>>) {
+/** 影响因素节点 */
+function FactorNode({ data }: NodeProps<FlowNode>) {
+  const nodeData = data as FactorNodeData
+  const weightPercent = Math.round(nodeData.weight * 100)
   return (
     <div className="canvas-node canvas-node--factor">
       <Handle type="target" position={Position.Left} />
       <div className="canvas-node__label">
-        关键因素{data.weight ? ` · ${data.weight}` : ''}
+        <span className="canvas-node__factor-weight">{weightPercent}%</span>
+        <span>关键因素</span>
       </div>
-      <div className="canvas-node__title">{data.title}</div>
-      {data.subtitle ? (
-        <div className="canvas-node__subtitle">{data.subtitle}</div>
+      <div className="canvas-node__title">{nodeData.label}</div>
+      {nodeData.description ? (
+        <div className="canvas-node__subtitle">{nodeData.description}</div>
       ) : null}
       <Handle type="source" position={Position.Right} />
     </div>
   )
 }
 
-function OptionNode({ data }: NodeProps<Node<PlaceholderNodeData>>) {
+/** 候选方案节点 */
+function OptionNode({ data }: NodeProps<FlowNode>) {
+  const nodeData = data as OptionNodeData
+  const { scores, recommendationBadge } = nodeData
+
   return (
     <div className="canvas-node canvas-node--option">
       <Handle type="target" position={Position.Left} />
       <div className="canvas-node__label">
-        候选方案
-        {data.badge ? (
-          <span className="canvas-node__badge">{data.badge}</span>
+        <span>候选方案</span>
+        {recommendationBadge ? (
+          <span className="canvas-node__badge">{recommendationBadge}</span>
         ) : null}
       </div>
-      <div className="canvas-node__title">{data.title}</div>
-      {data.lines?.map((line) => (
-        <div key={line} className="canvas-node__subtitle">
-          {line}
+      <div className="canvas-node__title">{nodeData.label}</div>
+
+      <div className="canvas-node__scores">
+        <div className="canvas-node__score-item">
+          <span className="canvas-node__score-label">成本</span>
+          <span className="canvas-node__score-value">{scores.cost}</span>
         </div>
-      ))}
+        <div className="canvas-node__score-item">
+          <span className="canvas-node__score-label">时间</span>
+          <span className="canvas-node__score-value">{scores.time}</span>
+        </div>
+        <div className="canvas-node__score-item">
+          <span className="canvas-node__score-label">收益</span>
+          <span className="canvas-node__score-value">{scores.benefit}</span>
+        </div>
+        <div className="canvas-node__score-item">
+          <span className="canvas-node__score-label">风险</span>
+          <span className="canvas-node__score-value">{scores.risk}</span>
+        </div>
+        <div className="canvas-node__score-item">
+          <span className="canvas-node__score-label">可行</span>
+          <span className="canvas-node__score-value">{scores.feasibility}</span>
+        </div>
+      </div>
     </div>
   )
 }
@@ -71,84 +99,26 @@ const nodeTypes = {
   option: OptionNode,
 }
 
-const initialNodes: Node<PlaceholderNodeData>[] = [
-  {
-    id: 'root',
-    type: 'decision',
-    position: { x: 24, y: 180 },
-    data: { title: '优先学习 Redis 还是 Docker？' },
-  },
-  {
-    id: 'f_time',
-    type: 'factor',
-    position: { x: 300, y: 40 },
-    data: {
-      title: '时间成本',
-      weight: '30%',
-      subtitle: '每天 2 小时，共 14 小时可用',
-    },
-  },
-  {
-    id: 'f_benefit',
-    type: 'factor',
-    position: { x: 300, y: 180 },
-    data: {
-      title: '求职收益',
-      weight: '35%',
-      subtitle: '面试高频度与项目可展示性',
-    },
-  },
-  {
-    id: 'f_practice',
-    type: 'factor',
-    position: { x: 300, y: 320 },
-    data: {
-      title: '项目实践',
-      weight: '20%',
-      subtitle: '能否形成可验证成果',
-    },
-  },
-  {
-    id: 'opt_docker',
-    type: 'option',
-    position: { x: 580, y: 40 },
-    data: {
-      title: '方案 A：优先 Docker',
-      lines: ['优点：工程化与部署能力', '风险：面试题偏场景化'],
-    },
-  },
-  {
-    id: 'opt_redis',
-    type: 'option',
-    position: { x: 580, y: 180 },
-    data: {
-      title: '方案 B：优先 Redis',
-      badge: '推荐',
-      lines: ['优点：面试高频缓存考点', '风险：缺少项目实践'],
-    },
-  },
-  {
-    id: 'opt_both',
-    type: 'option',
-    position: { x: 580, y: 320 },
-    data: {
-      title: '方案 C：双轨轻量',
-      lines: ['优点：覆盖更广', '风险：两周内深度不足'],
-    },
-  },
-]
-
-const initialEdges: Edge[] = [
-  { id: 'e1', source: 'root', target: 'f_time' },
-  { id: 'e2', source: 'root', target: 'f_benefit' },
-  { id: 'e3', source: 'root', target: 'f_practice' },
-  { id: 'e4', source: 'f_time', target: 'opt_docker' },
-  { id: 'e5', source: 'f_benefit', target: 'opt_redis' },
-  { id: 'e6', source: 'f_practice', target: 'opt_both' },
-]
-
-/** 画布占位：示意节点，后续对接 GET/PUT canvas */
+/**
+ * 决策画布面板
+ * 展示决策问题、影响因素和候选方案的节点关系图
+ * 数据来源：mocks/canvas.mock.ts（后续对接 GET /decisions/{id}/canvas）
+ */
 export function DecisionCanvasPanel() {
+  // 从 Mock 数据初始化
+  const initialNodes: FlowNode[] = mockCanvas.nodes.map((n) => ({
+    id: n.id,
+    type: n.type,
+    position: n.position,
+    data: n.data,
+  }))
+
+  const initialEdges: Edge[] = mockCanvas.edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+  }))
+
   const [nodes, , onNodesChange] = useNodesState(initialNodes)
   const [edges, , onEdgesChange] = useEdgesState(initialEdges)
   const themeMode = useLayoutStore((state) => state.themeMode)
@@ -157,8 +127,10 @@ export function DecisionCanvasPanel() {
   return (
     <div className="canvas-panel">
       <div className="canvas-panel__toolbar">
-        <span>编辑模式：拖拽移动 · 点击节点编辑 · 双击空白新增（占位）</span>
-        <span>画布数据待接入 · 保存提交完整 nodes + edges</span>
+        <span>编辑模式：拖拽移动 · 点击节点查看详情</span>
+        <span className="canvas-panel__hint">
+          保存后将提交完整 nodes + edges 至 /canvas 接口
+        </span>
       </div>
       <div className="canvas-panel__flow">
         <ReactFlow
