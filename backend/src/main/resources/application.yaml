@@ -1,4 +1,13 @@
 spring:
+  config:
+    import: optional:file:.env[.properties]
+  ai:
+    openai:
+      api-key: ${DEEPSEEK_API_KEY}
+      base-url: https://api.deepseek.com/beta
+      chat:
+        options:
+          model: deepseek-v4-flash
   application:
     name: Mid-term
   datasource:
