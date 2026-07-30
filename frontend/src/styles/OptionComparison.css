@@ -1,0 +1,59 @@
+.option-comparison {
+  margin-top: 16px;
+}
+
+.option-comparison__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.option-card {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.option-card.is-recommended {
+  border-color: #1677ff;
+  background: #f6fbff;
+}
+
+.option-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.option-card__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 6px 0;
+  font-size: 13px;
+}
+
+.option-card__list--pros li {
+  color: #52c41a;
+}
+
+.option-card__list--cons li {
+  color: #ff4d4f;
+}
+
+.option-card__list--risks li {
+  color: #faad14;
+}
+
+.option-card__scores {
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.option-card__scores div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 2;
+}

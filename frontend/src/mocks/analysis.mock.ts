@@ -1,4 +1,4 @@
-import type { AnalysisStep, ToolCallRecord, Option, AnalysisResult } from '../types/analysis';
+import type { AnalysisStep, ToolCallEvent, DecisionOption, AnalysisResult } from '../types/analysis';
 
 // ========== 步骤 mock ==========
 
@@ -21,12 +21,28 @@ export const mockSteps: AnalysisStep[] = [
     status: 'RUNNING',
     summary: '正在分析时间、收益与风险',
     content:
-      '关键因素包括：时间成本（每天仅 2 小时）、求职收益（面试高频度）、项目实践（能否形成可验证成果）。',
+      '关键因素包括：时间成本（每天仅 2 小时）、求职收益（面试高频度）、项目实践（能否形成可验证成果）、学习风险（失败或效果不佳）、可执行性（计划可行性）。',
   },
   {
     id: 's_3',
+    name: 'TOOL_CALL',
+    displayName: '工具调用',
+    status: 'WAITING',
+    summary: '等待前序步骤完成',
+    content: '',
+  },
+  {
+    id: 's_4',
     name: 'GENERATE_OPTIONS',
     displayName: '生成候选方案',
+    status: 'WAITING',
+    summary: '等待前序步骤完成',
+    content: '',
+  },
+  {
+    id: 's_5',
+    name: 'COMPARE_OPTIONS',
+    displayName: '方案对比',
     status: 'WAITING',
     summary: '等待前序步骤完成',
     content: '',
@@ -35,9 +51,10 @@ export const mockSteps: AnalysisStep[] = [
 
 // ========== 工具调用 mock ==========
 
-export const mockToolCalls: ToolCallRecord[] = [
+export const mockToolCalls: ToolCallEvent[] = [
   {
-    stepId: 's_2',
+    taskId: 't_30001',
+    stepId: 's_3',
     toolName: 'calculator',
     status: 'SUCCEEDED',
     inputSummary: '比较每日学习时长',
@@ -47,7 +64,7 @@ export const mockToolCalls: ToolCallRecord[] = [
 
 // ========== 方案 mock ==========
 
-export const mockOptions: Option[] = [
+export const mockOptions: DecisionOption[] = [
   {
     id: 'opt_docker',
     name: '优先学习 Docker',

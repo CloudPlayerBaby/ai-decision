@@ -1,13 +1,15 @@
-import type { ToolCallRecord } from "../../types/analysis";
+import type { ToolCallEvent } from "../../types/analysis";
 import { ToolOutlined } from "@ant-design/icons";
 import { Tag } from "antd";
-import '../../styles/ToolCard.css'
+import '../../styles/ToolCallCard.css'
 interface Props{
-    toolCall:ToolCallRecord;
+    toolCall:ToolCallEvent;
 }
 
-function getStatusColor(status:ToolCallRecord['status']){
+function getStatusColor(status:ToolCallEvent['status']){
     switch (status){
+        case 'WAITING':
+            return 'default';
         case 'RUNNING':
             return 'processing';
         case 'SUCCEEDED':
@@ -17,8 +19,10 @@ function getStatusColor(status:ToolCallRecord['status']){
     }
 
 }
-function getStatusText(status:ToolCallRecord['status']){
+function getStatusText(status:ToolCallEvent['status']){
     switch (status){
+        case 'WAITING':
+            return '等待中';
         case 'RUNNING':
             return '执行中';
         case 'SUCCEEDED':
