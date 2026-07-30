@@ -15,3 +15,13 @@ services:
       --default-authentication-plugin=mysql_native_password
     volumes:
       - ./docker/mysql/data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    container_name: local_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - ./docker/redis/data:/data

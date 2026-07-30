@@ -9,7 +9,8 @@ import {
 } from '@xyflow/react'
 import type { Node, Edge, NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useLayoutStore } from '../../stores/layoutStore'
+import { useLayoutStore } from '@/stores/layoutStore'
+import type { WorkbenchSlotProps } from '@/components/workbench/workbenchContracts'
 
 type PlaceholderNodeData = {
   title: string
@@ -147,8 +148,12 @@ const initialEdges: Edge[] = [
   { id: 'e6', source: 'f_practice', target: 'opt_both' },
 ]
 
-/** 画布占位：示意节点，后续对接 GET/PUT canvas */
-export function DecisionCanvasPanel() {
+/** 画布挂载点（A 组替换内部实现）；C 注入 decisionId / taskId */
+export function DecisionCanvasPanel({
+  decisionId,
+  taskId,
+  decisionStatus,
+}: WorkbenchSlotProps) {
   const [nodes, , onNodesChange] = useNodesState(initialNodes)
   const [edges, , onEdgesChange] = useEdgesState(initialEdges)
   const themeMode = useLayoutStore((state) => state.themeMode)
@@ -157,8 +162,12 @@ export function DecisionCanvasPanel() {
   return (
     <div className="canvas-panel">
       <div className="canvas-panel__toolbar">
-        <span>编辑模式：拖拽移动 · 点击节点编辑 · 双击空白新增（占位）</span>
-        <span>画布数据待接入 · 保存提交完整 nodes + edges</span>
+        <span>
+          决策 {decisionId}
+          {taskId ? ` · 任务 ${taskId}` : ''}
+          {decisionStatus ? ` · ${decisionStatus}` : ''}
+        </span>
+        <span>A 组：GET/PUT canvas · 保存提交完整 nodes + edges</span>
       </div>
       <div className="canvas-panel__flow">
         <ReactFlow

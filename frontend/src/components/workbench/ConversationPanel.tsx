@@ -13,6 +13,11 @@ import {
   UserOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
+import { getAnalysisTask } from '@/services/analysis.service'
+import { queryKeys } from '@/services/queryKeys'
+import type { WorkbenchSlotProps } from '@/components/workbench/workbenchContracts'
+import type { StepStatus } from '@/types/analysis'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -20,34 +25,13 @@ const { TextArea } = Input
 interface StepItem {
   id: string
   displayName: string
-  status: 'WAITING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  status: StepStatus
   summary: string
   content: string
   toolSummary?: string
 }
 
-/** 占位步骤：演示同 stepId content 覆盖展示形态，非真实 SSE */
-const PLACEHOLDER_STEPS: StepItem[] = [
-  {
-    id: 's_1',
-    displayName: '理解决策问题',
-    status: 'SUCCEEDED',
-    summary: '已识别学习路径与时间约束',
-    content:
-      '你只有一周时间准备 Java 后端面试，每天 2 小时，共 14 小时可用。核心矛盾在于有限时间内是追求覆盖面还是单点深度。',
-  },
-  {
-    id: 's_2',
-    displayName: '提取关键影响因素',
-    status: 'SUCCEEDED',
-    summary: '已提取时间、收益与实践因素',
-    content:
-      '关键因素包括：时间成本、求职收益、项目实践。可在画布调整权重后发起局部重推。',
-    toolSummary: 'calculator：比较每日学习时长 → 两种方案均可在 14 小时内完成基础学习',
-  },
-]
-
-function statusTag(status: StepItem['status']) {
+function statusTag(status: StepStatus) {
   switch (status) {
     case 'SUCCEEDED':
       return (
@@ -68,24 +52,55 @@ function statusTag(status: StepItem['status']) {
   }
 }
 
-/** 右侧推演对话占位：步骤日志可折叠；不展示模型内部推理 */
-export function ConversationPanel() {
+/**
+ * 右侧推演台挂载点（B 组替换 SSE / 事件消费）。
+ * C 先用 REST 任务快照恢复步骤，避免刷新从 0% 重演。
+ */
+export function ConversationPanel({
+  decisionId,
+  taskId,
+  pendingResultId,
+  hasPendingResult,
+  decisionStatus,
+}: WorkbenchSlotProps) {
+  const taskQuery = useQuery({
+    queryKey: queryKeys.analysisTasks.detail(taskId ?? 'none'),
+    queryFn: () => getAnalysisTask(taskId!),
+    enabled: Boolean(taskId),
+  })
+
+  const steps: StepItem[] =
+    taskQuery.data?.steps.map((step) => ({
+      id: step.id,
+      displayName: step.displayName,
+      status: step.status,
+      summary: step.summary ?? '',
+      content: step.content ?? '',
+    })) ?? []
+
+  const progress = taskQuery.data?.progress ?? 0
+  const isPartial = decisionStatus === 'PARTIAL_ANALYZING'
+
   return (
     <aside className="conversation-panel">
       <div className="conversation-panel__header">
         <Text strong>推演对话</Text>
-        <Tag>SSE 占位</Tag>
+        <Space size={4}>
+          {taskId ? <Tag color="blue">任务已恢复</Tag> : <Tag>待开始</Tag>}
+          <Tag>B：SSE Ticket</Tag>
+        </Space>
       </div>
 
       <div className="conversation-panel__body">
         <div className="chat-bubble chat-bubble--user">
           <div className="chat-bubble__meta">
             <UserOutlined />
-            <Text type="secondary">你</Text>
+            <Text type="secondary">决策 {decisionId}</Text>
           </div>
           <Paragraph style={{ marginBottom: 0 }}>
-            我应该优先学习 Redis 还是 Docker？约束：每天 2 小时，已有 Java
-            基础，一周内提升求职竞争力。
+            {taskId
+              ? `已关联任务 ${taskId}。刷新后先 GET 任务详情恢复步骤，再由 B 组取 SSE Ticket 连接。`
+              : '尚未发起推演。点击顶部「开始推演」后，右侧将展示步骤日志。'}
           </Paragraph>
         </div>
 
@@ -95,11 +110,16 @@ export function ConversationPanel() {
             <Text type="secondary">决策助手</Text>
           </div>
           <Paragraph style={{ marginBottom: 12 }}>
-            我将按「问题理解 → 因素提取 → 方案生成 → 方案对比」分步推演，并在画布上给出可调整的结构。面向你展示的是步骤日志与工具摘要，不会展示模型内部推理。
+            展示步骤日志与工具摘要，不展示模型内部推理。同 stepId 的 content
+            以最新全文覆盖。
           </Paragraph>
 
+          {taskQuery.isLoading ? (
+            <Text type="secondary">正在恢复任务步骤…</Text>
+          ) : null}
+
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            {PLACEHOLDER_STEPS.map((step) => (
+            {steps.map((step) => (
               <div key={step.id} className="step-card">
                 <div className="step-card__head">
                   <Text strong>{step.displayName}</Text>
@@ -114,66 +134,58 @@ export function ConversationPanel() {
                   items={[
                     {
                       key: 'content',
-                      label: '展开输入与校验结果',
+                      label: '展开详细内容',
                       children: (
                         <Paragraph
                           style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}
                         >
-                          {step.content}
+                          {step.content || '暂无内容'}
                         </Paragraph>
                       ),
                     },
-                    ...(step.toolSummary
-                      ? [
-                          {
-                            key: 'tool',
-                            label: '查看工具调用摘要',
-                            children: (
-                              <Paragraph style={{ marginBottom: 0 }}>
-                                {step.toolSummary}
-                              </Paragraph>
-                            ),
-                          },
-                        ]
-                      : []),
                   ]}
                 />
               </div>
             ))}
           </Space>
 
-          <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
-            已生成 3 个候选方案。你可以在画布调整因素权重；保存后将使用后端返回的
-            changedNodeIds 发起局部重推，并以 analysisResultId 确认草案。
-          </Paragraph>
+          {!taskId ? (
+            <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
+              B 组接入后：POST sse-ticket → EventSource(sseUrl)；断线显示「连接恢复中」。
+            </Paragraph>
+          ) : null}
         </div>
 
-        <Alert
-          type="warning"
-          showIcon
-          message="因素权重已变更"
-          description="受影响的方案与推荐正在重算，完成后请确认新草案后再覆盖正式结论。"
-          style={{ marginTop: 12 }}
-        />
+        {hasPendingResult ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="有新结果待确认"
+            description={`pendingResultId=${pendingResultId ?? '—'}，确认时必须携带该 analysisResultId。`}
+            style={{ marginTop: 12 }}
+          />
+        ) : null}
 
-        <div className="partial-status">
-          <div className="partial-status__title">
-            <LoadingOutlined />
-            <Text strong>局部推演中</Text>
-            <Tag color="orange">PARTIAL_ANALYZING</Tag>
+        {isPartial || (taskQuery.data && taskQuery.data.status === 'RUNNING') ? (
+          <div className="partial-status">
+            <div className="partial-status__title">
+              <LoadingOutlined />
+              <Text strong>{isPartial ? '局部推演中' : '整轮推演中'}</Text>
+              <Tag color="orange">{decisionStatus}</Tag>
+            </div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              进度来自 REST 任务快照 · SSE 实时更新由 B 组接管
+            </Text>
+            <Progress percent={progress} size="small" status="active" />
           </div>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            仅计算受影响子树 · 刷新后将先 GET 任务详情再连 SSE
-          </Text>
-          <Progress percent={42} size="small" status="active" />
-        </div>
+        ) : null}
       </div>
 
       <div className="conversation-panel__footer">
         <TextArea
           rows={2}
           disabled
-          placeholder="对话输入待接入（本阶段占位）"
+          placeholder="对话输入由 B 组接入（当前仅展示步骤日志）"
         />
       </div>
     </aside>
