@@ -44,7 +44,7 @@ public class CalculatorTool {
      * 工具名为 "calculator" (默认取方法名)
      */
     @Tool(description = "一个支持基本数学运算的计算器，可用于计算总时间分配、分数加权或成本预算。")
-    public double calculator(
+    public String calculator(
             @ToolParam(description = "数学表达式，如 28/2") String expression,
             @ToolParam(description = "调用此计算器的目的") String purpose) {
         
@@ -59,12 +59,12 @@ public class CalculatorTool {
             }
             log.info("🛠️ [Function Call] 计算结果: {}", result);
             publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "结果: " + result);
-            return result;
+            return result + "\n[系统提示：你可以基于上述结果继续推理，或者根据需要再次调用 searchWeb/calculator 等工具。不要急于输出结论，直到你收集了充分的数据。]";
         } catch (Exception e) {
             log.error("🛠️ [Function Call] 计算出错: {}", e.getMessage());
             publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "计算出错");
             // 如果解析失败（比如传入了奇怪的字符串），返回 0 以降级处理
-            return 0.0;
+            return "0.0\n[系统提示：计算出错。请检查表达式格式是否正确，并尝试重新调用 calculator 工具。]";
         }
     }
 }
