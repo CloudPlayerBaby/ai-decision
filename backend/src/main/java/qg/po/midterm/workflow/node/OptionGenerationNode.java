@@ -34,41 +34,46 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        qg.po.midterm.workflow.context.TaskContextHolder.setContext(state.getTaskId(), state.getDecisionId());
         try {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [OptionGeneration] executing for decision: {}", state.getDecisionId());
 
-        String understanding = state.getUnderstanding();
-        String constraints = state.getConstraints();
-        List<Factor> factors = state.getFactors();
-        
-        String factorStr = factors == null ? "无" : factors.stream()
-            .map(f -> String.format("- %s (权重: %.2f): %s", f.getName(), f.getWeight(), f.getDescription()))
-            .collect(Collectors.joining("\n"));
+            String understanding = state.getUnderstanding();
+            String constraints = state.getConstraints();
+            List<Factor> factors = state.getFactors();
+            
+            String factorStr = factors == null ? "无" : factors.stream()
+                .map(f -> String.format("- %s (权重: %.2f): %s", f.getName(), f.getWeight(), f.getDescription()))
+                .collect(Collectors.joining("\n"));
 
-        Map<String, Object> params = Map.of(
-            "understanding", understanding != null ? understanding : "无",
-            "constraints", constraints != null ? constraints : "无",
-            "factors", factorStr
-        );
-        String prompt = new PromptTemplate(promptResource).create(params).getContents();
-        
-        log.info(">>> 【AI Prompt】\n{}", prompt);
+            Map<String, Object> params = Map.of(
+                "understanding", understanding != null ? understanding : "无",
+                "constraints", constraints != null ? constraints : "无",
+                "factors", factorStr
+            );
+            String prompt = new PromptTemplate(promptResource).create(params).getContents();
+            
+            log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
-                chatClient.prompt()
-                        .user(prompt)
-                        .call()
-                        .entity(OptionGenerationResult.class)
-        );
-                
-        log.info("<<< 【AI Response】\n{}", result);
+            OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                    chatClient.prompt()
+                            .user(prompt)
+                            .call()
+                            .entity(OptionGenerationResult.class)
+            );
+                    
+            log.info("<<< 【AI Response】\n{}", result);
 
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            // 将大模型结果转换为 JSON 传入状态流，供前端渲染
+            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("options", result.options()));
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             return Map.of("options", result.options());
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
+        } finally {
+            qg.po.midterm.workflow.context.TaskContextHolder.clear();
         }
     }
 }

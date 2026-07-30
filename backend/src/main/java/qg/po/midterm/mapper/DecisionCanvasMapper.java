@@ -5,7 +5,7 @@ import org.apache.ibatis.annotations.Mapper;
 import qg.po.midterm.entity.DecisionCanvas;
 
 /**
- * 决策画布 Mapper。
+ * 决策画布 Mapper
  */
 @Mapper
 public interface DecisionCanvasMapper extends BaseMapper<DecisionCanvas> {

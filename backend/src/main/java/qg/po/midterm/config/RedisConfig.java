@@ -9,6 +9,11 @@ import org.redisson.config.SingleServerConfig;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 /**
  * Redis 配置。
@@ -17,20 +22,25 @@ import org.springframework.context.annotation.Configuration;
  * 业务代码使用的 StringRedisTemplate 会由 Spring Boot 自动创建，
  * 不需要在这里重复配置。
  */
-@Configuration
+@Configuration // 标记这是一个 Spring 配置类，启动时会自动扫描并执行里面的 @Bean 方法
 public class RedisConfig {
 
+    // -------------------------------------------------------------
+    // 1. 从配置文件 (application.yml / application.properties) 中读取 Redis 连接参数
+    //    冒号后面的值（如 localhost、6379）是默认值，防止配置文件没写时报错。
+    // -------------------------------------------------------------
+
     @Value("${spring.data.redis.host:localhost}")
-    private String redisHost;
+    private String redisHost; // Redis 服务端 IP/域名
 
     @Value("${spring.data.redis.port:6379}")
-    private int redisPort;
+    private int redisPort; // Redis 端口号
 
     @Value("${spring.data.redis.password:}")
-    private String redisPassword;
+    private String redisPassword; // Redis 密码（如果有）
 
     @Value("${spring.data.redis.database:0}")
-    private int redisDatabase;
+    private int redisDatabase; // 使用的 Redis 数据库编号（默认 0 号库）
 
     /**
      * 创建 Workflow 使用的 Redis 客户端。
@@ -39,8 +49,10 @@ public class RedisConfig {
     public RedissonClient redissonClient() {
         Config config = new Config();
 
-        // 当前项目使用单机 Redis。
+        // 当前项目使用单机 Redis
         String address = "redis://" + redisHost + ":" + redisPort;
+
+        // 设置为单机 Redis 模式（如果你用的是集群，这里会有所不同）
         SingleServerConfig serverConfig = config.useSingleServer()
                 .setAddress(address)
                 .setDatabase(redisDatabase);
@@ -59,7 +71,7 @@ public class RedisConfig {
     @Bean
     public BaseCheckpointSaver checkpointSaver(RedissonClient redissonClient) {
         return RedisSaver.builder()
-                .redissonClient(redissonClient)
+                .redissonClient(redissonClient) // 传入上面配置好的 Redisson 客户端
                 .build();
     }
 }
