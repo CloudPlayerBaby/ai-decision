@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
+import qg.po.midterm.workflow.tools.CalculatorTool;
 
 import java.util.Map;
 
@@ -22,6 +23,7 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final CalculatorTool calculatorTool;
 
     @Value("classpath:prompts/requirement.st")
     private Resource promptResource;
@@ -47,6 +49,7 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
 
         String understanding = chatClient.prompt()
                 .user(prompt)
+                .tools(calculatorTool)
                 .call()
                 .content();
                 

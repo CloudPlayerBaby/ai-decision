@@ -53,10 +53,12 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
         
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        RiskAnalysisResult result = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(RiskAnalysisResult.class);
+        RiskAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                chatClient.prompt()
+                        .user(prompt)
+                        .call()
+                        .entity(RiskAnalysisResult.class)
+        );
                 
         log.info("<<< 【AI Response】\n{}", result);
 

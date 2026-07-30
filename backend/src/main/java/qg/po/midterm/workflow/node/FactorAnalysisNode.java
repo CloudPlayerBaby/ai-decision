@@ -12,6 +12,7 @@ import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
+import qg.po.midterm.workflow.tools.TavilySearchTool;
 
 import java.util.List;
 import java.util.Map;
@@ -24,6 +25,7 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final TavilySearchTool tavilySearchTool;
 
     @Value("classpath:prompts/factor.st")
     private Resource promptResource;
@@ -47,10 +49,13 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
         
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        FactorAnalysisResult result = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(FactorAnalysisResult.class);
+        FactorAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                chatClient.prompt()
+                        .user(prompt)
+                        .tools(tavilySearchTool)
+                        .call()
+                        .entity(FactorAnalysisResult.class)
+        );
                 
         log.info("<<< 【AI Response】\n{}", result);
 

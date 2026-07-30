@@ -8,7 +8,9 @@ import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import qg.po.midterm.mapper.SysUserMapper;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -20,6 +22,9 @@ public class DecisionWorkflowIntegrationTest {
 
     @Autowired
     private WorkflowExecutor workflowExecutor;
+    
+    @MockitoBean
+    private SysUserMapper sysUserMapper;
 
     @Test
     public void testFullWorkflow() throws Exception {

@@ -55,10 +55,12 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
         
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        OptionGenerationResult result = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(OptionGenerationResult.class);
+        OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                chatClient.prompt()
+                        .user(prompt)
+                        .call()
+                        .entity(OptionGenerationResult.class)
+        );
                 
         log.info("<<< 【AI Response】\n{}", result);
 
