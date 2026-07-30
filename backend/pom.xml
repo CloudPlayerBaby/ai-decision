@@ -75,7 +75,8 @@
         <!-- MyBatis-Plus -->
         <dependency>
             <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <!-- 当前项目使用 Spring Boot 4，因此这里要使用 Boot 4 对应的 starter -->
+            <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
         <!-- 使用分页插件时保留 -->

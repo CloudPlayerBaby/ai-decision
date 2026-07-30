@@ -18,4 +18,5 @@ public class NodeProgressVO {
     private OffsetDateTime startedAt;
     private OffsetDateTime endedAt;
     private String summary;
+    private String content;
 }

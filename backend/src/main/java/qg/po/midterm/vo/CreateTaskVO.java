@@ -6,6 +6,9 @@ import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
 
+/**
+ * 发起分析后的返回数据。
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -16,5 +19,4 @@ public class CreateTaskVO {
     private String taskType;
     private String status;
     private OffsetDateTime startedAt;
-    private String sseUrl;
 }
