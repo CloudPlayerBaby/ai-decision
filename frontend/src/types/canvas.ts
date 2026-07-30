@@ -111,3 +111,13 @@ export interface Canvas {
   nodes: CanvasNode[]
   edges: CanvasEdge[]
 }
+
+/**
+ * 画布数据（前端内部通信用，非 API 契约）
+ * 用于 DecisionCanvasPanel → DecisionDetailPage 数据传递
+ * 结构与 Canvas 接口一致，但用途不同
+ */
+export interface CanvasData {
+  nodes: CanvasNode[]
+  edges: CanvasEdge[]
+}

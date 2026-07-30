@@ -1,4 +1,5 @@
-import { Breadcrumb, Button, Space, Tag, Typography, Tooltip } from 'antd'
+import { useState } from 'react'
+import { Breadcrumb, Button, Space, Tag, Typography, Tooltip, message } from 'antd'
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -8,6 +9,7 @@ import { DecisionCanvasPanel } from '../../components/workbench/DecisionCanvasPa
 import { ConversationPanel } from '../../components/workbench/ConversationPanel'
 import { ResizeHandle } from '../../components/layout/ResizeHandle'
 import { LAYOUT_LIMITS, useLayoutStore } from '../../stores/layoutStore'
+import type { CanvasData } from '../../types/canvas'
 
 const { Title, Text } = Typography
 
@@ -19,15 +21,33 @@ const TITLE_MAP: Record<string, string> = {
 
 /**
  * 决策工作台：中间画布 + 右侧推演对话（一体页，非分页面）。
- * 业务逻辑 / SSE / 保存确认待后续接入 services + React Query。
  */
 export function DecisionDetailPage() {
   const { decisionId = '' } = useParams<{ decisionId: string }>()
   const title = TITLE_MAP[decisionId] ?? `决策 ${decisionId}`
+
+  // 画布脏标记和最新数据
+  const [isDirty, setIsDirty] = useState(false)
+  const [canvasData, setCanvasData] = useState<CanvasData | null>(null)
+
+  // 布局状态
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
   const setRightCollapsed = useLayoutStore((state) => state.setRightCollapsed)
   const setRightWidth = useLayoutStore((state) => state.setRightWidth)
+
+  /**
+   * 保存画布（待 C 接入 services）
+   *
+   * TODO(C): 接入 services.saveCanvas(canvasData)
+   * - 发送完整 nodes + edges 至 /decisions/{id}/canvas
+   * - 成功后 setIsDirty(false)
+   * - 从响应中提取 changedNodeIds，传递给 ConversationPanel
+   */
+  const handleSaveCanvas = async () => {
+    // TODO(C): 接入后删除此临时提示
+    message.info('保存服务待 C 接入 services 层后实现')
+  }
 
   return (
     <div className="workbench">
@@ -43,7 +63,9 @@ export function DecisionDetailPage() {
             <Title level={4} style={{ margin: 0 }}>
               {title}
             </Title>
-            <Tag color="gold">待确认</Tag>
+            <Tag color="gold">
+              {canvasData && isDirty ? '已修改' : '待确认'}
+            </Tag>
             <Text type="secondary" style={{ fontSize: 12 }}>
               ID: {decisionId}
             </Text>
@@ -58,7 +80,11 @@ export function DecisionDetailPage() {
               onClick={() => setRightCollapsed(!rightCollapsed)}
             />
           </Tooltip>
-          <Button disabled>保存画布</Button>
+          <Tooltip title="保存服务待 C 接入 services 层后可用">
+            <Button disabled={!isDirty} onClick={handleSaveCanvas}>
+              保存画布
+            </Button>
+          </Tooltip>
           <Button type="primary" disabled>
             确认方案
           </Button>
@@ -66,7 +92,10 @@ export function DecisionDetailPage() {
       </header>
 
       <div className="workbench__body">
-        <DecisionCanvasPanel />
+        <DecisionCanvasPanel
+          onDirtyChange={setIsDirty}
+          onCanvasChange={setCanvasData}
+        />
 
         {!rightCollapsed ? (
           <>

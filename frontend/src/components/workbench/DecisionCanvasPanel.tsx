@@ -6,6 +6,10 @@ import {
   Controls,
   useNodesState,
   useEdgesState,
+  applyNodeChanges,
+  applyEdgeChanges,
+  type NodeChange,
+  type EdgeChange,
 } from '@xyflow/react'
 import type { Node, Edge, NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -15,6 +19,7 @@ import type {
   DecisionNodeData,
   FactorNodeData,
   OptionNodeData,
+  CanvasData,
 } from '../../types/canvas'
 
 type FlowNode = Node<DecisionNodeData | FactorNodeData | OptionNodeData>
@@ -99,12 +104,22 @@ const nodeTypes = {
   option: OptionNode,
 }
 
+export interface DecisionCanvasPanelProps {
+  /** 脏标记变更回调（仅实际数据变更时触发） */
+  onDirtyChange?: (dirty: boolean) => void
+  /** 画布数据变更回调（变更后立即回传最新状态） */
+  onCanvasChange?: (canvas: CanvasData) => void
+}
+
 /**
  * 决策画布面板
  * 展示决策问题、影响因素和候选方案的节点关系图
  * 数据来源：mocks/canvas.mock.ts（后续对接 GET /decisions/{id}/canvas）
  */
-export function DecisionCanvasPanel() {
+export function DecisionCanvasPanel({
+  onDirtyChange,
+  onCanvasChange,
+}: DecisionCanvasPanelProps) {
   // 从 Mock 数据初始化
   const initialNodes: FlowNode[] = mockCanvas.nodes.map((n) => ({
     id: n.id,
@@ -119,10 +134,92 @@ export function DecisionCanvasPanel() {
     target: e.target,
   }))
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes)
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges)
+  const [nodes, setNodes] = useNodesState(initialNodes)
+  const [edges, setEdges] = useEdgesState(initialEdges)
   const themeMode = useLayoutStore((state) => state.themeMode)
   const dotColor = themeMode === 'eyeCare' ? '#2f3644' : '#d9dee7'
+
+  /**
+   * 统一通知父组件画布已变更
+   * 始终传递最新 nodes + edges
+   */
+  const notifyCanvasChange = () => {
+    const canvasData: CanvasData = {
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        type: n.type as 'decision' | 'factor' | 'option',
+        position: n.position,
+        data: n.data,
+      })),
+      edges: edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+      })),
+    }
+    onCanvasChange?.(canvasData)
+    onDirtyChange?.(true)
+  }
+
+  /**
+   * 处理节点变更
+   * 仅在位置变化完成、新增、删除时通知父组件
+   * 纯 UI 状态变更（选择、悬停）不触发 dirty
+   */
+  const handleNodesChange = (changes: NodeChange<FlowNode>[]) => {
+    const nextNodes = applyNodeChanges(changes, nodes)
+    setNodes(nextNodes)
+
+    // 检测实际数据变更
+    const hasDataChange = changes.some((change) => {
+      // 位置变化完成（拖拽结束）
+      if (change.type === 'position' && change.position && !change.dragging) {
+        return true
+      }
+      // 节点新增
+      if (change.type === 'add') {
+        return true
+      }
+      // 节点删除
+      if (change.type === 'remove') {
+        return true
+      }
+      // 节点数据编辑（如标签修改）
+      if (change.type === 'select' && 'data' in change && change.data) {
+        return true
+      }
+      return false
+    })
+
+    if (hasDataChange) {
+      notifyCanvasChange()
+    }
+  }
+
+  /**
+   * 处理边变更
+   * 仅在新增、删除时通知父组件
+   */
+  const handleEdgesChange = (changes: EdgeChange[]) => {
+    const nextEdges = applyEdgeChanges(changes, edges)
+    setEdges(nextEdges)
+
+    const hasDataChange = changes.some((change) => {
+      // 边新增
+      if (change.type === 'add') {
+        return true
+      }
+      // 边删除
+      if (change.type === 'remove') {
+        return true
+      }
+      return false
+    })
+
+    if (hasDataChange) {
+      notifyCanvasChange()
+    }
+  }
 
   return (
     <div className="canvas-panel">
@@ -136,8 +233,8 @@ export function DecisionCanvasPanel() {
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
           nodeTypes={nodeTypes}
           fitView
           nodesDraggable
