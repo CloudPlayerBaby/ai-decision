@@ -86,14 +86,14 @@ export function AnalysisChatPanel({
   const displaySteps = simSteps;
 
   return (
-    <div className="analysis-chat-panel">
-      <div className="panel-header">推演对话</div>
+    <div className="analysis-panel">
+      <div className="analysis-panel__header">推演对话</div>
 
-      <div className="panel-body">
+      <div className="analysis-panel__body">
         <ChatMessage content={userMessage} />
 
         {!analysisCompleted && (
-          <div className="loading-row">
+          <div className="analysis-panel__loading">
             <Spin size="small" />
             <span>正在推演...</span>
           </div>
@@ -142,7 +142,7 @@ export function AnalysisChatPanel({
         )}
       </div>
 
-      <div className="panel-footer">● 已连接</div>
+      <div className="analysis-panel__footer">● 已连接</div>
     </div>
   );
 }

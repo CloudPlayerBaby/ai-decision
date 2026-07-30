@@ -35,14 +35,14 @@ function getStatusText(status:ToolCallEvent['status']){
 export function ToolCallCard({toolCall}:Props){
     return (
     <div className="tool-call-card">
-      <div className="header">
+      <div className="tool-call-card__header">
         <ToolOutlined style={{ color: '#1677ff' }} />
-        <span className="tool-name">{toolCall.toolName}</span>
-        <Tag color={getStatusColor(toolCall.status)} className="tag">
+        <span className="tool-call-card__name">{toolCall.toolName}</span>
+        <Tag color={getStatusColor(toolCall.status)} style={{ marginLeft: 'auto' }}>
           {getStatusText(toolCall.status)}
         </Tag>
       </div>
-      <div className="body">
+      <div className="tool-call-card__body">
         <div>入参: {toolCall.inputSummary}</div>
         <div>结果: {toolCall.outputSummary}</div>
       </div>

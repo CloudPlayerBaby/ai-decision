@@ -1,9 +1,10 @@
 .confirm-action {
-  margin-top: 16px;
+  margin-top: 4px;
   padding: 16px;
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
+  border: 1px solid var(--surface-soft-border);
+  border-radius: 10px;
   text-align: center;
+  background: var(--surface-soft);
 }
 
 .confirm-action .ant-result {
@@ -11,12 +12,12 @@
 }
 
 .confirm-result {
-  margin-top: 16px;
+  margin-top: 4px;
   padding: 24px 16px;
   text-align: center;
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
-  background: #f6ffed;
+  border: 1px solid var(--surface-soft-border);
+  border-radius: 10px;
+  background: var(--badge-bg);
 }
 
 .confirm-result .ant-result {

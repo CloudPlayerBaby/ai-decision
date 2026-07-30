@@ -2,29 +2,26 @@
   margin-left: 24px;
   margin-bottom: 12px;
   padding: 8px 12px;
-  background: #fafafa;
-  border-radius: 6px;
-  border: 1px solid #f0f0f0;
+  background: var(--surface-soft);
+  border-radius: 8px;
+  border: 1px solid var(--surface-soft-border);
   font-size: 13px;
 }
 
-.tool-call-card .header {
+.tool-call-card__header {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
 }
 
-.tool-call-card .header .tool-name {
+.tool-call-card__name {
   font-weight: 500;
+  color: var(--text-h);
 }
 
-.tool-call-card .header .tag {
-  margin-left: auto;
-}
-
-.tool-call-card .body {
-  color: #666;
+.tool-call-card__body {
+  color: var(--text-muted);
   font-size: 12px;
   padding-left: 20px;
 }
