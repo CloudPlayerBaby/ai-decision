@@ -8,11 +8,11 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 决策报告实体（对应 decision_report 表）
+ * 决策画布实体（对应 decision_canvas 表）
  */
 @Data
-@TableName("decision_report")
-public class Report {
+@TableName("decision_canvas")
+public class DecisionCanvas {
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -20,8 +20,11 @@ public class Report {
     /** 所属决策问题ID */
     private Long decisionId;
 
-    /** 报告内容（JSON：背景、目标、方案对比、推荐结论、下一步行动等） */
-    private String content;
+    /** 画布数据（JSON：完整 nodes + edges） */
+    private String canvasData;
+
+    /** 画布版本号 */
+    private Integer version;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

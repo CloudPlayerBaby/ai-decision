@@ -2,32 +2,43 @@ package qg.po.midterm.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import qg.po.midterm.common.enums.DecisionStatus;
 import qg.po.midterm.common.enums.ErrorCode;
 import qg.po.midterm.common.exception.BusinessException;
+import qg.po.midterm.dto.request.ConfirmDecisionRequest;
 import qg.po.midterm.dto.request.CreateDecisionRequest;
+import qg.po.midterm.dto.request.PartialAnalysisRequest;
+import qg.po.midterm.dto.request.PreferredOptionRequest;
+import qg.po.midterm.dto.request.SaveCanvasRequest;
+import qg.po.midterm.dto.result.AnalysisResultDto;
+import qg.po.midterm.dto.result.Canvas;
 import qg.po.midterm.entity.AnalysisResult;
 import qg.po.midterm.entity.AnalysisTask;
 import qg.po.midterm.entity.Decision;
+import qg.po.midterm.entity.DecisionCanvas;
+import qg.po.midterm.entity.Report;
 import qg.po.midterm.mapper.AnalysisResultMapper;
 import qg.po.midterm.mapper.AnalysisTaskMapper;
+import qg.po.midterm.mapper.DecisionCanvasMapper;
 import qg.po.midterm.mapper.DecisionMapper;
+import qg.po.midterm.mapper.ReportMapper;
 import qg.po.midterm.service.DecisionService;
-import qg.po.midterm.vo.DecisionDetailVO;
-import qg.po.midterm.vo.DecisionVO;
-import qg.po.midterm.vo.PageVO;
+import qg.po.midterm.vo.*;
+import qg.po.midterm.workflow.state.Factor;
+import qg.po.midterm.workflow.state.Option;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
- * 决策问题服务实现（API v2.0 第 6 节）
+ * 决策问题服务实现（API v2.0 第 6、9、10 节）
  */
 @Service
 @RequiredArgsConstructor
@@ -36,6 +47,9 @@ public class DecisionServiceImpl implements DecisionService {
     private final DecisionMapper decisionMapper;
     private final AnalysisTaskMapper analysisTaskMapper;
     private final AnalysisResultMapper analysisResultMapper;
+    private final ReportMapper reportMapper;
+    private final DecisionCanvasMapper decisionCanvasMapper;
+    private final ObjectMapper objectMapper;
 
     /** 6.4 中不可删除的状态 */
     private static final Set<String> UNDELETABLE_STATUSES =
@@ -168,6 +182,491 @@ public class DecisionServiceImpl implements DecisionService {
         decisionMapper.deleteById(id);
     }
 
+    // ==================== 第 9 节：结果、方案与确认 ====================
+
+    @Override
+    public AnalysisResultVO getAnalysisResult(String decisionId, String resultId) {
+        Long id = parseId(decisionId, "d_");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+
+        AnalysisResult result;
+        if (StringUtils.hasText(resultId)) {
+            // 指定了 resultId，直接查
+            Long arId = parseId(resultId, "ar_", "resultId");
+            result = analysisResultMapper.selectById(arId);
+            if (result == null || !result.getDecisionId().equals(id)) {
+                throw new BusinessException(ErrorCode.NOT_FOUND, "分析结果不存在");
+            }
+        } else {
+            // 未指定：优先返回 PENDING_CONFIRM，其次 CONFIRMED
+            LambdaQueryWrapper<AnalysisResult> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(AnalysisResult::getDecisionId, id)
+                    .orderByDesc(AnalysisResult::getCreatedAt);
+            List<AnalysisResult> list = analysisResultMapper.selectList(wrapper);
+            result = list.stream()
+                    .filter(r -> "PENDING_CONFIRM".equals(r.getStatus()))
+                    .findFirst()
+                    .orElse(list.isEmpty() ? null : list.get(0));
+        }
+
+        if (result == null) {
+            return null;
+        }
+
+        AnalysisResultDto dto = parseAnalysisResultDto(result.getResultData());
+        return AnalysisResultVO.from(
+                "ar_" + result.getId(),
+                result.getStatus(),
+                dto,
+                result.getCreatedAt() != null
+                        ? result.getCreatedAt().format(ISO_FORMATTER) : null);
+    }
+
+    @Override
+    public void setPreferredOption(String decisionId, PreferredOptionRequest request) {
+        Long id = parseId(decisionId, "d_");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+
+        // 校验 analysisResultId 和 optionId 前缀
+        if (request.getAnalysisResultId() == null || !request.getAnalysisResultId().startsWith("ar_")) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "analysisResultId 格式错误");
+        }
+        if (request.getOptionId() == null || !request.getOptionId().startsWith("opt_")) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "optionId 格式错误");
+        }
+
+        // 解析 optionId 中的数字部分作为 preferredOptionId
+        // optionId 格式为 "opt_xxx"，与 AnalysisResultDto 中 Factor.id 等保持同风格
+        // 这里不要求 optionId 对应数据库实体，仅保存用户倾向
+        decision.setPreferredOptionId(parseFlexibleId(request.getOptionId(), "opt_"));
+        decision.setUpdatedAt(LocalDateTime.now());
+        decisionMapper.updateById(decision);
+    }
+
+    @Override
+    @Transactional
+    public ConfirmResultVO confirm(String decisionId, ConfirmDecisionRequest request) {
+        Long id = parseId(decisionId, "d_");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+
+        // 校验 analysisResultId
+        if (request.getAnalysisResultId() == null || !request.getAnalysisResultId().startsWith("ar_")) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "analysisResultId 格式错误");
+        }
+
+        Long arId = parseId(request.getAnalysisResultId(), "ar_", "analysisResultId");
+        AnalysisResult result = analysisResultMapper.selectById(arId);
+        if (result == null || !result.getDecisionId().equals(id)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "分析结果不存在");
+        }
+
+        if (!"PENDING_CONFIRM".equals(result.getStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT,
+                    "仅 PENDING_CONFIRM 状态的草案可以确认，当前: " + result.getStatus());
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 1. 草案 → 已确认
+        result.setStatus("CONFIRMED");
+        result.setUpdatedAt(now);
+        analysisResultMapper.updateById(result);
+
+        // 2. 生成报告
+        Report report = new Report();
+        report.setDecisionId(id);
+        report.setContent(result.getResultData());
+        report.setCreatedAt(now);
+        report.setUpdatedAt(now);
+        reportMapper.insert(report);
+
+        // 3. 更新决策
+        decision.setStatus(DecisionStatus.COMPLETED.name());
+        decision.setReportId(report.getId());
+        decision.setHasPendingResult(false);
+        decision.setPendingResultId(null);
+        if (StringUtils.hasText(request.getSelectedOptionId())) {
+            decision.setPreferredOptionId(parseFlexibleId(request.getSelectedOptionId(), "opt_"));
+        }
+        decision.setUpdatedAt(now);
+        decisionMapper.updateById(decision);
+
+        return ConfirmResultVO.builder()
+                .decisionId("d_" + decision.getId())
+                .status(DecisionStatus.COMPLETED.name())
+                .analysisResultId("ar_" + result.getId())
+                .reportId("r_" + report.getId())
+                .reportStatus("READY")
+                .build();
+    }
+
+    // ==================== 第 10 节：画布与局部重推 ====================
+
+    @Override
+    public Canvas getCanvas(String decisionId) {
+        Long id = parseId(decisionId, "d_");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+
+        // 优先读取用户保存的画布
+        LambdaQueryWrapper<DecisionCanvas> canvasWrapper = new LambdaQueryWrapper<>();
+        canvasWrapper.eq(DecisionCanvas::getDecisionId, id)
+                .orderByDesc(DecisionCanvas::getUpdatedAt)
+                .last("LIMIT 1");
+        DecisionCanvas savedCanvas = decisionCanvasMapper.selectOne(canvasWrapper);
+        if (savedCanvas != null && savedCanvas.getCanvasData() != null) {
+            try {
+                return objectMapper.readValue(savedCanvas.getCanvasData(), Canvas.class);
+            } catch (Exception e) {
+                // 解析失败则回退到自动生成
+            }
+        }
+
+        // 无可保存画布，从分析结果自动生成
+        AnalysisResult result = findLatestResultForCanvas(id);
+        if (result == null || result.getResultData() == null) {
+            return new Canvas(Collections.emptyList(), Collections.emptyList());
+        }
+
+        AnalysisResultDto dto = parseAnalysisResultDto(result.getResultData());
+        return buildAutoCanvas(dto, decision.getTitle());
+    }
+
+    @Override
+    @Transactional
+    public SaveCanvasVO saveCanvas(String decisionId, SaveCanvasRequest request) {
+        Long id = parseId(decisionId, "d_");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+
+        // 解析请求中的画布
+        Canvas newCanvas = new Canvas(request.getNodes(), request.getEdges());
+
+        // 读出旧画布用于 diff
+        Canvas oldCanvas = null;
+        LambdaQueryWrapper<DecisionCanvas> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(DecisionCanvas::getDecisionId, id)
+                .orderByDesc(DecisionCanvas::getUpdatedAt)
+                .last("LIMIT 1");
+        DecisionCanvas existing = decisionCanvasMapper.selectOne(wrapper);
+        if (existing != null && existing.getCanvasData() != null) {
+            try {
+                oldCanvas = objectMapper.readValue(existing.getCanvasData(), Canvas.class);
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+
+        // 计算变更节点
+        List<String> changedNodeIds = computeChangedNodeIds(oldCanvas, newCanvas);
+
+        // 序列化并保存
+        LocalDateTime now = LocalDateTime.now();
+        String canvasJson;
+        try {
+            canvasJson = objectMapper.writeValueAsString(newCanvas);
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "画布序列化失败");
+        }
+
+        if (existing != null) {
+            existing.setCanvasData(canvasJson);
+            existing.setVersion(existing.getVersion() != null ? existing.getVersion() + 1 : 1);
+            existing.setUpdatedAt(now);
+            decisionCanvasMapper.updateById(existing);
+        } else {
+            DecisionCanvas canvas = new DecisionCanvas();
+            canvas.setDecisionId(id);
+            canvas.setCanvasData(canvasJson);
+            canvas.setVersion(1);
+            canvas.setCreatedAt(now);
+            canvas.setUpdatedAt(now);
+            decisionCanvasMapper.insert(canvas);
+        }
+
+        return SaveCanvasVO.builder()
+                .changedNodeIds(changedNodeIds)
+                .canvas(newCanvas)
+                .build();
+    }
+
+    @Override
+    public PartialAnalysisVO startPartialAnalysis(String decisionId, PartialAnalysisRequest request) {
+        Long id = parseId(decisionId, "d_");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+
+        if (request.getChangedNodeIds() == null || request.getChangedNodeIds().isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "changedNodeIds 不能为空");
+        }
+
+        // 计算受影响的节点
+        List<String> affectedNodeIds = computeAffectedNodeIds(id, request.getChangedNodeIds());
+
+        // 创建局部重推任务
+        LocalDateTime now = LocalDateTime.now();
+        AnalysisTask task = new AnalysisTask();
+        task.setDecisionId(id);
+        task.setRunType("PARTIAL");
+        task.setStatus("RUNNING");
+        task.setCurrentStep(0);
+        task.setTotalSteps(2); // GENERATE_OPTIONS + COMPARE_OPTIONS
+        task.setStartedAt(now);
+        task.setCreatedAt(now);
+        task.setUpdatedAt(now);
+        analysisTaskMapper.insert(task);
+
+        // 更新 decision 状态
+        decision.setStatus(DecisionStatus.PARTIAL_ANALYZING.name());
+        decision.setLatestTaskId(task.getId());
+        decision.setUpdatedAt(now);
+        decisionMapper.updateById(decision);
+
+        String taskId = "t_" + task.getId();
+
+        // TODO 异步分派局部重推：等第 7 节完善后，调用 workflowDispatcher.startPartialAnalysis(...)
+        // 当前先创建任务记录并返回
+
+        return PartialAnalysisVO.builder()
+                .taskId(taskId)
+                .taskType("PARTIAL_ANALYSIS")
+                .status("RUNNING")
+                .affectedNodeIds(affectedNodeIds)
+                .build();
+    }
+
+    // ==================== 画布工具方法 ====================
+
+    /**
+     * 查找用于生成画布的最新分析结果（优先 CONFIRMED，其次 PENDING_CONFIRM）
+     */
+    private AnalysisResult findLatestResultForCanvas(Long decisionId) {
+        LambdaQueryWrapper<AnalysisResult> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AnalysisResult::getDecisionId, decisionId)
+                .orderByDesc(AnalysisResult::getCreatedAt);
+        List<AnalysisResult> list = analysisResultMapper.selectList(wrapper);
+        return list.stream()
+                .filter(r -> "CONFIRMED".equals(r.getStatus()))
+                .findFirst()
+                .orElse(list.isEmpty() ? null : list.get(0));
+    }
+
+    /**
+     * 从分析结果构建自动画布
+     */
+    private Canvas buildAutoCanvas(AnalysisResultDto dto, String decisionTitle) {
+        List<Canvas.CanvasNode> nodes = new ArrayList<>();
+        List<Canvas.CanvasEdge> edges = new ArrayList<>();
+
+        // 根节点 — 决策问题
+        nodes.add(createNode("root", "decision", decisionTitle,
+                new Canvas.Position(360, 40), Collections.emptyMap()));
+
+        // Factor 节点 + edge
+        List<Factor> factors = dto.getFactors() != null
+                ? dto.getFactors() : Collections.emptyList();
+        int factorCount = factors.size();
+        for (int i = 0; i < factorCount; i++) {
+            Factor f = factors.get(i);
+            double x = 140 + (double) i * (560.0 / Math.max(1, factorCount - 1));
+            if (factorCount == 1) x = 360;
+            Map<String, Object> factorData = new HashMap<>();
+            factorData.put("weight", f.getWeight());
+            nodes.add(createNode(f.getId(), "factor", f.getName(),
+                    new Canvas.Position(x, 180), factorData));
+            edges.add(createEdge("e_f_" + i, "root", f.getId(), "HAS_FACTOR"));
+        }
+
+        // Option 节点 + edge
+        List<Option> options = dto.getOptions() != null
+                ? dto.getOptions() : Collections.emptyList();
+        int optionCount = options.size();
+        for (int i = 0; i < optionCount; i++) {
+            Option o = options.get(i);
+            double x = 140 + (double) i * (560.0 / Math.max(1, optionCount - 1));
+            if (optionCount == 1) x = 360;
+            Map<String, Object> optionData = new HashMap<>(o.getScores() != null
+                    ? o.getScores() : Collections.emptyMap());
+            nodes.add(createNode(o.getId(), "option", o.getName(),
+                    new Canvas.Position(x, 340), optionData));
+            edges.add(createEdge("e_o_" + i, "root", o.getId(), "HAS_OPTION"));
+        }
+
+        return new Canvas(nodes, edges);
+    }
+
+    private Canvas.CanvasNode createNode(String id, String type, String label,
+                                          Canvas.Position pos, java.util.Map<String, Object> data) {
+        Canvas.CanvasNode node = new Canvas.CanvasNode();
+        node.setId(id);
+        node.setType(type);
+        node.setLabel(label);
+        node.setPosition(pos);
+        node.setData(data);
+        return node;
+    }
+
+    private Canvas.CanvasEdge createEdge(String id, String source, String target, String relation) {
+        Canvas.CanvasEdge edge = new Canvas.CanvasEdge();
+        edge.setId(id);
+        edge.setSource(source);
+        edge.setTarget(target);
+        edge.setRelation(relation);
+        return edge;
+    }
+
+    /**
+     * 计算画布变更节点：比较新老画布的 nodes 和 edges，找出增/删/改的节点ID
+     */
+    private List<String> computeChangedNodeIds(Canvas oldCanvas, Canvas newCanvas) {
+        List<String> changed = new ArrayList<>();
+        if (oldCanvas == null) {
+            // 首次保存，所有节点都算变更
+            if (newCanvas.getNodes() != null) {
+                newCanvas.getNodes().forEach(n -> changed.add(n.getId()));
+            }
+            return changed;
+        }
+
+        Map<String, Canvas.CanvasNode> oldNodes = indexNodes(oldCanvas);
+        Map<String, Canvas.CanvasNode> newNodes = indexNodes(newCanvas);
+
+        // 新增或修改的节点
+        for (String id : newNodes.keySet()) {
+            if (!oldNodes.containsKey(id)) {
+                changed.add(id); // 新增
+            } else if (!nodeEquals(oldNodes.get(id), newNodes.get(id))) {
+                changed.add(id); // 修改
+            }
+        }
+        // 删除的节点
+        for (String id : oldNodes.keySet()) {
+            if (!newNodes.containsKey(id)) {
+                changed.add(id);
+            }
+        }
+
+        // 边变更也视为关联节点变更
+        Set<String> oldEdges = indexEdges(oldCanvas);
+        Set<String> newEdges = indexEdges(newCanvas);
+        if (!oldEdges.equals(newEdges)) {
+            // 找出边变更影响的节点
+            Set<String> edgeAffected = new HashSet<>();
+            if (oldCanvas.getEdges() != null) {
+                oldCanvas.getEdges().forEach(e -> {
+                    edgeAffected.add(e.getSource());
+                    edgeAffected.add(e.getTarget());
+                });
+            }
+            if (newCanvas.getEdges() != null) {
+                newCanvas.getEdges().forEach(e -> {
+                    edgeAffected.add(e.getSource());
+                    edgeAffected.add(e.getTarget());
+                });
+            }
+            for (String nodeId : edgeAffected) {
+                if (!changed.contains(nodeId)) {
+                    changed.add(nodeId);
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    private Map<String, Canvas.CanvasNode> indexNodes(Canvas canvas) {
+        Map<String, Canvas.CanvasNode> map = new LinkedHashMap<>();
+        if (canvas != null && canvas.getNodes() != null) {
+            for (Canvas.CanvasNode node : canvas.getNodes()) {
+                map.put(node.getId(), node);
+            }
+        }
+        return map;
+    }
+
+    private java.util.Set<String> indexEdges(Canvas canvas) {
+        java.util.Set<String> set = new LinkedHashSet<>();
+        if (canvas != null && canvas.getEdges() != null) {
+            for (Canvas.CanvasEdge edge : canvas.getEdges()) {
+                set.add(edge.getSource() + "->" + edge.getTarget() + ":" + edge.getRelation());
+            }
+        }
+        return set;
+    }
+
+    private boolean nodeEquals(Canvas.CanvasNode a, Canvas.CanvasNode b) {
+        if (!Objects.equals(a.getPosition().getX() + "," + a.getPosition().getY(),
+                b.getPosition().getX() + "," + b.getPosition().getY())) {
+            return false;
+        }
+        // 比较 data（深度比较 JSON）
+        try {
+            String jsonA = objectMapper.writeValueAsString(a.getData());
+            String jsonB = objectMapper.writeValueAsString(b.getData());
+            return jsonA.equals(jsonB);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 根据变更节点计算受影响的节点（用于局部重推）
+     * 规则：factor 变更 → 影响所有 option；option 变更 → 仅影响自身
+     */
+    private List<String> computeAffectedNodeIds(Long decisionId, List<String> changedNodeIds) {
+        java.util.Set<String> affected = new LinkedHashSet<>();
+
+        // 获取当前画布
+        Canvas canvas = null;
+        LambdaQueryWrapper<DecisionCanvas> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(DecisionCanvas::getDecisionId, decisionId)
+                .orderByDesc(DecisionCanvas::getUpdatedAt)
+                .last("LIMIT 1");
+        DecisionCanvas dc = decisionCanvasMapper.selectOne(wrapper);
+        if (dc != null && dc.getCanvasData() != null) {
+            try {
+                canvas = objectMapper.readValue(dc.getCanvasData(), Canvas.class);
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+
+        if (canvas == null) {
+            return new java.util.ArrayList<>(changedNodeIds);
+        }
+
+        for (String changedId : changedNodeIds) {
+            affected.add(changedId);
+            // factor 变更 → 所有 option 受影响
+            if (changedId.startsWith("f_") && canvas.getNodes() != null) {
+                for (Canvas.CanvasNode node : canvas.getNodes()) {
+                    if ("option".equals(node.getType())) {
+                        affected.add(node.getId());
+                    }
+                }
+            }
+        }
+
+        return new java.util.ArrayList<>(affected);
+    }
+
+    // ==================== 私有工具方法 ====================
+
     private Long getCurrentUserId() {
         return (Long) SecurityContextHolder.getContext()
                 .getAuthentication().getPrincipal();
@@ -191,6 +690,44 @@ public class DecisionServiceImpl implements DecisionService {
         }
     }
 
+    private Long parseId(String externalId, String prefix, String fieldName) {
+        if (externalId == null || !externalId.startsWith(prefix)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    fieldName + " 格式错误");
+        }
+        try {
+            return Long.parseLong(externalId.substring(prefix.length()));
+        } catch (NumberFormatException e) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    fieldName + " 格式错误");
+        }
+    }
+
+    /**
+     * 解析形如 "opt_1" 或 "opt_redis" 的ID，返回数字部分（用于存储到 preferredOptionId）
+     */
+    private Long parseFlexibleId(String externalId, String prefix) {
+        try {
+            return Long.parseLong(externalId.substring(prefix.length()));
+        } catch (NumberFormatException e) {
+            return (long) externalId.substring(prefix.length()).hashCode();
+        }
+    }
+
+    /**
+     * 解析 AnalysisResult.resultData JSON 为 AnalysisResultDto
+     */
+    private AnalysisResultDto parseAnalysisResultDto(String resultData) {
+        if (resultData == null || resultData.isBlank()) {
+            return new AnalysisResultDto();
+        }
+        try {
+            return objectMapper.readValue(resultData, AnalysisResultDto.class);
+        } catch (Exception e) {
+            return new AnalysisResultDto();
+        }
+    }
+
     private DecisionVO toVO(Decision entity) {
         return DecisionVO.builder()
                 .id("d_" + entity.getId())
@@ -200,7 +737,7 @@ public class DecisionServiceImpl implements DecisionService {
                 .constraints(entity.getConstraints())
                 .status(entity.getStatus())
                 .preferredOptionId(entity.getPreferredOptionId() != null
-                        ? "d_" + entity.getPreferredOptionId() : null)
+                        ? "opt_" + entity.getPreferredOptionId() : null)
                 .latestTaskId(entity.getLatestTaskId() != null
                         ? "t_" + entity.getLatestTaskId() : null)
                 .hasPendingResult(entity.getHasPendingResult())
