@@ -21,6 +21,18 @@ public interface WorkflowExecutor {
     String startAnalysis(String decisionId, String background, String goal, String constraints);
 
     /**
+     * 使用任务服务已经创建好的 taskId 启动完整推演。
+     *
+     * <p>这样 Workflow 事件中的 taskId 能和 agent_run、SSE 使用同一个 ID。</p>
+     */
+    String startAnalysis(
+            String taskId,
+            String decisionId,
+            String background,
+            String goal,
+            String constraints);
+
+    /**
      * 针对失败步骤触发重试
      *
      * @param taskId 异步推演的任务 ID
@@ -37,6 +49,15 @@ public interface WorkflowExecutor {
      * @return 新生成的局部重推taskId
      */
     String startPartialAnalysis(String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState);
+
+    /**
+     * 使用任务服务已经创建好的 taskId 启动局部推演。
+     */
+    String startPartialAnalysis(
+            String taskId,
+            String decisionId,
+            java.util.List<String> changedNodeIds,
+            DecisionState currentState);
 
     /**
      * 接收原始大模型输出，进行 JSON Schema 强校验

@@ -89,6 +89,45 @@ class WorkflowExecutorImplTest {
         assertEquals("COMPARE_OPTIONS", injectedState.get("startNode"));
     }
 
+    @Test
+    void startAnalysisShouldUseProvidedTaskId() throws Exception {
+        String taskId = "t_30001";
+
+        String result = workflowExecutor.startAnalysis(
+                taskId,
+                "d_20001",
+                "测试背景",
+                "测试目标",
+                "测试约束"
+        );
+
+        assertEquals(taskId, result);
+
+        ArgumentCaptor<Map<String, Object>> stateCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(compiledGraph).invoke(stateCaptor.capture(), any(RunnableConfig.class));
+        assertEquals(taskId, stateCaptor.getValue().get("taskId"));
+    }
+
+    @Test
+    void startPartialAnalysisShouldUseProvidedTaskId() throws Exception {
+        String taskId = "t_30002";
+        DecisionState currentState = new DecisionState(new HashMap<>());
+
+        String result = workflowExecutor.startPartialAnalysis(
+                taskId,
+                "d_20001",
+                List.of("opt_redis"),
+                currentState
+        );
+
+        assertEquals(taskId, result);
+
+        ArgumentCaptor<Map<String, Object>> stateCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(compiledGraph).invoke(stateCaptor.capture(), any(RunnableConfig.class));
+        assertEquals(taskId, stateCaptor.getValue().get("taskId"));
+        assertEquals("COMPARE_OPTIONS", stateCaptor.getValue().get("startNode"));
+    }
+
     /**
      * 测试 7.3 接口约定：重试失败的步骤 (调用 invoke(null) 触发 checkpoint 恢复)
      */

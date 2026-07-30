@@ -24,17 +24,27 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
     @Override
     public String startAnalysis(String decisionId, String background, String goal, String constraints) {
         String taskId = UUID.randomUUID().toString();
-        
+
+        return startAnalysis(taskId, decisionId, background, goal, constraints);
+    }
+
+    @Override
+    public String startAnalysis(
+            String taskId,
+            String decisionId,
+            String background,
+            String goal,
+            String constraints) {
         Map<String, Object> initData = new HashMap<>();
         initData.put("decisionId", decisionId);
         initData.put("taskId", taskId);
         initData.put("background", background);
         initData.put("goal", goal);
         initData.put("constraints", constraints);
-        
+
         DecisionState state = new DecisionState(initData);
         runGraph(taskId, state);
-        
+
         return taskId;
     }
 
@@ -50,7 +60,16 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
     @Override
     public String startPartialAnalysis(String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState) {
         String taskId = UUID.randomUUID().toString();
-        
+
+        return startPartialAnalysis(taskId, decisionId, changedNodeIds, currentState);
+    }
+
+    @Override
+    public String startPartialAnalysis(
+            String taskId,
+            String decisionId,
+            java.util.List<String> changedNodeIds,
+            DecisionState currentState) {
         // 根据 changedNodeIds 判断从哪个节点开始重推
         // 如果改了因素(factor)，需要重新生成方案 -> GENERATE_OPTIONS
         // 如果只改了方案(option)，只需要重新对比风险 -> COMPARE_OPTIONS
