@@ -89,6 +89,11 @@
             <artifactId>langgraph4j-core</artifactId>
             <version>1.8.20</version>
         </dependency>
+        <dependency>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-redis-saver</artifactId>
+            <version>${langgraph4j.version}</version>
+        </dependency>
 
         <!-- Lombok -->
         <dependency>
