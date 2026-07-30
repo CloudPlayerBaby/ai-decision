@@ -1,5 +1,6 @@
 package qg.po.midterm.workflow;
 
+import org.bsc.langgraph4j.CompiledGraph;
 import qg.po.midterm.dto.result.ValidationResult;
 import qg.po.midterm.workflow.state.DecisionState;
 
@@ -50,5 +51,5 @@ public interface WorkflowExecutor {
      * B 同学可以直接调用此方法获取图，然后使用 graph.stream(...) 获取 AsyncGenerator，
      * 从而遍历每个节点的输出（NodeOutput），实现向前端推送 SSE 流式事件！
      */
-    org.bsc.langgraph4j.CompiledGraph<DecisionState> getCompiledGraph();
+    CompiledGraph<DecisionState> getCompiledGraph();
 }
