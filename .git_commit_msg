@@ -1,4 +1,5 @@
-﻿feat(ai): 对齐架构规范并开放 Checkpoint 注入槽位
+﻿feat(ai): 完善异步推演异常拦截与全局事件重构
 
-1. 状态流转对齐：将 6 个 Node 广播的事件状态彻底修改为 PRD 标准的 RUNNING 和 SUCCEEDED，消除了 B 组在事件处理时状态映射的逻辑负担。
-2. 韧性架构（重要）：在 DecisionWorkflow 中为 LangGraph4j 引入 BaseCheckpointSaver 依赖注入。此举向外开放了断点持久化能力（可由 D 组或 B 组实现），使得图引擎未来可具备 Crash 后的断点续传与代偿能力。
+1. NodeExecutionEvent: 扩充 errorMessage 字段，用于携带大模型报错细节。
+2. 节点重构: 对全部 6 个推演节点追加全局 try-catch 拦截。大模型抛出异常时立即广播 FAILED 事件并重新抛出，为 B 组异步状态落库提供完美支持。
+3. 基建补全: 补全 BusinessException 类的骨架代码，完美支持传入 ErrorCode 字典，统一后续业务异常拦截规范。
