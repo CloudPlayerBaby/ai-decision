@@ -1,7 +1,9 @@
 import { Button, Card, Form, Input, Space, Typography, message, Tooltip } from 'antd'
 import { BulbFilled, BulbOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router-dom'
-import { useLayoutStore } from '../../stores/layoutStore'
+import { useState } from 'react'
+import { useLayoutStore } from '@/stores/layoutStore'
+import { register } from '@/services/auth.service'
 
 const { Title, Paragraph } = Typography
 
@@ -11,19 +13,26 @@ interface RegisterFormValues {
   password: string
 }
 
-/**
- * 注册页占位：字段对齐 v2.0 POST /auth/register（username / email / password）。
- * 本阶段不调用 services。
- */
+/** 注册页：POST /auth/register */
 export function RegisterPage() {
   const navigate = useNavigate()
   const themeMode = useLayoutStore((state) => state.themeMode)
   const toggleThemeMode = useLayoutStore((state) => state.toggleThemeMode)
   const isEyeCare = themeMode === 'eyeCare'
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleFinish = (_values: RegisterFormValues) => {
-    message.success('注册表单占位提交成功（待接入真实注册接口）')
-    navigate('/login')
+  const handleFinish = async (values: RegisterFormValues) => {
+    if (submitting) return
+    setSubmitting(true)
+    try {
+      await register(values)
+      message.success('注册成功，请登录')
+      navigate('/login', { replace: true })
+    } catch {
+      // 错误已由 http 拦截器提示
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -45,7 +54,7 @@ export function RegisterPage() {
               注册
             </Title>
             <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              创建账号后开始决策推演 · 占位页
+              创建账号后开始决策推演
             </Paragraph>
           </div>
           <Form<RegisterFormValues>
@@ -94,7 +103,13 @@ export function RegisterPage() {
               />
             </Form.Item>
             <Form.Item style={{ marginBottom: 8 }}>
-              <Button type="primary" htmlType="submit" block>
+              <Button
+                type="primary"
+                htmlType="submit"
+                block
+                loading={submitting}
+                disabled={submitting}
+              >
                 注册
               </Button>
             </Form.Item>
