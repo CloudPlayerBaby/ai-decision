@@ -25,6 +25,9 @@ public class DecisionWorkflowIntegrationTest {
     
     @MockitoBean
     private SysUserMapper sysUserMapper;
+    
+    @MockitoBean
+    private qg.po.midterm.mapper.DecisionMapper decisionMapper;
 
     @Test
     public void testFullWorkflow() throws Exception {

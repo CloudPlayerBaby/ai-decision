@@ -66,7 +66,7 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
         log.info("Starting partial analysis for decision {} with startNode: {}", decisionId, startNode);
 
-        Map<String, Object> initData = currentState.data();
+        Map<String, Object> initData = new HashMap<>(currentState.data());
         initData.put("decisionId", decisionId);
         initData.put("taskId", taskId);
         initData.put("startNode", startNode);
@@ -86,14 +86,10 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     @Override
     public void runGraph(String taskId, DecisionState initialState) {
-        // 构建 RunnableConfig，传入 threadId 启用 Checkpoint 持久化和追踪
-        RunnableConfig config = RunnableConfig.builder()
-                .threadId(taskId)
-                .build();
-                
-        // 调用底层图执行（异步，或者由 B 来进行 stream 消费，这里如果被独立调用则阻塞执行完）
+        RunnableConfig config = RunnableConfig.builder().threadId(taskId).build();
         try {
-            getCompiledGraph().invoke(initialState.data(), config);
+            Map<String, Object> stateData = (initialState != null) ? initialState.data() : null;
+            getCompiledGraph().invoke(stateData, config);
         } catch (Exception e) {
             log.error("Failed to execute graph for task {}", taskId, e);
         }
