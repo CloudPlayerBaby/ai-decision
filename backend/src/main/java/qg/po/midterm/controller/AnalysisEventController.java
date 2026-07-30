@@ -1,9 +1,5 @@
 package qg.po.midterm.controller;
 
-
-/**
- * SSE流式事件返回
- */
-public class AnalysisEventController
-{
+/** 提供分析任务 SSE 事件订阅接口。 */
+public class AnalysisEventController {
 }

@@ -1,9 +1,5 @@
 package qg.po.midterm.controller;
 
-
-/**
- * 负责最终报告
- */
-public class ReportController
-{
+/** 提供分析报告查询和重新生成接口。 */
+public class ReportController {
 }

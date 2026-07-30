@@ -1,11 +1,12 @@
-package qg.po.midterm.dto;
+package qg.po.midterm.dto.result;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
+
 import java.util.List;
 
 @Data
@@ -35,7 +36,7 @@ public class AnalysisResultDto {
     public static class Recommendation {
         @Schema(description = "推荐方案的唯一ID")
         private String optionId;
-        
+
         @Schema(description = "推荐理由")
         private String reason;
     }

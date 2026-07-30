@@ -1,9 +1,5 @@
 package qg.po.midterm.controller;
 
-
-/**
- * 负责登录注册等
- */
-public class AuthController
-{
+/** 提供注册、登录和登出接口。 */
+public class AuthController {
 }

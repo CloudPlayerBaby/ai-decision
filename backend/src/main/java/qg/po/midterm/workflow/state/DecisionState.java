@@ -1,6 +1,7 @@
 package qg.po.midterm.workflow.state;
 
 import org.bsc.langgraph4j.state.AgentState;
+
 import java.util.Map;
 
 public class DecisionState extends AgentState {

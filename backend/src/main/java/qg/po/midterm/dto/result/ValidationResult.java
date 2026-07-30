@@ -1,9 +1,10 @@
-package qg.po.midterm.dto;
+package qg.po.midterm.dto.result;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
+
 import java.util.List;
 
 @Data

@@ -1,6 +1,6 @@
 package qg.po.midterm.workflow;
 
-import qg.po.midterm.dto.ValidationResult;
+import qg.po.midterm.dto.result.ValidationResult;
 import qg.po.midterm.workflow.state.DecisionState;
 
 /**
@@ -33,10 +33,10 @@ public interface WorkflowExecutor {
      * 如果失败，内部可触发“一次修复”逻辑
      *
      * @param jsonResult 大模型输出的 JSON 字符串
-     * @return 结构化校验反馈（包含是否有效、是否修复、缺失字段等）
+     * @return 结构化校验反馈（包含是否修复、缺失字段等）
      */
     ValidationResult validateAndRepair(String jsonResult);
-    
+
     /**
      * 底层直接运行推演节点图的方法 (给 B 同学深度集成使用)
      *
