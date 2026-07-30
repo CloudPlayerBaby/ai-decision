@@ -3,11 +3,15 @@ package qg.po.midterm.workflow;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -29,13 +33,29 @@ public class DecisionWorkflowIntegrationTest {
         log.info("目标: {}", goal);
         log.info("=================================================");
         
-        String taskId = workflowExecutor.startAnalysis(decisionId, background, goal, constraints);
+        Map<String, Object> initData = new HashMap<>();
+        initData.put("decisionId", decisionId);
+        initData.put("taskId", UUID.randomUUID().toString());
+        initData.put("background", background);
+        initData.put("goal", goal);
+        initData.put("constraints", constraints);
         
-        log.info("✅ 任务已提交，taskId: {}", taskId);
-        log.info("⏳ 正在等待大模型推演完毕（最大等待 120 秒）...");
+        qg.po.midterm.workflow.state.DecisionState state = new qg.po.midterm.workflow.state.DecisionState(initData);
+        RunnableConfig config = RunnableConfig.builder().threadId(decisionId).build();
         
-        Thread.sleep(120000);
-        log.info("🏁 测试结束");
+        var result = workflowExecutor.getCompiledGraph().invoke(state.data(), config);
+        
+        log.info("✅ 推演结束，输出最终结果：");
+        log.info("=================================================");
+        result.ifPresent(s -> {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                log.info("\n{}", mapper.writerWithDefaultPrettyPrinter().writeValueAsString(s.data()));
+            } catch (Exception e) {
+                log.error("Failed to format JSON", e);
+            }
+        });
+        log.info("=================================================");
     }
     
     @Component
