@@ -8,8 +8,10 @@ import org.springframework.transaction.annotation.Transactional;
 import qg.po.midterm.common.enums.ErrorCode;
 import qg.po.midterm.entity.AnalysisStep;
 import qg.po.midterm.entity.AnalysisTask;
+import qg.po.midterm.entity.Decision;
 import qg.po.midterm.mapper.AnalysisStepMapper;
 import qg.po.midterm.mapper.AnalysisTaskMapper;
+import qg.po.midterm.mapper.DecisionMapper;
 import qg.po.midterm.service.AnalysisEventService;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 
@@ -20,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 把 Workflow 节点事件转换成数据库状态和 SSE 事件。
+ * 把 Workflow 节点事件转换成数据库状态和 SSE 事件
  */
 @Component
 @RequiredArgsConstructor
@@ -28,22 +30,20 @@ public class NodeExecutionEventListener {
 
     private final AnalysisTaskMapper taskMapper;
     private final AnalysisStepMapper stepMapper;
+    private final DecisionMapper decisionMapper;
     private final AnalysisEventService eventService;
 
     @EventListener
     @Transactional
     public void handle(NodeExecutionEvent event) {
-        Long taskDbId = parseTaskId(event.getTaskId());
-        if (taskDbId == null) {
-            return;
-        }
-
-        AnalysisTask task = taskMapper.selectById(taskDbId);
+        // 通过event里面的taskId找到对应的task
+        AnalysisTask task = findDatabaseTask(event);
         if (task == null) {
             return;
         }
+        Long taskDbId = task.getId();
 
-        // Workflow 内部的修复节点不对前端展示。
+        // 如果是修复节点，不展示，但是如果判断修复失败，直接标记为任务失败
         if ("Repair".equals(event.getNodeName())) {
             if ("FAILED".equals(event.getStatus())) {
                 failTask(task, null, event.getErrorMessage());
@@ -51,8 +51,7 @@ public class NodeExecutionEventListener {
             return;
         }
 
-        // 当前 Workflow 的 ReportGeneration 是最后一个节点。
-        // 分析结果落库和 decision -> WAITING_CONFIRM 由结果处理模块完成。
+        // 当前 Workflow 的 ReportGeneration 是最后一个节点，不展示
         if ("ReportGeneration".equals(event.getNodeName())) {
             if ("SUCCEEDED".equals(event.getStatus())) {
                 task.setStatus("SUCCEEDED");
@@ -65,12 +64,15 @@ public class NodeExecutionEventListener {
 
 
             } else if ("FAILED".equals(event.getStatus())) {
+                // 如果是失败了，就标记为失败
                 failTask(task, null, event.getErrorMessage());
             }
             return;
         }
 
+        // 把 workflow 里面的名转换成我们需要的名称
         String stepName = getStepName(event.getNodeName());
+        // 没有的话就是 tool call 节点
         if (stepName == null) {
             // TODO Workflow 工具调用事件接入后，在这里创建 TOOL_CALL 步骤并发送 tool_call。
 
@@ -78,6 +80,7 @@ public class NodeExecutionEventListener {
             return;
         }
 
+        // 从数据库查询 step
         AnalysisStep step = stepMapper.selectOne(
                 new LambdaQueryWrapper<AnalysisStep>()
                         .eq(AnalysisStep::getRunId, taskDbId)
@@ -115,7 +118,7 @@ public class NodeExecutionEventListener {
     }
 
     /**
-     * 同时标记步骤和任务失败，并通知前端。
+     * 同时标记步骤和任务失败，并通知前端
      */
     private void failTask(
             AnalysisTask task,
@@ -146,7 +149,7 @@ public class NodeExecutionEventListener {
     }
 
     /**
-     * 发送文档规定的 step_update。
+     * 发送文档规定的 step_update
      */
     private void sendStepUpdate(AnalysisTask task, AnalysisStep step) {
         List<AnalysisStep> steps = stepMapper.selectList(
@@ -173,7 +176,7 @@ public class NodeExecutionEventListener {
     }
 
     /**
-     * Workflow 节点名转换为 API 步骤名。
+     * Workflow 节点名转换为 API 步骤名
      */
     private String getStepName(String nodeName) {
         return switch (nodeName) {
@@ -191,6 +194,41 @@ public class NodeExecutionEventListener {
         }
         try {
             return Long.parseLong(taskId.substring(2));
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Workflow 的 taskId 是它自己生成的 UUID
+     * 数据库任务通过 decision.latestTaskId 找回，不要求修改 Workflow 接口
+     */
+    private AnalysisTask findDatabaseTask(NodeExecutionEvent event) {
+        // 获取taskId
+        Long taskDbId = parseTaskId(event.getTaskId());
+        if (taskDbId != null) {
+            return taskMapper.selectById(taskDbId);
+        }
+
+        // 找不到就用决策 ID
+        Long decisionDbId = parseDecisionId(event.getDecisionId());
+        if (decisionDbId == null) {
+            return null;
+        }
+        Decision decision = decisionMapper.selectById(decisionDbId);
+        if (decision == null || decision.getLatestTaskId() == null) {
+            return null;
+        }
+        return taskMapper.selectById(decision.getLatestTaskId());
+    }
+
+    // 转化决策 ID，去除前面的 d_
+    private Long parseDecisionId(String decisionId) {
+        if (decisionId == null || !decisionId.startsWith("d_")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(decisionId.substring(2));
         } catch (NumberFormatException exception) {
             return null;
         }

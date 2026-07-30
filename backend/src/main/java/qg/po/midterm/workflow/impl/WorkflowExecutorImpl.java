@@ -28,7 +28,6 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
         return startAnalysis(taskId, decisionId, background, goal, constraints);
     }
 
-    @Override
     public String startAnalysis(
             String taskId,
             String decisionId,
@@ -64,7 +63,6 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
         return startPartialAnalysis(taskId, decisionId, changedNodeIds, currentState);
     }
 
-    @Override
     public String startPartialAnalysis(
             String taskId,
             String decisionId,

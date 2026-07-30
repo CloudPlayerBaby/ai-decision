@@ -5,13 +5,11 @@ import org.springframework.stereotype.Repository;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * SSE Ticket 和连接管理。
@@ -24,17 +22,18 @@ public class TaskRuntimeRepository {
 
     private static final String TICKET_KEY_PREFIX = "sse_ticket:";
     private static final String EVENT_ID_KEY_PREFIX = "sse_event_id:";
+    private static final String EVENT_SEQUENCE_KEY = "sse_event_sequence";
+    private static final String WORKFLOW_TASK_KEY_PREFIX = "workflow_task:";
 
     private final StringRedisTemplate stringRedisTemplate;
     private final Map<String, CopyOnWriteArrayList<SseEmitter>> connections = new ConcurrentHashMap<>();
-    private final AtomicLong eventNumber = new AtomicLong();
 
     public TaskRuntimeRepository(StringRedisTemplate stringRedisTemplate) {
         this.stringRedisTemplate = stringRedisTemplate;
     }
 
     /**
-     * 创建有时效的 Ticket（存储在 Redis 中，到期自动清除）。
+     * 创建有时效的 Ticket（存储在 Redis 中，到期自动清除）
      */
     public String createTicket(String taskId, long validSeconds) {
         String ticket = "sse_tk_" + UUID.randomUUID().toString().replace("-", "");
@@ -44,7 +43,7 @@ public class TaskRuntimeRepository {
     }
 
     /**
-     * 消费 Ticket（一次性使用，消费后立即删除）。
+     * 消费 Ticket（一次性使用，消费后立即删除）
      */
     public boolean consumeTicket(String taskId, String ticket) {
         String key = TICKET_KEY_PREFIX + ticket;
@@ -72,7 +71,7 @@ public class TaskRuntimeRepository {
     }
 
     /**
-     * 返回副本，避免发送过程中连接列表变化。
+     * 返回副本，避免发送过程中连接列表变化
      */
     public List<SseEmitter> getConnections(String taskId) {
         List<SseEmitter> emitters = connections.get(taskId);
@@ -86,12 +85,36 @@ public class TaskRuntimeRepository {
     // ==================== Event ID ====================
 
     public String nextEventId(String taskId) {
-        String eventId = "evt_" + eventNumber.incrementAndGet();
+        Long eventNumber = stringRedisTemplate
+                .opsForValue()
+                .increment(EVENT_SEQUENCE_KEY);
+        String eventId = "evt_" + eventNumber;
         stringRedisTemplate.opsForValue().set(EVENT_ID_KEY_PREFIX + taskId, eventId);
         return eventId;
     }
 
     public String getLastEventId(String taskId) {
         return stringRedisTemplate.opsForValue().get(EVENT_ID_KEY_PREFIX + taskId);
+    }
+
+    /**
+     * 保存数据库任务 ID 与 Workflow 自己生成的 taskId 的对应关系
+     */
+    public void saveWorkflowTaskId(
+            String databaseTaskId,
+            String workflowTaskId) {
+        stringRedisTemplate.opsForValue().set(
+                WORKFLOW_TASK_KEY_PREFIX + databaseTaskId,
+                workflowTaskId
+        );
+    }
+
+    /**
+     * 重试时根据数据库任务 ID 找回 Workflow checkpoint 的 taskId
+     */
+    public String getWorkflowTaskId(String databaseTaskId) {
+        return stringRedisTemplate.opsForValue().get(
+                WORKFLOW_TASK_KEY_PREFIX + databaseTaskId
+        );
     }
 }

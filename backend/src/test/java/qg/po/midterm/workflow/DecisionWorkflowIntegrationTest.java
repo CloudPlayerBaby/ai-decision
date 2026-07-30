@@ -3,7 +3,7 @@ package qg.po.midterm.workflow;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.event.EventListener;

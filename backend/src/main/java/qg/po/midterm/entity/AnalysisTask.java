@@ -17,25 +17,37 @@ public class AnalysisTask {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 所属决策问题ID */
+    /**
+     * 所属决策问题ID
+     */
     private Long decisionId;
 
-    /** 推演类型：FULL（整轮）/ PARTIAL（局部重推） */
+    /**
+     * 推演类型：FULL（整轮）/ PARTIAL（局部重推）
+     */
     private String runType;
 
-    /** 任务状态：PENDING / RUNNING / SUCCEEDED / FAILED */
+    /**
+     * 任务状态：PENDING / RUNNING / SUCCEEDED / FAILED
+     */
     private String status;
 
-    /** 当前步骤序号 */
+    /**
+     * 当前步骤序号
+     */
     private Integer currentStep;
 
-    /** 总步骤数 */
+    /**
+     * 总步骤数
+     */
     private Integer totalSteps;
 
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
 
-    /** 失败信息 */
+    /**
+     * 失败信息
+     */
     private String errorMessage;
 
     private LocalDateTime createdAt;

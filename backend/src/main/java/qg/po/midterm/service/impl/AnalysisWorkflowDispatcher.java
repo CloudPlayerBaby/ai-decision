@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.entity.Decision;
+import qg.po.midterm.repository.TaskRuntimeRepository;
 import qg.po.midterm.workflow.WorkflowExecutor;
 import qg.po.midterm.workflow.state.DecisionState;
 
@@ -19,27 +20,31 @@ import java.util.List;
 public class AnalysisWorkflowDispatcher {
 
     private final WorkflowExecutor workflowExecutor;
+    private final TaskRuntimeRepository runtimeRepository;
 
     @Async
     public void startFullAnalysis(String taskId, String decisionId, Decision decision) {
         try {
-            workflowExecutor.startAnalysis(
-                    taskId,
+            // 只调用 Workflow 组公开的整轮推演接口
+            String workflowTaskId = workflowExecutor.startAnalysis(
                     decisionId,
                     decision.getBackground(),
                     decision.getGoal(),
                     decision.getConstraints()
             );
+            runtimeRepository.saveWorkflowTaskId(
+                    taskId,
+                    workflowTaskId
+            );
         } catch (Exception exception) {
-            // TODO Workflow 当前内部会吞掉异常；后续统一由任务事件监听器持久化 FAILED 状态。
             log.error("Failed to dispatch full analysis, taskId={}", taskId, exception);
         }
     }
 
     /**
-     * 异步发起局部推演。
+     * 异步发起局部推演
      *
-     * <p>currentState 应由局部推演业务根据已保存的 AnalysisResult/画布构建。</p>
+     * <p>currentState 应由局部推演业务根据已保存的 AnalysisResult/画布构建</p>
      */
     @Async
     public void startPartialAnalysis(
@@ -48,14 +53,17 @@ public class AnalysisWorkflowDispatcher {
             List<String> changedNodeIds,
             DecisionState currentState) {
         try {
-            workflowExecutor.startPartialAnalysis(
-                    taskId,
+            // 局部起点由 WorkflowExecutor 根据 changedNodeIds 判断。
+            String workflowTaskId = workflowExecutor.startPartialAnalysis(
                     decisionId,
                     changedNodeIds,
                     currentState
             );
+            runtimeRepository.saveWorkflowTaskId(
+                    taskId,
+                    workflowTaskId
+            );
         } catch (Exception exception) {
-            // TODO 后续由任务事件监听器回写局部推演失败信息。
             log.error(
                     "Failed to dispatch partial analysis, taskId={}, decisionId={}",
                     taskId,
@@ -68,10 +76,14 @@ public class AnalysisWorkflowDispatcher {
     @Async
     public void retryStep(String taskId, String stepId) {
         try {
-            // Workflow 会根据 taskId 的 checkpoint 找到失败步骤并恢复执行。
-            workflowExecutor.retryStep(taskId);
+            String workflowTaskId =
+                    runtimeRepository.getWorkflowTaskId(taskId);
+            workflowExecutor.retryStep(
+                    workflowTaskId == null
+                            ? taskId
+                            : workflowTaskId
+            );
         } catch (Exception exception) {
-            // TODO 后续由任务事件监听器回写步骤失败信息。
             log.error("Failed to dispatch retry, taskId={}, stepId={}", taskId, stepId, exception);
         }
     }
