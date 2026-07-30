@@ -104,6 +104,9 @@ public class NodeExecutionEventListener {
             step.setStatus("SUCCEEDED");
             step.setFinishedAt(now);
             step.setUpdatedAt(now);
+            if (event.getOutputData() != null) {
+                step.setOutputData(event.getOutputData());
+            }
             stepMapper.updateById(step);
         } else if ("FAILED".equals(event.getStatus())) {
             failTask(task, step, event.getErrorMessage());

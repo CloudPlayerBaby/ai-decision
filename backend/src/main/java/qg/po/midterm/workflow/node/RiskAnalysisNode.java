@@ -62,7 +62,11 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
                 
         log.info("<<< 【AI Response】\n{}", result);
 
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+        // 将大模型结果转换为 JSON 传入状态流，供前端渲染
+        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+            Map.of("recommendation", result.recommendation(), "nextActions", result.nextActions())
+        );
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             return Map.of(
                 "recommendation", result.recommendation(),
                 "nextActions", result.nextActions()

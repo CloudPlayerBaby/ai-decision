@@ -59,8 +59,10 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
                 
         log.info("<<< 【AI Response】\n{}", result);
 
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
-            return Map.of("factors", result.factors());
+        // 将大模型结果转换为 JSON 传入状态流，供前端渲染
+        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("factors", result.factors()));
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
+        return Map.of("factors", result.factors());
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;

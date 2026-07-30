@@ -55,8 +55,11 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
                 
         log.info("<<< 【AI Response】\n{}", understanding);
 
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
-            return Map.of("understanding", understanding);
+        // 使用 ObjectMapper 将结果序列化为 JSON 字符串
+        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("understanding", understanding));
+
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
+        return Map.of("understanding", understanding);
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;

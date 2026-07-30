@@ -48,7 +48,9 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
                 
         log.info("<<< 【AI Response】\n{}", reportSummary);
 
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+        // 将大模型结果转换为 JSON 传入状态流，供前端渲染
+        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("reportSummary", reportSummary));
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             // 实际生成报告可能需要保存到特定实体中，这里先作为结果之一存入 State
             return Map.of("reportSummary", reportSummary);
         } catch (Exception e) {

@@ -12,9 +12,10 @@ public class NodeExecutionEvent extends ApplicationEvent {
     private final String taskId;
     private final String status;
     private final String errorMessage;
+    private final String outputData; // AI 节点生成的 JSON 数据
 
     /**
-     * 节点正常开始或成功时使用。
+     * 节点正常开始时使用。
      */
     public NodeExecutionEvent(
             Object source,
@@ -22,11 +23,11 @@ public class NodeExecutionEvent extends ApplicationEvent {
             String decisionId,
             String taskId,
             String status) {
-        this(source, nodeName, decisionId, taskId, status, null);
+        this(source, nodeName, decisionId, taskId, status, null, null);
     }
 
     /**
-     * 节点失败时使用，可以额外传入错误信息。
+     * 节点失败时使用，传入错误信息。
      */
     public NodeExecutionEvent(
             Object source,
@@ -35,12 +36,27 @@ public class NodeExecutionEvent extends ApplicationEvent {
             String taskId,
             String status,
             String errorMessage) {
+        this(source, nodeName, decisionId, taskId, status, errorMessage, null);
+    }
+
+    /**
+     * 节点成功时使用，传入执行结果 (outputData)。
+     */
+    public NodeExecutionEvent(
+            Object source,
+            String nodeName,
+            String decisionId,
+            String taskId,
+            String status,
+            String errorMessage,
+            String outputData) {
         super(source);
         this.nodeName = nodeName;
         this.decisionId = decisionId;
         this.taskId = taskId;
         this.status = status;
         this.errorMessage = errorMessage;
+        this.outputData = outputData;
     }
 
     public String getNodeName() {
@@ -61,5 +77,9 @@ public class NodeExecutionEvent extends ApplicationEvent {
 
     public String getErrorMessage() {
         return errorMessage;
+    }
+
+    public String getOutputData() {
+        return outputData;
     }
 }
