@@ -22,8 +22,7 @@ spring:
   data:
     redis:
       host: ${REDIS_HOST:localhost}
-      # 与 docker-compose.yml 暴露的宿主机端口保持一致。
-      port: ${REDIS_PORT:6380}
+      port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:1234}
       database: 0
       timeout: 3000ms
