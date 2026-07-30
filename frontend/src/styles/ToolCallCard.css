@@ -1,0 +1,30 @@
+.tool-call-card {
+  margin-left: 24px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+
+.tool-call-card .header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tool-call-card .header .tool-name {
+  font-weight: 500;
+}
+
+.tool-call-card .header .tag {
+  margin-left: auto;
+}
+
+.tool-call-card .body {
+  color: #666;
+  font-size: 12px;
+  padding-left: 20px;
+}

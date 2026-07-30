@@ -1,0 +1,15 @@
+.chat-message {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  background: #e6f4ff;
+  color: #1d1d1d;
+}
