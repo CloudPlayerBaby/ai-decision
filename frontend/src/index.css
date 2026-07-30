@@ -393,6 +393,7 @@ body.is-resizing .resize-handle::before {
 .canvas-panel__toolbar {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   padding: 8px 12px;
   font-size: 12px;
@@ -400,6 +401,15 @@ body.is-resizing .resize-handle::before {
   background: var(--canvas-toolbar-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.canvas-panel__hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.canvas-panel__toolbar .ant-btn {
+  font-size: 12px;
 }
 
 .canvas-panel__flow {
@@ -544,6 +554,59 @@ body.is-resizing .resize-handle::before {
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
+}
+
+/* —— 画布节点：评分展示（仅前端演示） —— */
+.canvas-node__scores {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.canvas-node__score-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 24px;
+}
+
+.canvas-node__score-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.canvas-node__score-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-h);
+  line-height: 1;
+}
+
+/* 方案评分低值警示（仅 UI 效果，非 API 契约字段） */
+.canvas-node__score-value[data-level='low'] {
+  color: #dc2626;
+}
+
+.canvas-node__score-value[data-level='mid'] {
+  color: #d97706;
+}
+
+.canvas-node__score-value[data-level='high'] {
+  color: #059669;
+}
+
+/* 因素权重标签 */
+.canvas-node__factor-weight {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--node-factor-border);
+  color: var(--text-h);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 @media (max-width: 1100px) {
