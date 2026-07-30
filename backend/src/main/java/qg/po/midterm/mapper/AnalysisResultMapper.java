@@ -2,11 +2,11 @@ package qg.po.midterm.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
-import qg.po.midterm.entity.AnalysisTask;
+import qg.po.midterm.entity.AnalysisResult;
 
 /**
- * 分析任务 Mapper
+ * AI 分析结果草案 Mapper
  */
 @Mapper
-public interface AnalysisTaskMapper extends BaseMapper<AnalysisTask> {
+public interface AnalysisResultMapper extends BaseMapper<AnalysisResult> {
 }
