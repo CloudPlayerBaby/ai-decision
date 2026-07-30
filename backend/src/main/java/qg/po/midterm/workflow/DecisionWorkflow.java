@@ -45,7 +45,18 @@ public class DecisionWorkflow {
         graph.addNode("GENERATE_REPORT", node_async(reportGenerationNode));
         graph.addNode("REPAIR", node_async(repairNode));
 
-        graph.addEdge(START, "UNDERSTAND");
+        // 支持局部重推：根据 state 里的 startNode 决定入口
+        graph.addConditionalEdges(START,
+            state -> {
+                String startNode = state.value("startNode").map(Object::toString).orElse("UNDERSTAND");
+                return java.util.concurrent.CompletableFuture.completedFuture(startNode);
+            },
+            Map.of(
+                "UNDERSTAND", "UNDERSTAND",
+                "GENERATE_OPTIONS", "GENERATE_OPTIONS",
+                "COMPARE_OPTIONS", "COMPARE_OPTIONS"
+            )
+        );
         graph.addEdge("UNDERSTAND", "EXTRACT_FACTORS");
         graph.addEdge("EXTRACT_FACTORS", "GENERATE_OPTIONS");
         graph.addEdge("GENERATE_OPTIONS", "COMPARE_OPTIONS");
