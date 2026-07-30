@@ -1,0 +1,15 @@
+.chat-bubble--user {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.chat-bubble--user .chat-bubble__content {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  background: #e6f4ff;
+  color: var(--text-h);
+}

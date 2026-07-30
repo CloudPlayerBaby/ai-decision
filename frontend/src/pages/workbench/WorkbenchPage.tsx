@@ -19,7 +19,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
-import { ConversationPanel } from '@/components/workbench/ConversationPanel'
+import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
+import { mockSteps, mockToolCalls, mockOptions, mockResult } from '@/mocks/analysis.mock'
 import { ConfirmResultModal } from '@/components/workbench/ConfirmResultModal'
 import { DecisionStatusTag } from '@/components/common/DecisionStatusTag'
 import { ResizeHandle } from '@/components/layout/ResizeHandle'
@@ -291,13 +292,14 @@ export function WorkbenchPage() {
               className="workbench__right"
               style={{ width: rightWidth, flex: `0 0 ${rightWidth}px` }}
             >
-              <ConversationPanel
-                decisionId={decision.id}
-                taskId={taskId}
-                pendingResultId={pendingResultId}
-                hasPendingResult={decision.hasPendingResult}
-                decisionStatus={decision.status}
-                onRequestRefresh={refreshDecision}
+              <AnalysisChatPanel
+                userMessage={decision.title}
+                steps={mockSteps}
+                toolCalls={mockToolCalls}
+                analysisCompleted={false}
+                options={mockOptions}
+                recommendation={mockResult.recommendation}
+                analysisResultId={mockResult.id}
               />
             </div>
           </>
