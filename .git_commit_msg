@@ -1,7 +1,4 @@
-﻿feat(ai): 修复引擎底层编译异常、接入强校验模式并增加节点生命周期事件
+﻿feat(ai): 对齐架构规范并开放 Checkpoint 注入槽位
 
-1. 框架依赖：修复 pom.xml 中 lombok 编译失效问题，彻底解决各实体类 getters/setters 在编译期的报错。
-2. 模型配置：调整 application.yaml 启用 DeepSeek beta 端点与 deepseek-v4-flash 模型，正式激活严格的 JSON Schema 强校验输出机制。
-3. 工作流重构：在 DecisionWorkflow 中全面适配 LangGraph4j 1.8.20 异步接口规范，使用 node_async 包裹所有同步执行节点。
-4. 事件机制(重点)：全 Node 注入 Spring ApplicationEventPublisher，精准抛出带有状态(STARTED/FINISHED)和 decisionId 的 NodeExecutionEvent 事件。为通信组无侵入对接 SSE 实时推流彻底扫清障碍。
-5. 协作防腐：修正 WorkflowExecutorImpl 相关遗漏的方法签名；同时更新 .gitignore，确保本地私有的开发守则（AI_RULES.md）不会污染远端代码库。
+1. 状态流转对齐：将 6 个 Node 广播的事件状态彻底修改为 PRD 标准的 RUNNING 和 SUCCEEDED，消除了 B 组在事件处理时状态映射的逻辑负担。
+2. 韧性架构（重要）：在 DecisionWorkflow 中为 LangGraph4j 引入 BaseCheckpointSaver 依赖注入。此举向外开放了断点持久化能力（可由 D 组或 B 组实现），使得图引擎未来可具备 Crash 后的断点续传与代偿能力。

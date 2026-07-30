@@ -28,8 +28,9 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "STARTED"));
-        log.info("Node [OptionGeneration] executing for decision: {}", state.getDecisionId());
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        try {
+            log.info("Node [OptionGeneration] executing for decision: {}", state.getDecisionId());
 
         String understanding = state.getUnderstanding();
         String constraints = state.getConstraints();
@@ -59,7 +60,11 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
                 .call()
                 .entity(OptionGenerationResult.class);
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "FINISHED"));
-        return Map.of("options", result.options());
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            return Map.of("options", result.options());
+        } catch (Exception e) {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            throw e;
+        }
     }
 }

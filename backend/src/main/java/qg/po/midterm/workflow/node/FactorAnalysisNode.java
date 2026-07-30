@@ -26,8 +26,9 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "STARTED"));
-        log.info("Node [FactorAnalysis] executing for decision: {}", state.getDecisionId());
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        try {
+            log.info("Node [FactorAnalysis] executing for decision: {}", state.getDecisionId());
 
         String understanding = state.getUnderstanding();
         String background = state.getBackground();
@@ -48,7 +49,11 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
                 .call()
                 .entity(FactorAnalysisResult.class);
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "FINISHED"));
-        return Map.of("factors", result.factors());
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            return Map.of("factors", result.factors());
+        } catch (Exception e) {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            throw e;
+        }
     }
 }

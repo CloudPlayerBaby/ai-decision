@@ -28,8 +28,9 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "STARTED"));
-        log.info("Node [RiskAnalysis] executing for decision: {}", state.getDecisionId());
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        try {
+            log.info("Node [RiskAnalysis] executing for decision: {}", state.getDecisionId());
 
         String understanding = state.getUnderstanding();
         List<Option> options = state.getOptions();
@@ -55,10 +56,14 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
                 .call()
                 .entity(RiskAnalysisResult.class);
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "FINISHED"));
-        return Map.of(
-            "recommendation", result.recommendation(),
-            "nextActions", result.nextActions()
-        );
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            return Map.of(
+                "recommendation", result.recommendation(),
+                "nextActions", result.nextActions()
+            );
+        } catch (Exception e) {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            throw e;
+        }
     }
 }

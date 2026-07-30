@@ -31,4 +31,5 @@ public class NodeExecutionEvent extends ApplicationEvent {
     public String getStatus() {
         return status;
     }
+    public String getErrorMessage() { return errorMessage; }
 }
