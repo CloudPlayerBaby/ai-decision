@@ -6,6 +6,9 @@ import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.io.Resource;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
@@ -21,6 +24,9 @@ public class RepairNode implements NodeAction<DecisionState> {
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
 
+    @Value("classpath:prompts/repair.st")
+    private Resource promptResource;
+
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "RUNNING"));
@@ -34,18 +40,19 @@ public class RepairNode implements NodeAction<DecisionState> {
             throw new RuntimeException("一次修复失败，任务终止。错误原因: " + errorMsg);
         }
 
-        String prompt = String.format(
-            "之前生成的 JSON 结果未能通过严格的 Schema 校验。请根据以下错误信息进行修复，并返回正确的 JSON。\n" +
-            "错误信息：%s\n\n" +
-            "要求：\n" +
-            "请直接输出修复后的标准 JSON 格式，不要包含任何额外的解释或 Markdown 格式。",
-            errorMsg != null ? errorMsg : "未知错误"
+        Map<String, Object> params = Map.of(
+            "errorMsg", errorMsg != null ? errorMsg : "未知错误"
         );
+        String prompt = new PromptTemplate(promptResource).create(params).getContents();
+        
+        log.info(">>> 【AI Prompt】\n{}", prompt);
 
         AnalysisResultDto repairedResult = chatClient.prompt()
                 .user(prompt)
                 .call()
                 .entity(AnalysisResultDto.class);
+                
+        log.info("<<< 【AI Response】\n{}", repairedResult);
 
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
             return Map.of(

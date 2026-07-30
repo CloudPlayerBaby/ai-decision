@@ -7,6 +7,7 @@ public class NodeExecutionEvent extends ApplicationEvent {
     private final String decisionId;
     private final String taskId;
     private final String status; // "STARTED", "FINISHED", "FAILED"
+    private String errorMessage;
 
     public NodeExecutionEvent(Object source, String nodeName, String decisionId, String taskId, String status) {
         super(source);
@@ -14,6 +15,15 @@ public class NodeExecutionEvent extends ApplicationEvent {
         this.decisionId = decisionId;
         this.taskId = taskId;
         this.status = status;
+    }
+
+    public NodeExecutionEvent(Object source, String nodeName, String decisionId, String taskId, String status, String errorMessage) {
+        super(source);
+        this.nodeName = nodeName;
+        this.decisionId = decisionId;
+        this.taskId = taskId;
+        this.status = status;
+        this.errorMessage = errorMessage;
     }
 
     public String getNodeName() {
