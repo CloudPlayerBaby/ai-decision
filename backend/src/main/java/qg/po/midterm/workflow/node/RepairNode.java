@@ -24,7 +24,8 @@ public class RepairNode implements NodeAction<DecisionState> {
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "RUNNING"));
-        log.info("Node [Repair] executing for decision: {}", state.getDecisionId());
+        try {
+            log.info("Node [Repair] executing for decision: {}", state.getDecisionId());
 
         String errorMsg = state.getErrorMsg();
         int retryCount = state.getRetryCount();
@@ -46,15 +47,19 @@ public class RepairNode implements NodeAction<DecisionState> {
                 .call()
                 .entity(AnalysisResultDto.class);
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
-        return Map.of(
-            "understanding", repairedResult.getUnderstanding(),
-            "factors", repairedResult.getFactors(),
-            "options", repairedResult.getOptions(),
-            "recommendation", repairedResult.getRecommendation(),
-            "nextActions", repairedResult.getNextActions(),
-            "retryCount", retryCount + 1,
-            "errorMsg", "" // Clear error after successful repair
-        );
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            return Map.of(
+                "understanding", repairedResult.getUnderstanding(),
+                "factors", repairedResult.getFactors(),
+                "options", repairedResult.getOptions(),
+                "recommendation", repairedResult.getRecommendation(),
+                "nextActions", repairedResult.getNextActions(),
+                "retryCount", retryCount + 1,
+                "errorMsg", "" // Clear error after successful repair
+            );
+        } catch (Exception e) {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            throw e;
+        }
     }
 }

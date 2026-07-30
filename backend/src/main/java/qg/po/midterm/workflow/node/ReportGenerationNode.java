@@ -23,7 +23,8 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
-        log.info("Node [ReportGeneration] executing for decision: {}", state.getDecisionId());
+        try {
+            log.info("Node [ReportGeneration] executing for decision: {}", state.getDecisionId());
 
         String understanding = state.getUnderstanding();
         
@@ -38,8 +39,12 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
                 .call()
                 .content();
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
-        // 实际生成报告可能需要保存到特定实体中，这里先作为结果之一存入 State
-        return Map.of("reportSummary", reportSummary);
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            // 实际生成报告可能需要保存到特定实体中，这里先作为结果之一存入 State
+            return Map.of("reportSummary", reportSummary);
+        } catch (Exception e) {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            throw e;
+        }
     }
 }

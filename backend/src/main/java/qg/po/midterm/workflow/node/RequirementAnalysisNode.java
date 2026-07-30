@@ -23,7 +23,8 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
-        log.info("Node [RequirementAnalysis] executing for decision: {}", state.getDecisionId());
+        try {
+            log.info("Node [RequirementAnalysis] executing for decision: {}", state.getDecisionId());
 
         String background = state.getBackground() != null ? state.getBackground() : "无";
         String goal = state.getGoal() != null ? state.getGoal() : "未明确";
@@ -43,7 +44,11 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
                 .call()
                 .content();
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
-        return Map.of("understanding", understanding);
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            return Map.of("understanding", understanding);
+        } catch (Exception e) {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            throw e;
+        }
     }
 }
