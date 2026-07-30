@@ -1,8 +1,10 @@
 package qg.po.midterm.repository;
 
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -12,45 +14,45 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 保存 SSE Ticket 和当前在线连接。
+ * SSE Ticket 和连接管理。
  *
- * <p>这些都是短期运行数据，不属于业务结果，所以暂时放在内存中。
- * 多实例部署时应改用 Redis。</p>
+ * <p>Ticket 使用 Redis 存储，支持多实例部署时跨节点共享。
+ * SseEmitter 连接绑定在单机内存中（不可序列化），多实例时需在网关层做会话粘滞。</p>
  */
 @Repository
 public class TaskRuntimeRepository {
 
-    private final Map<String, TicketData> tickets = new ConcurrentHashMap<>();
-    private final Map<String, CopyOnWriteArrayList<SseEmitter>> connections =
-            new ConcurrentHashMap<>();
-    private final Map<String, String> lastEventIds = new ConcurrentHashMap<>();
+    private static final String TICKET_KEY_PREFIX = "sse_ticket:";
+    private static final String EVENT_ID_KEY_PREFIX = "sse_event_id:";
+
+    private final StringRedisTemplate stringRedisTemplate;
+    private final Map<String, CopyOnWriteArrayList<SseEmitter>> connections = new ConcurrentHashMap<>();
     private final AtomicLong eventNumber = new AtomicLong();
 
+    public TaskRuntimeRepository(StringRedisTemplate stringRedisTemplate) {
+        this.stringRedisTemplate = stringRedisTemplate;
+    }
+
     /**
-     * 创建 60 秒有效的 Ticket。
+     * 创建有时效的 Ticket（存储在 Redis 中，到期自动清除）。
      */
     public String createTicket(String taskId, long validSeconds) {
         String ticket = "sse_tk_" + UUID.randomUUID().toString().replace("-", "");
-        Instant expiresAt = Instant.now().plusSeconds(validSeconds);
-        tickets.put(ticket, new TicketData(taskId, expiresAt));
+        String key = TICKET_KEY_PREFIX + ticket;
+        stringRedisTemplate.opsForValue().set(key, taskId, Duration.ofSeconds(validSeconds));
         return ticket;
     }
 
     /**
-     * 消费 Ticket。
-     *
-     * remove 保证同一个 Ticket 只能使用一次。
+     * 消费 Ticket（一次性使用，消费后立即删除）。
      */
     public boolean consumeTicket(String taskId, String ticket) {
-        TicketData ticketData = tickets.remove(ticket);
-        if (ticketData == null) {
-            return false;
-        }
-        if (!ticketData.taskId().equals(taskId)) {
-            return false;
-        }
-        return ticketData.expiresAt().isAfter(Instant.now());
+        String key = TICKET_KEY_PREFIX + ticket;
+        String storedTaskId = stringRedisTemplate.opsForValue().getAndDelete(key);
+        return taskId.equals(storedTaskId);
     }
+
+    // ==================== SSE 连接（内存绑定，不可序列化） ====================
 
     public void addConnection(String taskId, SseEmitter emitter) {
         connections
@@ -81,16 +83,15 @@ public class TaskRuntimeRepository {
         return connections;
     }
 
+    // ==================== Event ID ====================
+
     public String nextEventId(String taskId) {
         String eventId = "evt_" + eventNumber.incrementAndGet();
-        lastEventIds.put(taskId, eventId);
+        stringRedisTemplate.opsForValue().set(EVENT_ID_KEY_PREFIX + taskId, eventId);
         return eventId;
     }
 
     public String getLastEventId(String taskId) {
-        return lastEventIds.get(taskId);
-    }
-
-    private record TicketData(String taskId, Instant expiresAt) {
+        return stringRedisTemplate.opsForValue().get(EVENT_ID_KEY_PREFIX + taskId);
     }
 }
