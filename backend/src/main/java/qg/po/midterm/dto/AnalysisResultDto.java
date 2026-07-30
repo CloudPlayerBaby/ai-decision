@@ -7,7 +7,6 @@ import lombok.AllArgsConstructor;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 import java.util.List;
-import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -15,19 +14,19 @@ import java.util.Map;
 @Schema(description = "AI 推演返回的规范化JSON结构")
 public class AnalysisResultDto {
 
-    @Schema(description = "对问题和目标的理�?, required = true)
+    @Schema(description = "对问题和目标的理解", required = true)
     private String understanding;
 
     @Schema(description = "关键因素列表", required = true)
     private List<Factor> factors;
 
-    @Schema(description = "候选方案列�?(2-3�?", required = true)
+    @Schema(description = "候选方案列表 (2-3个)", required = true)
     private List<Option> options;
 
     @Schema(description = "推荐方案及其理由", required = true)
     private Recommendation recommendation;
 
-    @Schema(description = "下一步行动建�?, required = true)
+    @Schema(description = "下一步行动建议", required = true)
     private List<String> nextActions;
 
     @Data

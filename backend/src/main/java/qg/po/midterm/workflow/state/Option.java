@@ -1,28 +1,25 @@
 package qg.po.midterm.workflow.state;
 
 import java.util.Map;
-
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
 @Data
 @NoArgsConstructor
-@Schema(description = "ºòÑ¡¾ö²ß·½°¸")
+@AllArgsConstructor
+@Schema(description = "å€™é€‰å†³ç­–æ–¹æ¡ˆ")
 public class Option {
-    @Schema(description = "·½°¸Î¨Ò»±êÊ¶")
+    @Schema(description = "æ–¹æ¡ˆå”¯ä¸€æ ‡è¯†")
     private String id;
-    @Schema(description = "·½°¸Ãû³Æ")
+    
+    @Schema(description = "æ–¹æ¡ˆåç§°")
     private String name;
-    @Schema(description = "·½°¸ÏêÏ¸ÃèÊö")
+    
+    @Schema(description = "æ–¹æ¡ˆè¯¦ç»†æè¿°")
     private String description;
-    @Schema(description = "ÎåÎ¬´ò·Ö½á¹û")
-    private java.util.Map<String, Integer> scores;
-
-    public Option(String id, String name, String description, Map<String, Integer> scores) {
-        this.id = id;
-        this.name = name;
-        this.description = description;
-        this.scores = scores;
-    }
+    
+    @Schema(description = "äº”ç»´æ‰“åˆ†ç»“æœ")
+    private Map<String, Integer> scores;
 }

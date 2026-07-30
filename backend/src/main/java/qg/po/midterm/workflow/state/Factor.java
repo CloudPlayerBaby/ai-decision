@@ -3,21 +3,19 @@ package qg.po.midterm.workflow.state;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
 @Data
 @NoArgsConstructor
-@Schema(description = "Ó°Ïì¾ö²ßµÄ¹Ø¼üÒòËØ")
+@AllArgsConstructor
+@Schema(description = "å½±å“å†³ç­–çš„å…³é”®å› ç´ ")
 public class Factor {
-    @Schema(description = "ÒòËØÃû³Æ")
+    @Schema(description = "å› ç´ åç§°")
     private String name;
-    @Schema(description = "ÒòËØÃèÊö")
+    
+    @Schema(description = "å› ç´ æè¿°")
     private String description;
-    @Schema(description = "ÒòËØÈ¨ÖØ")
+    
+    @Schema(description = "å› ç´ æƒé‡")
     private double weight;
-
-    public Factor(String name, String description, double weight) {
-        this.name = name;
-        this.description = description;
-        this.weight = weight;
-    }
 }
