@@ -16,8 +16,19 @@ public class NodeExecutionEvent extends ApplicationEvent {
         this.status = status;
     }
 
-    public String getNodeName() { return nodeName; }
-    public String getDecisionId() { return decisionId; }
-    public String getTaskId() { return taskId; }
-    public String getStatus() { return status; }
+    public String getNodeName() {
+        return nodeName;
+    }
+
+    public String getDecisionId() {
+        return decisionId;
+    }
+
+    public String getTaskId() {
+        return taskId;
+    }
+
+    public String getStatus() {
+        return status;
+    }
 }

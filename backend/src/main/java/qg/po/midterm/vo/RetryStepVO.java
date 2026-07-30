@@ -4,17 +4,13 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.OffsetDateTime;
-
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class CreateTaskVO {
+public class RetryStepVO {
 
     private String taskId;
-    private String decisionId;
-    private String taskType;
+    private String stepId;
     private String status;
-    private OffsetDateTime startedAt;
-    private String sseUrl;
+    private String message;
 }
