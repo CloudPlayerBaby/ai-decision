@@ -1,8 +1,11 @@
 import { Button, Card, Form, Input, Space, Typography, message, Tooltip } from 'antd'
 import { BulbFilled, BulbOutlined } from '@ant-design/icons'
-import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { useAuthStore } from '../../stores/authStore'
-import { useLayoutStore } from '../../stores/layoutStore'
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
+import { useState } from 'react'
+import { useAuthStore } from '@/stores/authStore'
+import { useLayoutStore } from '@/stores/layoutStore'
+import { login } from '@/services/auth.service'
+import { ApiError, BusinessCode } from '@/types/api'
 
 const { Title, Paragraph } = Typography
 
@@ -11,30 +14,40 @@ interface LoginFormValues {
   password: string
 }
 
-/**
- * 登录页占位：字段对齐 v2.0 POST /auth/login（account / password）。
- * 本阶段不调用 services，仅写入本地会话以便进入受保护路由。
- */
+/** 登录页：POST /auth/login（account / password） */
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const setSession = useAuthStore((state) => state.setSession)
   const themeMode = useLayoutStore((state) => state.themeMode)
   const toggleThemeMode = useLayoutStore((state) => state.toggleThemeMode)
   const isEyeCare = themeMode === 'eyeCare'
-  const from =
-    (location.state as { from?: string } | null)?.from ?? '/decisions'
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleFinish = (values: LoginFormValues) => {
-    setSession('placeholder-token', {
-      id: 'u_placeholder',
-      username: values.account,
-      email: values.account.includes('@')
-        ? values.account
-        : `${values.account}@example.com`,
-    })
-    message.success('已进入本地占位登录态（待接入真实登录接口）')
-    navigate(from, { replace: true })
+  const fromState = (location.state as { from?: string } | null)?.from
+  const fromQuery = searchParams.get('from')
+  const from = fromState || fromQuery || '/decisions'
+
+  const handleFinish = async (values: LoginFormValues) => {
+    if (submitting) return
+    setSubmitting(true)
+    try {
+      const data = await login(values)
+      setSession(data.accessToken, data.user)
+      message.success('登录成功')
+      navigate(from, { replace: true })
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.code === BusinessCode.Unauthorized
+      ) {
+        message.error(error.message || '账号或密码错误')
+      }
+      // 其他错误已由 http 拦截器提示
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -56,7 +69,7 @@ export function LoginPage() {
               登录
             </Title>
             <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              AI 情景推演决策系统 · 占位页
+              AI 情景推演决策系统
             </Paragraph>
           </div>
           <Form<LoginFormValues>
@@ -82,7 +95,13 @@ export function LoginPage() {
               />
             </Form.Item>
             <Form.Item style={{ marginBottom: 8 }}>
-              <Button type="primary" htmlType="submit" block>
+              <Button
+                type="primary"
+                htmlType="submit"
+                block
+                loading={submitting}
+                disabled={submitting}
+              >
                 登录
               </Button>
             </Form.Item>

@@ -1,36 +1,54 @@
 import { Button, Card, Form, Input, Space, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { PagePlaceholder } from '../../components/placeholders/PagePlaceholder'
+import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { PagePlaceholder } from '@/components/placeholders/PagePlaceholder'
+import { createDecision } from '@/services/decision.service'
+import { queryKeys } from '@/services/queryKeys'
+import { isMockEnabled } from '@/services/config'
+import type { CreateDecisionRequest } from '@/types/decision'
 
 const { TextArea } = Input
 
-interface CreateDecisionFormValues {
-  title: string
-  background?: string
-  goal: string
-  /** v2.0：constraints 为 string，不是 string[] */
-  constraints?: string
-}
-
-/**
- * 创建决策占位：字段对齐 POST /decisions（title / background / goal / constraints）。
- */
+/** 创建决策：constraints 为 string；成功后进入工作台 */
 export function DecisionCreatePage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleFinish = (_values: CreateDecisionFormValues) => {
-    message.info('创建表单占位提交成功（待接入 POST /decisions）')
-    navigate('/decisions/demo-1')
+  const mutation = useMutation({
+    mutationFn: createDecision,
+    onSuccess: async (data) => {
+      message.success('决策已创建')
+      await queryClient.invalidateQueries({ queryKey: queryKeys.decisions.all })
+      navigate(`/workbench/${data.id}`, { replace: true })
+    },
+  })
+
+  const handleFinish = async (values: CreateDecisionRequest) => {
+    if (submitting || mutation.isPending) return
+    setSubmitting(true)
+    try {
+      await mutation.mutateAsync(values)
+    } catch {
+      // http 已提示
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
     <PagePlaceholder
       title="新建推演"
       description="填写决策背景、目标与约束，创建后进入决策工作台。"
-      hint="constraints 为自由文本 string · 待接入 POST /decisions"
+      hint={
+        isMockEnabled()
+          ? 'constraints 为自由文本 string · 当前 Mock 模式'
+          : 'constraints 为自由文本 string · POST /decisions'
+      }
     >
       <Card>
-        <Form<CreateDecisionFormValues>
+        <Form<CreateDecisionRequest>
           layout="vertical"
           onFinish={handleFinish}
           requiredMark={false}
@@ -72,8 +90,13 @@ export function DecisionCreatePage() {
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit">
-                创建（占位）
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={submitting || mutation.isPending}
+                disabled={submitting || mutation.isPending}
+              >
+                创建并进入工作台
               </Button>
               <Button onClick={() => navigate('/decisions')}>取消</Button>
             </Space>
