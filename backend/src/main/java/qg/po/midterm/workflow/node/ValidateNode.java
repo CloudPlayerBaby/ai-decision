@@ -23,6 +23,9 @@ public class ValidateNode implements NodeAction<DecisionState> {
     public Map<String, Object> apply(DecisionState state) throws Exception {
         log.info("Node [ValidateNode] executing for decision: {}", state.getDecisionId());
 
+        // -----------------------------------------------------------------------------------
+        // 第一阶段：执行严格的字段审查（对应 PRD 12.1）
+        // -----------------------------------------------------------------------------------
         List<String> missingFields = new ArrayList<>();
 
         if (state.getUnderstanding() == null || state.getUnderstanding().trim().isEmpty()) {
@@ -66,21 +69,27 @@ public class ValidateNode implements NodeAction<DecisionState> {
 
         int retryCount = state.getRetryCount();
 
+        // -----------------------------------------------------------------------------------
+        // 第二阶段：根据审查结果决定命运 (放行 / 驳回修复 / 彻底封杀)
+        // -----------------------------------------------------------------------------------
         if (!missingFields.isEmpty()) {
             String errorDetails = "校验失败，缺少以下必填项:\n" + String.join("\n- ", missingFields);
             log.warn(">>> [ValidateNode] 发现不合法结构: \n{}", errorDetails);
             
             if (retryCount >= 1) {
-                // 已经尝试过修复，但仍然失败。抛出异常中止任务，这会由外部捕获转换为 42201 错误。
+                // 彻底封杀：已经给过一次机会（被 RepairNode 抢救过），依然不合格。
+                // 抛出异常会直接中止整个工作流任务，抛给上层统一异常处理，标记状态为 FAILED (42201)。
                 log.error(">>> [ValidateNode] 一次修复失败，任务彻底终止！");
                 throw new RuntimeException("AI 分析结果结构校验彻底失败: " + errorDetails);
             } else {
-                // 没尝试过修复，记录 errorMsg 引导路由去向 RepairNode
+                // 驳回修复：第一次犯错，把错题本（errorMsg）存入状态。
+                // 图引擎（DecisionWorkflow）的条件路由发现 errorMsg 不为空，会自动将其踢到 RepairNode。
                 return Map.of("errorMsg", errorDetails);
             }
         }
         
+        // 绿灯放行：完全符合结构，清空 errorMsg（尤其是在被 RepairNode 修复成功的情况下），图引擎会流向 GENERATE_REPORT。
         log.info(">>> [ValidateNode] 校验完美通过！");
-        return Map.of("errorMsg", ""); // 清空可能存在的错误信息
+        return Map.of("errorMsg", "");
     }
 }

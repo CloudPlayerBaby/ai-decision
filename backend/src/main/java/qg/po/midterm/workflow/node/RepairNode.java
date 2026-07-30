@@ -31,11 +31,13 @@ public class RepairNode implements NodeAction<DecisionState> {
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
         // 注：遵循 PRD 12 节，Repair 节点为引擎内部节点，不抛出 NodeExecutionEvent
+        // 它的核心职责是接收 ValidateNode 打回的错题本 (errorMsg)，然后喂给大模型重新做题。
         log.info("Node [Repair] executing for decision: {}", state.getDecisionId());
 
         String errorMsg = state.getErrorMsg();
         int retryCount = state.getRetryCount();
 
+        // 将之前大模型写错的数据结构，配合具体的错误提示传给大模型
         Map<String, Object> params = Map.of(
             "errorMsg", errorMsg != null ? errorMsg : "未知错误"
         );
