@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Docker 本地数据库数据
+docker/mysql/data/
