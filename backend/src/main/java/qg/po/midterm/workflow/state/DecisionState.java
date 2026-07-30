@@ -14,6 +14,10 @@ public class DecisionState extends AgentState {
         return value("decisionId").map(Object::toString).orElse(null);
     }
 
+    public String getTaskId() {
+        return value("taskId").map(Object::toString).orElse(null);
+    }
+
     public String getBackground() {
         return value("background").map(Object::toString).orElse(null);
     }
