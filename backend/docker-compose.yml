@@ -6,12 +6,12 @@ services:
     container_name: local_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: "1234"      # 1. 建议加上引号，防止某些版本将纯数字误判
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ai_decision
-      TZ: Asia/Shanghai               # 2. 显式指定容器时区，避免后端存储的时间与本地相差 8 小时
+      TZ: Asia/Shanghai
     ports:
       - "3306:3306"
-    command:                           # 3. 指定默认字符集和身份验证插件
+    command:
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
       --default-authentication-plugin=mysql_native_password
