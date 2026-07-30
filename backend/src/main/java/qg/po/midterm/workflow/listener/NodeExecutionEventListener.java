@@ -24,6 +24,7 @@ import java.util.Map;
  */
 @Component
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class NodeExecutionEventListener {
 
     private final AnalysisTaskMapper taskMapper;
@@ -72,9 +73,21 @@ public class NodeExecutionEventListener {
 
         String stepName = getStepName(event.getNodeName());
         if (stepName == null) {
-            // TODO Workflow 工具调用事件接入后，在这里创建 TOOL_CALL 步骤并发送 tool_call。
-
-
+            if ("ToolCall".equals(event.getNodeName())) {
+                try {
+                    Map<String, Object> toolData = new com.fasterxml.jackson.databind.ObjectMapper().readValue(event.getOutputData(), Map.class);
+                    Map<String, Object> sseData = new LinkedHashMap<>();
+                    sseData.put("taskId", "t_" + task.getId());
+                    sseData.put("toolName", toolData.get("toolName"));
+                    sseData.put("status", event.getStatus());
+                    sseData.put("inputSummary", toolData.get("inputSummary"));
+                    sseData.put("outputSummary", toolData.get("outputSummary"));
+                    
+                    eventService.sendToolCall("t_" + task.getId(), sseData);
+                } catch (Exception e) {
+                    log.error("Failed to parse tool call event data", e);
+                }
+            }
             return;
         }
 

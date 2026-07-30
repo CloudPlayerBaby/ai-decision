@@ -160,4 +160,31 @@ class NodeExecutionEventListenerTest {
         Map<String, Object> sseData = mapCaptor.getValue();
         assertEquals("大模型生成超时", sseData.get("message"));
     }
+
+    @Test
+    void testHandle_ToolCallEvent_ShouldSendToolCallSse() {
+        // Arrange
+        when(taskMapper.selectById(12345L)).thenReturn(mockTask);
+
+        String jsonPayload = "{\"toolName\":\"TavilySearch\",\"inputSummary\":\"正在搜索:机票价格\",\"outputSummary\":\"\"}";
+        NodeExecutionEvent event = new NodeExecutionEvent(
+                this,
+                "ToolCall",
+                "d_111",
+                "t_12345",
+                "RUNNING",
+                null,
+                jsonPayload
+        );
+
+        // Act
+        listener.handle(event);
+
+        // Assert Event Sent
+        verify(eventService).sendToolCall(eq("t_12345"), mapCaptor.capture());
+        Map<String, Object> sseData = mapCaptor.getValue();
+        assertEquals("RUNNING", sseData.get("status"));
+        assertEquals("TavilySearch", sseData.get("toolName"));
+        assertEquals("正在搜索:机票价格", sseData.get("inputSummary"));
+    }
 }

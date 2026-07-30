@@ -28,34 +28,37 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        qg.po.midterm.workflow.context.TaskContextHolder.setContext(state.getTaskId(), state.getDecisionId());
         try {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [ReportGeneration] executing for decision: {}", state.getDecisionId());
 
-        String understanding = state.getUnderstanding();
-        
-        Map<String, Object> params = Map.of(
-            "understanding", understanding != null ? understanding : "无"
-        );
-        String prompt = new PromptTemplate(promptResource).create(params).getContents();
-        
-        log.info(">>> 【AI Prompt】\n{}", prompt);
+            String understanding = state.getUnderstanding();
+            
+            Map<String, Object> params = Map.of(
+                "understanding", understanding != null ? understanding : "无"
+            );
+            String prompt = new PromptTemplate(promptResource).create(params).getContents();
+            
+            log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        String reportSummary = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
-                
-        log.info("<<< 【AI Response】\n{}", reportSummary);
+            String reportSummary = chatClient.prompt()
+                    .user(prompt)
+                    .call()
+                    .content();
+                    
+            log.info("<<< 【AI Response】\n{}", reportSummary);
 
-        // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("reportSummary", reportSummary));
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
+            // 将大模型结果转换为 JSON 传入状态流，供前端渲染
+            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("reportSummary", reportSummary));
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             // 实际生成报告可能需要保存到特定实体中，这里先作为结果之一存入 State
             return Map.of("reportSummary", reportSummary);
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
+        } finally {
+            qg.po.midterm.workflow.context.TaskContextHolder.clear();
         }
     }
 }

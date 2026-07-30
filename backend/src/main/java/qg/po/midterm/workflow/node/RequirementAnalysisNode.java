@@ -30,8 +30,9 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        qg.po.midterm.workflow.context.TaskContextHolder.setContext(state.getTaskId(), state.getDecisionId());
         try {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [RequirementAnalysis] executing for decision: {}", state.getDecisionId());
 
         String background = state.getBackground() != null ? state.getBackground() : "无";
@@ -63,6 +64,8 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
+        } finally {
+            qg.po.midterm.workflow.context.TaskContextHolder.clear();
         }
     }
 }
