@@ -355,6 +355,7 @@ body.is-resizing .resize-handle::before {
 .canvas-panel__toolbar {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   padding: 8px 12px;
   font-size: 12px;
@@ -362,6 +363,15 @@ body.is-resizing .resize-handle::before {
   background: var(--canvas-toolbar-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.canvas-panel__hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.canvas-panel__toolbar .ant-btn {
+  font-size: 12px;
 }
 
 .canvas-panel__flow {
