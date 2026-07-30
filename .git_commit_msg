@@ -1,4 +1,0 @@
-﻿feat(ai): 对齐架构规范并开放 Checkpoint 注入槽位
-
-1. 状态流转对齐：将 6 个 Node 广播的事件状态彻底修改为 PRD 标准的 RUNNING 和 SUCCEEDED，消除了 B 组在事件处理时状态映射的逻辑负担。
-2. 韧性架构（重要）：在 DecisionWorkflow 中为 LangGraph4j 引入 BaseCheckpointSaver 依赖注入。此举向外开放了断点持久化能力（可由 D 组或 B 组实现），使得图引擎未来可具备 Crash 后的断点续传与代偿能力。
