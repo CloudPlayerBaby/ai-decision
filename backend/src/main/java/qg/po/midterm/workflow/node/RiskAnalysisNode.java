@@ -6,6 +6,9 @@ import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.io.Resource;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
@@ -24,6 +27,9 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
 
+    @Value("classpath:prompts/risk.st")
+    private Resource promptResource;
+
     public record RiskAnalysisResult(AnalysisResultDto.Recommendation recommendation, List<String> nextActions) {}
 
     @Override
@@ -39,22 +45,22 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             .map(o -> String.format("- 方案ID: %s, 名称: %s, 描述: %s", o.getId(), o.getName(), o.getDescription()))
             .collect(Collectors.joining("\n"));
 
-        String prompt = String.format(
-            "基于以下决策核心理解以及生成的候选方案，请进行最终的风险对比与推荐。\n" +
-            "核心理解：%s\n" +
-            "候选方案：\n%s\n\n" +
-            "要求：\n" +
-            "1. 必须提供 recommendation (推荐方案)，包含 optionId (必须是上面提供的方案ID之一) 和 reason (推荐理由)。\n" +
-            "2. 必须提供 nextActions (下一步行动建议)，包含 3-5 条具体可落地的后续行动。\n" +
-            "3. 以标准的 JSON 格式输出，不要包含任何额外的解释或Markdown格式。",
-            understanding != null ? understanding : "无",
-            optionStr
+        Map<String, Object> params = Map.of(
+            "understanding", understanding != null ? understanding : "无",
+            "options", optionStr
         );
+        String prompt = new PromptTemplate(promptResource).create(params).getContents();
+        
+        log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        RiskAnalysisResult result = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(RiskAnalysisResult.class);
+        RiskAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                chatClient.prompt()
+                        .user(prompt)
+                        .call()
+                        .entity(RiskAnalysisResult.class)
+        );
+                
+        log.info("<<< 【AI Response】\n{}", result);
 
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
             return Map.of(

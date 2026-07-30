@@ -1,5 +1,7 @@
 package qg.po.midterm.dto.result;
 
+import java.io.Serializable;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -11,7 +13,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Schema(description = "结构化校验反馈")
-public class ValidationResult {
+public class ValidationResult implements Serializable {
 
     @Schema(description = "结果是否有效（通过所有结构和业务校验）")
     private boolean schemaValid;

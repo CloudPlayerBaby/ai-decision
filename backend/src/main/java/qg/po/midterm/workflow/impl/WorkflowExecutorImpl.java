@@ -39,11 +39,42 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
     }
 
     @Override
-    public String retryStep(String taskId, String stepId) {
-        log.info("Retrying step {} for task {}", stepId, taskId);
-        // B 同学会使用 LangGraph4j 的 checkpointer 获取之前的状态，然后在这个 taskId 上重入
-        // 由于咱们这里只提供底层暴露，B 拿到 getCompiledGraph() 后可以直接恢复图执行
+    public String retryStep(String taskId) {
+        log.info("Retrying task {} from the last failed node checkpoint", taskId);
+        // 传入 null 状态，LangGraph4j 会自动通过 CheckpointSaver (基于 threadId=taskId)
+        // 恢复上一次挂起的图状态并继续执行失败的节点。
+        runGraph(taskId, null);
         return "RETRY_TRIGGERED";
+    }
+
+    @Override
+    public String startPartialAnalysis(String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState) {
+        String taskId = UUID.randomUUID().toString();
+        
+        // 根据 changedNodeIds 判断从哪个节点开始重推
+        // 如果改了因素(factor)，需要重新生成方案 -> GENERATE_OPTIONS
+        // 如果只改了方案(option)，只需要重新对比风险 -> COMPARE_OPTIONS
+        String startNode = "UNDERSTAND";
+        boolean factorChanged = changedNodeIds.stream().anyMatch(id -> id.startsWith("f_"));
+        boolean optionChanged = changedNodeIds.stream().anyMatch(id -> id.startsWith("opt_"));
+
+        if (factorChanged) {
+            startNode = "GENERATE_OPTIONS";
+        } else if (optionChanged) {
+            startNode = "COMPARE_OPTIONS";
+        }
+
+        log.info("Starting partial analysis for decision {} with startNode: {}", decisionId, startNode);
+
+        Map<String, Object> initData = currentState.data();
+        initData.put("decisionId", decisionId);
+        initData.put("taskId", taskId);
+        initData.put("startNode", startNode);
+
+        DecisionState state = new DecisionState(initData);
+        runGraph(taskId, state);
+
+        return taskId;
     }
 
     @Override

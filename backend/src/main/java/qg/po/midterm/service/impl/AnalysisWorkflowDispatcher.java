@@ -41,7 +41,8 @@ public class AnalysisWorkflowDispatcher {
     @Async
     public void retryStep(String taskId, String stepId) {
         try {
-            workflowExecutor.retryStep(taskId, stepId);
+            // Workflow 会根据 taskId 的 checkpoint 找到失败步骤并恢复执行。
+            workflowExecutor.retryStep(taskId);
         } catch (Exception exception) {
             // TODO 后续由任务事件监听器回写步骤失败信息。
             log.error("Failed to dispatch retry, taskId={}, stepId={}", taskId, stepId, exception);

@@ -5,7 +5,7 @@ import org.apache.ibatis.annotations.Mapper;
 import qg.po.midterm.entity.Decision;
 
 /**
- * decision 表的 MP Mapper。
+ * 决策问题 Mapper
  */
 @Mapper
 public interface DecisionMapper extends BaseMapper<Decision> {

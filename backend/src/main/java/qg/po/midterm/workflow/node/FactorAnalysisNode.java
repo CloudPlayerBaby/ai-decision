@@ -6,9 +6,13 @@ import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.io.Resource;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
+import qg.po.midterm.workflow.tools.TavilySearchTool;
 
 import java.util.List;
 import java.util.Map;
@@ -21,6 +25,10 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final TavilySearchTool tavilySearchTool;
+
+    @Value("classpath:prompts/factor.st")
+    private Resource promptResource;
 
     public record FactorAnalysisResult(List<Factor> factors) {}
 
@@ -33,21 +41,23 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
         String understanding = state.getUnderstanding();
         String background = state.getBackground();
 
-        String prompt = String.format(
-            "基于以下决策问题背景和核心理解，请提取出影响该决策的最关键的 3-5 个因素。\n" +
-            "背景：%s\n" +
-            "核心理解：%s\n\n" +
-            "要求：\n" +
-            "1. 每个因素需要包含 id (英文字母下划线组合), name (简短名称), description (详细说明), weight (0到1之间的小数，所有因素权重之和为1)。\n" +
-            "2. 以标准的 JSON 格式输出，不要包含任何额外的解释或Markdown格式。",
-            background != null ? background : "无",
-            understanding != null ? understanding : "无"
+        Map<String, Object> params = Map.of(
+            "background", background != null ? background : "无",
+            "understanding", understanding != null ? understanding : "无"
         );
+        String prompt = new PromptTemplate(promptResource).create(params).getContents();
+        
+        log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        FactorAnalysisResult result = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(FactorAnalysisResult.class);
+        FactorAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                chatClient.prompt()
+                        .user(prompt)
+                        .tools(tavilySearchTool)
+                        .call()
+                        .entity(FactorAnalysisResult.class)
+        );
+                
+        log.info("<<< 【AI Response】\n{}", result);
 
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
             return Map.of("factors", result.factors());

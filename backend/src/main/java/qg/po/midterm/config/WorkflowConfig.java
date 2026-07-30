@@ -10,10 +10,6 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class WorkflowConfig {
 
-    /**
-     * Spring AI 默认提供 ChatClient.Builder，
-     * 这里把它构建成各个工作流节点直接使用的 ChatClient。
-     */
     @Bean
     public ChatClient chatClient(ChatClient.Builder builder) {
         return builder.build();

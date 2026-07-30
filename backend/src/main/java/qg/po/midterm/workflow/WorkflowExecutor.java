@@ -24,10 +24,19 @@ public interface WorkflowExecutor {
      * 针对失败步骤触发重试
      *
      * @param taskId 异步推演的任务 ID
-     * @param stepId 失败的步骤 ID
-     * @return 步骤触发重试后的状态反馈
+     * @return 触发重试后的状态反馈
      */
-    String retryStep(String taskId, String stepId);
+    String retryStep(String taskId);
+
+    /**
+     * 发起局部重推 (Partial Analysis)
+     * 
+     * @param decisionId 决策ID
+     * @param changedNodeIds 前端画布中被修改的节点ID列表
+     * @param currentState 包含修改后数据的当前状态
+     * @return 新生成的局部重推taskId
+     */
+    String startPartialAnalysis(String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState);
 
     /**
      * 接收原始大模型输出，进行 JSON Schema 强校验
