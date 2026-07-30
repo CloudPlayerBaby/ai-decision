@@ -1,7 +1,15 @@
 package qg.po.midterm.service;
 
+import qg.po.midterm.dto.request.CreateDecisionRequest;
+import qg.po.midterm.vo.DecisionVO;
+
 /**
- * 负责决策问题及其状态的业务处理。
+ * 决策问题服务接口
  */
-public class DecisionService {
+public interface DecisionService {
+
+    /**
+     * 创建决策问题，返回带格式化ID的视图
+     */
+    DecisionVO create(CreateDecisionRequest request);
 }
