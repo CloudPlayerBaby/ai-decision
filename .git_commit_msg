@@ -1,7 +1,5 @@
-﻿feat(ai): 修复引擎底层编译异常、接入强校验模式并增加节点生命周期事件
+﻿fix(ai): 补全节点生命周期事件缺失的 taskId 上下文
 
-1. 框架依赖：修复 pom.xml 中 lombok 编译失效问题，彻底解决各实体类 getters/setters 在编译期的报错。
-2. 模型配置：调整 application.yaml 启用 DeepSeek beta 端点与 deepseek-v4-flash 模型，正式激活严格的 JSON Schema 强校验输出机制。
-3. 工作流重构：在 DecisionWorkflow 中全面适配 LangGraph4j 1.8.20 异步接口规范，使用 node_async 包裹所有同步执行节点。
-4. 事件机制(重点)：全 Node 注入 Spring ApplicationEventPublisher，精准抛出带有状态(STARTED/FINISHED)和 decisionId 的 NodeExecutionEvent 事件。为通信组无侵入对接 SSE 实时推流彻底扫清障碍。
-5. 协作防腐：修正 WorkflowExecutorImpl 相关遗漏的方法签名；同时更新 .gitignore，确保本地私有的开发守则（AI_RULES.md）不会污染远端代码库。
+1. 状态机制：在 WorkflowExecutorImpl 启动时将 taskId 注入 initData，并在 DecisionState 中暴露 getTaskId() 方法。
+2. 事件广播：扩展 NodeExecutionEvent 增加 taskId 字段，在全部 6 个执行节点抛出事件时同步传递 taskId。
+3. 收益：彻底解决同一 decisionId 多次执行引发的会话污染隐患，使 B 组能按任务实例精准推送 SSE 进度。

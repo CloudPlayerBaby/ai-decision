@@ -28,7 +28,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "STARTED"));
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
         log.info("Node [RiskAnalysis] executing for decision: {}", state.getDecisionId());
 
         String understanding = state.getUnderstanding();
@@ -55,7 +55,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
                 .call()
                 .entity(RiskAnalysisResult.class);
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "FINISHED"));
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
         return Map.of(
             "recommendation", result.recommendation(),
             "nextActions", result.nextActions()

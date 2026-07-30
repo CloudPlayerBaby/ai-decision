@@ -23,7 +23,7 @@ public class RepairNode implements NodeAction<DecisionState> {
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "STARTED"));
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "RUNNING"));
         log.info("Node [Repair] executing for decision: {}", state.getDecisionId());
 
         String errorMsg = state.getErrorMsg();
@@ -46,7 +46,7 @@ public class RepairNode implements NodeAction<DecisionState> {
                 .call()
                 .entity(AnalysisResultDto.class);
 
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "FINISHED"));
+        eventPublisher.publishEvent(new NodeExecutionEvent(this, "Repair", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
         return Map.of(
             "understanding", repairedResult.getUnderstanding(),
             "factors", repairedResult.getFactors(),

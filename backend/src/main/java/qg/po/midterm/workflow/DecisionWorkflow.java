@@ -1,8 +1,11 @@
 package qg.po.midterm.workflow;
 
 import lombok.RequiredArgsConstructor;
+import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.StateGraph;
+import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.workflow.node.*;
 import qg.po.midterm.workflow.state.DecisionState;
@@ -25,6 +28,9 @@ public class DecisionWorkflow {
     private final RiskAnalysisNode riskAnalysisNode;
     private final ReportGenerationNode reportGenerationNode;
     private final RepairNode repairNode;
+
+    @Autowired(required = false)
+    private BaseCheckpointSaver checkpointSaver;
 
     private CompiledGraph<DecisionState> compiledGraph;
 
@@ -59,7 +65,11 @@ public class DecisionWorkflow {
         graph.addEdge("REPAIR", "GENERATE_REPORT");
         graph.addEdge("GENERATE_REPORT", END);
 
-        this.compiledGraph = graph.compile();
+        if (checkpointSaver != null) {
+            this.compiledGraph = graph.compile(CompileConfig.builder().checkpointSaver(checkpointSaver).build());
+        } else {
+            this.compiledGraph = graph.compile();
+        }
     }
 
     public CompiledGraph<DecisionState> getGraph() {
