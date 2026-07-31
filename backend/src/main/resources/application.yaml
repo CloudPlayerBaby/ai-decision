@@ -4,10 +4,12 @@ spring:
   ai:
     openai:
       api-key: ${DEEPSEEK_API_KEY}
-      base-url: https://api.deepseek.com/beta
+      base-url: https://api.deepseek.com/
       chat:
         options:
           model: deepseek-v4-flash
+        response-format:
+          type: JSON_OBJECT
   application:
     name: Mid-term
   datasource:

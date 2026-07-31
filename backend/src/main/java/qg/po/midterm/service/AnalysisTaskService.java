@@ -13,9 +13,7 @@ public interface AnalysisTaskService {
 
     CreateTaskVO startFullAnalysis(String decisionId);
 
-    PartialTaskVO startPartialAnalysis(
-            String decisionId,
-            PartialAnalysisRequest request);
+    PartialTaskVO startPartialAnalysis(String decisionId, PartialAnalysisRequest request);
 
     AnalysisTaskVO getTask(String taskId);
 

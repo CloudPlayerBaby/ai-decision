@@ -125,9 +125,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
      */
     @Override
     @Transactional
-    public PartialTaskVO startPartialAnalysis(
-            String decisionId,
-            PartialAnalysisRequest request) {
+    public PartialTaskVO startPartialAnalysis(String decisionId, PartialAnalysisRequest request) {
         // 去除前缀
         Long decisionDbId = parseId(decisionId, "d_", "decisionId");
 

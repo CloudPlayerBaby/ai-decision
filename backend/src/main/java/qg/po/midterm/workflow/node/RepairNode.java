@@ -4,19 +4,21 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Component;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.Resource;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
+import qg.po.midterm.workflow.utils.JsonOutputOptions;
 
 import java.util.List;
 import java.util.Map;
 
-/** 工作流节点：修复校验失败的结果。 */
+/**
+ * 工作流节点：修复校验失败的结果。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -39,27 +41,28 @@ public class RepairNode implements NodeAction<DecisionState> {
 
         // 将之前大模型写错的数据结构，配合具体的错误提示传给大模型
         Map<String, Object> params = Map.of(
-            "errorMsg", errorMsg != null ? errorMsg : "未知错误"
+                "errorMsg", errorMsg != null ? errorMsg : "未知错误"
         );
         String prompt = new PromptTemplate(promptResource).create(params).getContents();
-        
+
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
         AnalysisResultDto repairedResult = chatClient.prompt()
+                .options(JsonOutputOptions.create())
                 .user(prompt)
                 .call()
                 .entity(AnalysisResultDto.class);
-                
+
         log.info("<<< 【AI Response】\n{}", repairedResult);
 
         return Map.of(
-            "understanding", repairedResult.getUnderstanding() != null ? repairedResult.getUnderstanding() : "",
-            "factors", repairedResult.getFactors() != null ? repairedResult.getFactors() : List.of(),
-            "options", repairedResult.getOptions() != null ? repairedResult.getOptions() : List.of(),
-            "recommendation", repairedResult.getRecommendation() != null ? repairedResult.getRecommendation() : new AnalysisResultDto.Recommendation(),
-            "nextActions", repairedResult.getNextActions() != null ? repairedResult.getNextActions() : List.of(),
-            "retryCount", retryCount + 1,
-            "errorMsg", "" // 修复后清空 errorMsg，流转回 ValidateNode 进行二次校验
+                "understanding", repairedResult.getUnderstanding() != null ? repairedResult.getUnderstanding() : "",
+                "factors", repairedResult.getFactors() != null ? repairedResult.getFactors() : List.of(),
+                "options", repairedResult.getOptions() != null ? repairedResult.getOptions() : List.of(),
+                "recommendation", repairedResult.getRecommendation() != null ? repairedResult.getRecommendation() : new AnalysisResultDto.Recommendation(),
+                "nextActions", repairedResult.getNextActions() != null ? repairedResult.getNextActions() : List.of(),
+                "retryCount", retryCount + 1,
+                "errorMsg", "" // 修复后清空 errorMsg，流转回 ValidateNode 进行二次校验
         );
     }
 }
