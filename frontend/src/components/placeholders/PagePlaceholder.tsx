@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Card, Empty, Space, Typography } from 'antd'
+import { Empty, Typography } from 'antd'
 
 const { Title, Paragraph, Text } = Typography
 
@@ -8,17 +8,21 @@ interface PagePlaceholderProps {
   description: string
   hint?: string
   children?: ReactNode
+  /** 更宽内容区（表格页） */
+  wide?: boolean
 }
 
+/** 普通业务页壳：统一标题区 + 限宽内容，避免缩放时散乱 */
 export function PagePlaceholder({
   title,
   description,
   hint,
   children,
+  wide = false,
 }: PagePlaceholderProps) {
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <div>
+    <div className={`page-shell${wide ? ' page-shell--wide' : ''}`}>
+      <div className="page-shell__intro">
         <Title level={3} style={{ marginBottom: 8 }}>
           {title}
         </Title>
@@ -31,11 +35,9 @@ export function PagePlaceholder({
           </Text>
         ) : null}
       </div>
-      {children ?? (
-        <Card>
-          <Empty description="功能占位，待接入业务逻辑" />
-        </Card>
-      )}
-    </Space>
+      <div className="page-shell__body">
+        {children ?? <Empty description="功能占位，待接入业务逻辑" />}
+      </div>
+    </div>
   )
 }

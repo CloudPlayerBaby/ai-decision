@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import { AppRouter } from '@/app/router'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { ThemeDocumentSync } from '@/components/layout/ThemeDocumentSync'
+import { LayoutViewportSync } from '@/components/layout/LayoutViewportSync'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +56,7 @@ function ThemedApp({ children }: { children?: ReactNode }) {
       }}
     >
       <ThemeDocumentSync />
+      <LayoutViewportSync />
       <AntApp>
         <BrowserRouter>{children ?? <AppRouter />}</BrowserRouter>
       </AntApp>

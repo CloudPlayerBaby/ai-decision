@@ -34,6 +34,17 @@ export function MainLayout() {
   const { token } = theme.useToken()
   const isEyeCare = themeMode === 'eyeCare'
 
+  const leftDragMax = Math.max(
+    LAYOUT_LIMITS.leftMin,
+    Math.min(
+      LAYOUT_LIMITS.leftMax,
+      (typeof window !== 'undefined' ? window.innerWidth : 1440) -
+        LAYOUT_LIMITS.minCenterWidth -
+        LAYOUT_LIMITS.rightMin -
+        12,
+    ),
+  )
+
   const recentQuery = useQuery({
     queryKey: queryKeys.decisions.list({ page: 1, pageSize: 5 }),
     queryFn: () => listDecisions({ page: 1, pageSize: 5 }),
@@ -78,7 +89,7 @@ export function MainLayout() {
   )
 
   return (
-    <Layout style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
+    <Layout className="app-shell">
       <div className="app-sider-shell">
         <Sider
           collapsible
@@ -245,7 +256,7 @@ export function MainLayout() {
             value={leftWidth}
             onChange={setLeftWidth}
             min={LAYOUT_LIMITS.leftMin}
-            max={LAYOUT_LIMITS.leftMax}
+            max={leftDragMax}
             title="拖动调整左侧栏宽度（双击收起）"
             onDoubleClick={() => setLeftCollapsed(true)}
           />
