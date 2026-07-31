@@ -35,7 +35,7 @@ public class Decision {
     private String status;
 
     /** 用户当前倾向方案ID */
-    private Long preferredOptionId;
+    private String preferredOptionId;
 
     /** 最近一次推演任务ID */
     private Long latestTaskId;

@@ -1,0 +1,8 @@
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"B","location":"providers.tsx:AppProviders","message":"AppProviders mount","data":{"hasChildren":false,"apiBase":"/api/v1"},"timestamp":1785399956893}
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"B","location":"providers.tsx:AppProviders","message":"AppProviders mount","data":{"hasChildren":false,"apiBase":"/api/v1"},"timestamp":1785399956893}
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"C","location":"router.tsx:AppRouter","message":"AppRouter render","data":{"path":"/login"},"timestamp":1785399957078}
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"C","location":"router.tsx:AppRouter","message":"AppRouter render","data":{"path":"/login"},"timestamp":1785399957078}
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"B","location":"providers.tsx:AppProviders","message":"AppProviders mount","data":{"hasChildren":false,"apiBase":"/api/v1"},"timestamp":1785401845464}
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"B","location":"providers.tsx:AppProviders","message":"AppProviders mount","data":{"hasChildren":false,"apiBase":"/api/v1"},"timestamp":1785401845464}
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"C","location":"router.tsx:AppRouter","message":"AppRouter render","data":{"path":"/login"},"timestamp":1785401845483}
+{"sessionId":"dbe912","runId":"pre-fix","hypothesisId":"C","location":"router.tsx:AppRouter","message":"AppRouter render","data":{"path":"/login"},"timestamp":1785401845484}

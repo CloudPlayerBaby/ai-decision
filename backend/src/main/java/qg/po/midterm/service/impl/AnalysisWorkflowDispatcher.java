@@ -2,11 +2,13 @@ package qg.po.midterm.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.entity.Decision;
 import qg.po.midterm.repository.TaskRuntimeRepository;
 import qg.po.midterm.workflow.WorkflowExecutor;
+import qg.po.midterm.workflow.event.WorkflowFailedEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 
 import java.util.List;
@@ -21,6 +23,7 @@ public class AnalysisWorkflowDispatcher {
 
     private final WorkflowExecutor workflowExecutor;
     private final TaskRuntimeRepository runtimeRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     // 异步调用整体推演
     @Async
@@ -36,6 +39,7 @@ public class AnalysisWorkflowDispatcher {
             );
         } catch (Exception exception) {
             log.error("整体推演调用失败, taskId={}", taskId, exception);
+            publishWorkflowFailed(taskId, exception);
         }
     }
 
@@ -65,6 +69,7 @@ public class AnalysisWorkflowDispatcher {
                     decisionId,
                     exception
             );
+            publishWorkflowFailed(taskId, exception);
         }
     }
 
@@ -75,6 +80,17 @@ public class AnalysisWorkflowDispatcher {
             workflowExecutor.retryStep(taskId);
         } catch (Exception exception) {
             log.error("发起异步推演失败, taskId={}, stepId={}", taskId, stepId, exception);
+            publishWorkflowFailed(taskId, exception);
         }
+    }
+
+    private void publishWorkflowFailed(String taskId, Exception exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            message = exception.getClass().getSimpleName();
+        }
+        eventPublisher.publishEvent(
+                new WorkflowFailedEvent(this, taskId, message)
+        );
     }
 }

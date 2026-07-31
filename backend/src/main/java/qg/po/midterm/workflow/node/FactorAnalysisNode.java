@@ -60,12 +60,11 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
-            FactorAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
-                    chatClient.prompt()
-                            .user(prompt)
-                            .tools(tavilySearchTool)
-                            .call()
-                            .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(FactorAnalysisResult.class))
+            FactorAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepair(
+                    chatClient,
+                    prompt,
+                    new Object[]{tavilySearchTool},
+                    FactorAnalysisResult.class
             );
 
             log.info("<<< 【AI Response】\n{}", result);
@@ -76,7 +75,7 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
             return Map.of("factors", result.factors());
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

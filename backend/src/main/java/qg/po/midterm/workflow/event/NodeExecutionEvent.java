@@ -13,6 +13,7 @@ public class NodeExecutionEvent extends ApplicationEvent {
     private final String status;
     private final String errorMessage;
     private final String outputData; // AI 节点生成的 JSON 数据
+    private final Exception exception;
 
     /**
      * 节点正常开始时使用。
@@ -23,7 +24,7 @@ public class NodeExecutionEvent extends ApplicationEvent {
             String decisionId,
             String taskId,
             String status) {
-        this(source, nodeName, decisionId, taskId, status, null, null);
+        this(source, nodeName, decisionId, taskId, status, null, null, null);
     }
 
     /**
@@ -36,7 +37,20 @@ public class NodeExecutionEvent extends ApplicationEvent {
             String taskId,
             String status,
             String errorMessage) {
-        this(source, nodeName, decisionId, taskId, status, errorMessage, null);
+        this(source, nodeName, decisionId, taskId, status, errorMessage, null, null);
+    }
+
+    /**
+     * 节点失败时使用，传入异常对象。
+     */
+    public NodeExecutionEvent(
+            Object source,
+            String nodeName,
+            String decisionId,
+            String taskId,
+            String status,
+            Exception exception) {
+        this(source, nodeName, decisionId, taskId, status, exception != null ? exception.getMessage() : null, null, exception);
     }
 
     /**
@@ -49,7 +63,8 @@ public class NodeExecutionEvent extends ApplicationEvent {
             String taskId,
             String status,
             String errorMessage,
-            String outputData) {
+            String outputData,
+            Exception exception) {
         super(source);
         this.nodeName = nodeName;
         this.decisionId = decisionId;
@@ -57,6 +72,18 @@ public class NodeExecutionEvent extends ApplicationEvent {
         this.status = status;
         this.errorMessage = errorMessage;
         this.outputData = outputData;
+        this.exception = exception;
+    }
+
+    public NodeExecutionEvent(
+            Object source,
+            String nodeName,
+            String decisionId,
+            String taskId,
+            String status,
+            String errorMessage,
+            String outputData) {
+        this(source, nodeName, decisionId, taskId, status, errorMessage, outputData, null);
     }
 
     public String getNodeName() {
@@ -81,5 +108,9 @@ public class NodeExecutionEvent extends ApplicationEvent {
 
     public String getOutputData() {
         return outputData;
+    }
+
+    public Exception getException() {
+        return exception;
     }
 }

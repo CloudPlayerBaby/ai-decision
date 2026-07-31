@@ -465,6 +465,7 @@ body.is-resizing .resize-handle::before {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
   gap: 8px 12px;
   padding: 8px 12px;
@@ -484,9 +485,97 @@ body.is-resizing .resize-handle::before {
   font-size: 12px;
 }
 
+/* 画布图例 */
+.canvas-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--canvas-toolbar-bg);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.canvas-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.canvas-legend__separator {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+}
+
+.canvas-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+.canvas-legend__dot--decision {
+  border-color: var(--node-decision-border);
+  background: #eff6ff;
+}
+
+.canvas-legend__dot--factor {
+  border-color: var(--node-factor-border);
+  background: #fffbeb;
+}
+
+.canvas-legend__dot--option {
+  border-color: var(--node-option-border);
+  background: #ecfdf5;
+}
+
+/* 箭头图例用 SVG inline 箭头 */
+.canvas-legend__arrow {
+  display: inline-block;
+  width: 20px;
+  height: 10px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.canvas-legend__arrow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: no-repeat center;
+  background-size: contain;
+}
+
+.canvas-legend__arrow--has-factor {
+  background: linear-gradient(to right, #93c5fd, transparent);
+}
+
+.canvas-legend__arrow--has-factor::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 10' fill='none'%3E%3Cpath d='M1 5h4M5 2l3 3-3 3' stroke='%2393c5fd' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.canvas-legend__arrow--affects {
+  background: linear-gradient(to right, #6ee7b7, transparent);
+}
+
+.canvas-legend__arrow--affects::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 10' fill='none'%3E%3Cpath d='M1 5h4M5 2l3 3-3 3' stroke='%236ee7b7' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
 .canvas-panel__flow {
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 .canvas-node {
@@ -670,6 +759,20 @@ body.is-resizing .resize-handle::before {
   color: #059669;
 }
 
+.canvas-node__subtitle--constraints {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* 方案节点摘要行：优 N · 缺 N · 风险 N */
+.canvas-node__option-summary {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 /* 因素权重标签 */
 .canvas-node__factor-weight {
   padding: 0 5px;
@@ -679,6 +782,12 @@ body.is-resizing .resize-handle::before {
   font-size: 10px;
   font-weight: 600;
   line-height: 1.5;
+}
+
+@media (max-width: 1100px) {
+  .workbench__body {
+    flex-direction: column;
+  }
 }
 
 /* 窄屏：保持三栏横排语义，由 JS 收起侧栏；内容页收紧内边距 */
@@ -711,4 +820,364 @@ body.is-resizing .resize-handle::before {
     min-width: 150px;
     max-width: 180px;
   }
+}
+
+/* —— 节点编辑 Modal —— */
+.canvas-modal .ant-modal-content {
+  border-radius: 16px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.canvas-modal .ant-modal-body {
+  padding: 0;
+}
+
+/* 节点上下文栏 */
+.canvas-modal-context {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.canvas-modal-context__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Modal 自定义头部 */
+.canvas-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+}
+
+.canvas-modal__header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.canvas-modal__type-badge {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.canvas-modal__type-badge--factor {
+  background: #f59e0b;
+}
+
+.canvas-modal__type-badge--option {
+  background: #10b981;
+}
+
+.canvas-modal__header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.canvas-modal__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.canvas-modal__subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.canvas-modal__close {
+  color: var(--text-muted);
+  padding: 4px;
+  margin: -4px -4px 0 0;
+}
+
+.canvas-modal__close:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.canvas-modal__divider {
+  margin: 0;
+  padding: 0 24px;
+}
+
+/* 表单区域 */
+.canvas-modal .ant-form {
+  padding: 20px 24px 24px;
+}
+
+.canvas-modal .ant-form-item-label > label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.canvas-modal .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.canvas-modal .ant-input,
+.canvas-modal .ant-input-affix-wrapper {
+  border-radius: 8px;
+}
+
+/* 权重卡片 */
+.canvas-modal__weight-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.canvas-modal__weight-card .ant-slider {
+  flex: 1;
+  margin: 0;
+}
+
+.canvas-modal__weight-value {
+  min-width: 36px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* 五维评分 */
+.canvas-modal .ant-rate {
+  font-size: 18px;
+}
+
+/* 推演分析只读区 */
+.canvas-modal__readonly-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 0 4px;
+}
+
+.canvas-modal__readonly-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.canvas-modal__readonly-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.canvas-modal__readonly-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.canvas-modal__readonly-list li {
+  margin-bottom: 2px;
+}
+
+.canvas-modal__readonly-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* 底部操作栏 */
+.canvas-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.canvas-modal__footer .ant-btn {
+  border-radius: 6px;
+}
+
+/* 方案节点摘要行："查看分析"链接 */
+.canvas-node__option-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.canvas-node__option-summary-link {
+  color: var(--decision);
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.canvas-node__option-summary-link:hover {
+  text-decoration: underline;
+}
+
+.canvas-node__option-empty {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+}
+
+/* Hover 快速预览 Popover */
+.canvas-option-popover-overlay .ant-popover-inner {
+  padding: 10px 12px;
+}
+
+.canvas-option-popover {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.canvas-option-popover__row {
+  margin-bottom: 4px;
+}
+
+.canvas-option-popover__label {
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.canvas-option-popover__link {
+  margin-top: 6px;
+  color: var(--decision);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.canvas-option-popover__link:hover {
+  text-decoration: underline;
+}
+
+/* 候选方案 Modal 自定义 Tab 切换器 */
+.canvas-option-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.canvas-option-tabs__btn {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.canvas-option-tabs__btn:hover {
+  color: var(--text-h);
+}
+
+.canvas-option-tabs__btn--active {
+  color: var(--decision);
+  border-bottom-color: var(--decision);
+  font-weight: 500;
+}
+
+/* 方案分析 Tab 内容 */
+.canvas-modal-analysis {
+  padding: 4px 0;
+}
+
+.canvas-modal-analysis__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: var(--surface-soft);
+  border-radius: 6px;
+  border: 1px solid var(--surface-soft-border);
+}
+
+.canvas-modal-analysis__section {
+  margin-bottom: 16px;
+}
+
+.canvas-modal-analysis__section:last-child {
+  margin-bottom: 0;
+}
+
+.canvas-modal-analysis__section-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-h);
+  margin-bottom: 6px;
+}
+
+.canvas-modal-analysis__list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.canvas-modal-analysis__list li {
+  margin-bottom: 3px;
+}
+
+.canvas-modal-analysis__list li:last-child {
+  margin-bottom: 0;
+}
+
+.canvas-modal-analysis__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.canvas-modal-analysis__empty-state {
+  text-align: center;
+  padding: 32px 16px;
+}
+
+.canvas-modal-analysis__empty-title {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.canvas-modal-analysis__empty-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
 }

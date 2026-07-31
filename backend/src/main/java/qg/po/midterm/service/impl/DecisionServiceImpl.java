@@ -18,14 +18,20 @@ import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.Canvas;
 import qg.po.midterm.dto.result.ReportContent;
 import qg.po.midterm.entity.AnalysisResult;
+import qg.po.midterm.entity.AnalysisStep;
 import qg.po.midterm.entity.AnalysisTask;
 import qg.po.midterm.entity.Decision;
 import qg.po.midterm.entity.DecisionCanvas;
+import qg.po.midterm.entity.DecisionFactor;
+import qg.po.midterm.entity.DecisionSolution;
 import qg.po.midterm.entity.Report;
 import qg.po.midterm.mapper.AnalysisResultMapper;
+import qg.po.midterm.mapper.AnalysisStepMapper;
 import qg.po.midterm.mapper.AnalysisTaskMapper;
 import qg.po.midterm.mapper.DecisionCanvasMapper;
+import qg.po.midterm.mapper.DecisionFactorMapper;
 import qg.po.midterm.mapper.DecisionMapper;
+import qg.po.midterm.mapper.DecisionSolutionMapper;
 import qg.po.midterm.mapper.ReportMapper;
 import qg.po.midterm.service.DecisionService;
 import qg.po.midterm.vo.*;
@@ -53,6 +59,9 @@ public class DecisionServiceImpl implements DecisionService {
     private final AnalysisResultMapper analysisResultMapper;
     private final ReportMapper reportMapper;
     private final DecisionCanvasMapper decisionCanvasMapper;
+    private final AnalysisStepMapper analysisStepMapper;
+    private final DecisionFactorMapper decisionFactorMapper;
+    private final DecisionSolutionMapper decisionSolutionMapper;
     private final ObjectMapper objectMapper;
     private final ReportAgent reportAgent;
 
@@ -120,6 +129,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (entity == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(entity);
 
         DecisionDetailVO.LatestTaskSummary latestTask = null;
         if (entity.getLatestTaskId() != null) {
@@ -172,18 +182,21 @@ public class DecisionServiceImpl implements DecisionService {
     }
 
     @Override
+    @Transactional
     public void delete(String decisionId) {
         Long id = parseId(decisionId, "d_");
         Decision entity = decisionMapper.selectById(id);
         if (entity == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(entity);
 
         if (UNDELETABLE_STATUSES.contains(entity.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT,
                     "当前状态 " + entity.getStatus() + " 不允许删除，请等待推演完成");
         }
 
+        deleteDecisionRelations(id);
         decisionMapper.deleteById(id);
     }
 
@@ -196,6 +209,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
         AnalysisResult result;
         if (StringUtils.hasText(resultId)) {
@@ -236,19 +250,21 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
-        // 校验 analysisResultId 和 optionId 前缀
-        if (request.getAnalysisResultId() == null || !request.getAnalysisResultId().startsWith("ar_")) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "analysisResultId 格式错误");
+        AnalysisResult result = getAnalysisResultOrThrow(
+                id,
+                request.getAnalysisResultId()
+        );
+        if (!"PENDING_CONFIRM".equals(result.getStatus())) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "仅 PENDING_CONFIRM 状态的草案可以选择倾向方案"
+            );
         }
-        if (request.getOptionId() == null || !request.getOptionId().startsWith("opt_")) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "optionId 格式错误");
-        }
+        Option option = getOptionOrThrow(result, request.getOptionId());
 
-        // 解析 optionId 中的数字部分作为 preferredOptionId
-        // optionId 格式为 "opt_xxx"，与 AnalysisResultDto 中 Factor.id 等保持同风格
-        // 这里不要求 optionId 对应数据库实体，仅保存用户倾向
-        decision.setPreferredOptionId(parseFlexibleId(request.getOptionId(), "opt_"));
+        decision.setPreferredOptionId(option.getId());
         decision.setUpdatedAt(LocalDateTime.now());
         decisionMapper.updateById(decision);
     }
@@ -261,23 +277,22 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
-        // 校验 analysisResultId
-        if (request.getAnalysisResultId() == null || !request.getAnalysisResultId().startsWith("ar_")) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "analysisResultId 格式错误");
-        }
-
-        Long arId = parseId(request.getAnalysisResultId(), "ar_", "analysisResultId");
-        AnalysisResult result = analysisResultMapper.selectById(arId);
-        if (result == null || !result.getDecisionId().equals(id)) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "分析结果不存在");
-        }
+        AnalysisResult result = getAnalysisResultOrThrow(
+                id,
+                request.getAnalysisResultId()
+        );
 
         if (!"PENDING_CONFIRM".equals(result.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT,
                     "仅 PENDING_CONFIRM 状态的草案可以确认，当前: " + result.getStatus());
         }
 
+        Option selectedOption = getOptionOrThrow(
+                result,
+                request.getSelectedOptionId()
+        );
         LocalDateTime now = LocalDateTime.now();
 
         // 1. 草案 → 已确认
@@ -286,15 +301,7 @@ public class DecisionServiceImpl implements DecisionService {
         analysisResultMapper.updateById(result);
 
         // 获取用户选择的方案名称
-        String selectedOptionName = null;
-        AnalysisResultDto dto = parseAnalysisResultDto(result.getResultData());
-        if (StringUtils.hasText(request.getSelectedOptionId()) && dto.getOptions() != null) {
-            selectedOptionName = dto.getOptions().stream()
-                    .filter(o -> o.getId() != null && o.getId().equals(request.getSelectedOptionId()))
-                    .map(Option::getName)
-                    .findFirst()
-                    .orElse(null);
-        }
+        String selectedOptionName = selectedOption.getName();
 
         // 调用大模型生成报告内容
         ReportContent content = reportAgent.generateReport(result.getResultData(), selectedOptionName);
@@ -302,6 +309,7 @@ public class DecisionServiceImpl implements DecisionService {
         // 2. 生成报告（结构化内容）
         Report report = new Report();
         report.setDecisionId(id);
+        report.setAnalysisResultId(result.getId());
         report.setContent(objectMapper.writeValueAsString(content));
         report.setCreatedAt(now);
         reportMapper.insert(report);
@@ -311,9 +319,7 @@ public class DecisionServiceImpl implements DecisionService {
         decision.setReportId(report.getId());
         decision.setHasPendingResult(false);
         decision.setPendingResultId(null);
-        if (StringUtils.hasText(request.getSelectedOptionId())) {
-            decision.setPreferredOptionId(parseFlexibleId(request.getSelectedOptionId(), "opt_"));
-        }
+        decision.setPreferredOptionId(selectedOption.getId());
         decision.setUpdatedAt(now);
         decisionMapper.updateById(decision);
 
@@ -335,6 +341,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
         // 优先读取用户保存的画布
         LambdaQueryWrapper<DecisionCanvas> canvasWrapper = new LambdaQueryWrapper<>();
@@ -368,6 +375,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
         // 解析请求中的画布
         Canvas newCanvas = new Canvas(request.getNodes(), request.getEdges());
@@ -593,6 +601,104 @@ public class DecisionServiceImpl implements DecisionService {
 
     // ==================== 私有工具方法 ====================
 
+    private void checkOwner(Decision decision) {
+        if (!Objects.equals(decision.getUserId(), getCurrentUserId())) {
+            throw new BusinessException(
+                    ErrorCode.NOT_FOUND,
+                    "决策问题不存在"
+            );
+        }
+    }
+
+    private void deleteDecisionRelations(Long decisionId) {
+        reportMapper.delete(
+                new LambdaQueryWrapper<Report>()
+                        .eq(Report::getDecisionId, decisionId)
+        );
+        analysisResultMapper.delete(
+                new LambdaQueryWrapper<AnalysisResult>()
+                        .eq(AnalysisResult::getDecisionId, decisionId)
+        );
+
+        List<Long> taskIds = analysisTaskMapper.selectList(
+                        new LambdaQueryWrapper<AnalysisTask>()
+                                .eq(AnalysisTask::getDecisionId, decisionId)
+                ).stream()
+                .map(AnalysisTask::getId)
+                .toList();
+        if (!taskIds.isEmpty()) {
+            analysisStepMapper.delete(
+                    new LambdaQueryWrapper<AnalysisStep>()
+                            .in(AnalysisStep::getRunId, taskIds)
+            );
+        }
+
+        analysisTaskMapper.delete(
+                new LambdaQueryWrapper<AnalysisTask>()
+                        .eq(AnalysisTask::getDecisionId, decisionId)
+        );
+        decisionCanvasMapper.delete(
+                new LambdaQueryWrapper<DecisionCanvas>()
+                        .eq(DecisionCanvas::getDecisionId, decisionId)
+        );
+        decisionFactorMapper.delete(
+                new LambdaQueryWrapper<DecisionFactor>()
+                        .eq(DecisionFactor::getDecisionId, decisionId)
+        );
+        decisionSolutionMapper.delete(
+                new LambdaQueryWrapper<DecisionSolution>()
+                        .eq(DecisionSolution::getDecisionId, decisionId)
+        );
+    }
+
+    private AnalysisResult getAnalysisResultOrThrow(
+            Long decisionId,
+            String analysisResultId) {
+        Long resultId = parseId(
+                analysisResultId,
+                "ar_",
+                "analysisResultId"
+        );
+        AnalysisResult result = analysisResultMapper.selectById(resultId);
+        if (result == null
+                || !Objects.equals(result.getDecisionId(), decisionId)) {
+            throw new BusinessException(
+                    ErrorCode.NOT_FOUND,
+                    "分析结果不存在"
+            );
+        }
+        return result;
+    }
+
+    private Option getOptionOrThrow(
+            AnalysisResult result,
+            String optionId) {
+        if (!StringUtils.hasText(optionId)
+                || !optionId.startsWith("opt_")) {
+            throw new BusinessException(
+                    ErrorCode.BAD_REQUEST,
+                    "optionId 格式错误"
+            );
+        }
+
+        AnalysisResultDto resultDto =
+                parseAnalysisResultDto(result.getResultData());
+        if (resultDto.getOptions() == null) {
+            throw new BusinessException(
+                    ErrorCode.BAD_REQUEST,
+                    "所选方案不属于该分析结果"
+            );
+        }
+
+        return resultDto.getOptions().stream()
+                .filter(option -> optionId.equals(option.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.BAD_REQUEST,
+                        "所选方案不属于该分析结果"
+                ));
+    }
+
     private Long getCurrentUserId() {
         return (Long) SecurityContextHolder.getContext()
                 .getAuthentication().getPrincipal();
@@ -626,17 +732,6 @@ public class DecisionServiceImpl implements DecisionService {
         } catch (NumberFormatException e) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                     fieldName + " 格式错误");
-        }
-    }
-
-    /**
-     * 解析形如 "opt_1" 或 "opt_redis" 的ID，返回数字部分（用于存储到 preferredOptionId）
-     */
-    private Long parseFlexibleId(String externalId, String prefix) {
-        try {
-            return Long.parseLong(externalId.substring(prefix.length()));
-        } catch (NumberFormatException e) {
-            return (long) Math.abs(externalId.substring(prefix.length()).hashCode());
         }
     }
 
@@ -704,8 +799,7 @@ public class DecisionServiceImpl implements DecisionService {
                 .goal(entity.getGoal())
                 .constraints(entity.getConstraints())
                 .status(entity.getStatus())
-                .preferredOptionId(entity.getPreferredOptionId() != null
-                        ? "opt_" + entity.getPreferredOptionId() : null)
+                .preferredOptionId(entity.getPreferredOptionId())
                 .latestTaskId(entity.getLatestTaskId() != null
                         ? "t_" + entity.getLatestTaskId() : null)
                 .hasPendingResult(entity.getHasPendingResult())
