@@ -1,19 +1,24 @@
 package qg.po.midterm.workflow.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
+import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.ValidationResult;
+import qg.po.midterm.workflow.AnalysisResultRepairer;
 import qg.po.midterm.workflow.DecisionWorkflow;
 import qg.po.midterm.workflow.WorkflowExecutor;
 import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
 import qg.po.midterm.workflow.event.WorkflowFailedEvent;
 import qg.po.midterm.workflow.state.DecisionState;
+import qg.po.midterm.workflow.utils.AnalysisResultValidator;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,6 +30,8 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     private final DecisionWorkflow decisionWorkflow;
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
+    private final AnalysisResultRepairer resultRepairer;
 
     public String startAnalysis(
             String taskId,
@@ -87,9 +94,31 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     @Override
     public ValidationResult validateAndRepair(String jsonResult) {
-        // 由于现在已经引入了图内的一次修复节点(RepairNode)，这里的外部校验方法可能会被逐步废弃，
-        // 或者保留给前端单纯调校验使用。
-        return new ValidationResult(true, false, null, null);
+        // 对应 PRD 12 节：先解析为 JSON，再做强校验；不合格则带原 JSON 交给 AI 修复一次后二次校验。
+        AnalysisResultDto dto;
+        try {
+            dto = objectMapper.readValue(jsonResult, AnalysisResultDto.class);
+        } catch (Exception e) {
+            log.error("AI 结果 JSON 解析失败", e);
+            return new ValidationResult(false, false, List.of("result (JSON 解析失败)"), List.of(e.getMessage()));
+        }
+
+        List<String> missingFields = AnalysisResultValidator.validate(dto);
+        if (missingFields.isEmpty()) {
+            return new ValidationResult(true, false, List.of(), null);
+        }
+
+        try {
+            AnalysisResultDto repaired = resultRepairer.repair(
+                    "校验失败，以下字段缺失或非法:\n- " + String.join("\n- ", missingFields),
+                    dto
+            );
+            List<String> repairedMissing = AnalysisResultValidator.validate(repaired);
+            return new ValidationResult(repairedMissing.isEmpty(), true, repairedMissing, null);
+        } catch (Exception e) {
+            log.error("AI 修复调用失败", e);
+            return new ValidationResult(false, true, missingFields, List.of("AI 修复调用失败: " + e.getMessage()));
+        }
     }
 
     @Override

@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * ValidateNode 单元测试
- * 
+ *
  * 专门针对《接口文档 2.0》第 12 节 “AI 结果强校验拦截” 的核心规则进行边界测试。
  */
 class ValidateNodeTest {
@@ -29,41 +29,44 @@ class ValidateNodeTest {
     }
 
     /**
-     * 构建一个全字段完美的满血状态（完美匹配 PRD 12 节约束）。
+     * 构建一个全字段完美的满血状态（完美匹配 PRD 12 节约束 + 4.2/4.3 数据契约）。
      */
     private Map<String, Object> buildPerfectInitData() {
         Map<String, Object> initData = new HashMap<>();
-        
+
         // 1. 必填理解
         initData.put("understanding", "完美理解了业务背景和目标。");
-        
-        // 2. 至少1个因素
+
+        // 2. 至少1个因素，含 id/name/weight
         Factor f1 = new Factor();
         f1.setId("f_1");
         f1.setName("性能");
+        f1.setWeight(0.3);
         initData.put("factors", List.of(f1));
-        
-        // 3. 必须包含 2 到 3 个选项，且五维分数齐全
+
+        // 3. 2 个候选方案，五维分数均为 1-5，且含 name
         Option opt1 = new Option();
         opt1.setId("opt_1");
+        opt1.setName("优先学习 Redis");
         Map<String, Integer> scores1 = new HashMap<>();
-        scores1.put("cost", 80);
-        scores1.put("time", 70);
-        scores1.put("benefit", 90);
-        scores1.put("risk", 60);
-        scores1.put("feasibility", 85);
+        scores1.put("cost", 4);
+        scores1.put("time", 4);
+        scores1.put("benefit", 5);
+        scores1.put("risk", 3);
+        scores1.put("feasibility", 4);
         opt1.setScores(scores1);
 
         Option opt2 = new Option();
         opt2.setId("opt_2");
-        Map<String, Integer> scores2 = new HashMap<>(scores1); // 复制一份完美分数
-        opt2.setScores(scores2);
+        opt2.setName("优先学习 Docker");
+        opt2.setScores(new HashMap<>(scores1));
 
         initData.put("options", Arrays.asList(opt1, opt2));
 
-        // 4. 必填推荐
+        // 4. 必填推荐，optionId 必须指向存在的方案
         AnalysisResultDto.Recommendation rec = new AnalysisResultDto.Recommendation();
         rec.setOptionId("opt_1");
+        rec.setReason("Redis 是 Java 后端面试高频考点");
         initData.put("recommendation", rec);
 
         // 5. 必填下一步行动
@@ -94,12 +97,12 @@ class ValidateNodeTest {
     @Test
     void testValidate_MissingOptions_ShouldReturnErrorMsg() throws Exception {
         Map<String, Object> initData = buildPerfectInitData();
-        
+
         // 故意只保留 1 个方案
         @SuppressWarnings("unchecked")
         List<Option> options = (List<Option>) initData.get("options");
         initData.put("options", options.subList(0, 1));
-        
+
         DecisionState state = new DecisionState(initData);
         Map<String, Object> result = validateNode.apply(state);
 
@@ -115,12 +118,12 @@ class ValidateNodeTest {
     @Test
     void testValidate_MissingScores_ShouldReturnErrorMsg() throws Exception {
         Map<String, Object> initData = buildPerfectInitData();
-        
+
         // 故意删掉第 1 个方案的 feasibility 分数
         @SuppressWarnings("unchecked")
         List<Option> options = (List<Option>) initData.get("options");
         options.get(0).getScores().remove("feasibility");
-        
+
         DecisionState state = new DecisionState(initData);
         Map<String, Object> result = validateNode.apply(state);
 
@@ -142,11 +145,87 @@ class ValidateNodeTest {
         DecisionState state = new DecisionState(initData);
 
         RuntimeException exception = assertThrows(
-            RuntimeException.class, 
+            RuntimeException.class,
             () -> validateNode.apply(state),
             "重试次数到达上限，必须抛出异常结束工作流"
         );
-        
+
         assertTrue(exception.getMessage().contains("彻底失败"), "异常信息中应该包含 '彻底失败' 提示词");
+    }
+
+    /**
+     * 测试场景 5：因素缺少 name（PRD 4.2 要求每项含 id/name/weight/description）。
+     * 预期：返回包含 "factors[0].name" 的 errorMsg。
+     */
+    @Test
+    void testValidate_MissingFactorName_ShouldReturnErrorMsg() throws Exception {
+        Map<String, Object> initData = buildPerfectInitData();
+
+        @SuppressWarnings("unchecked")
+        List<Factor> factors = (List<Factor>) initData.get("factors");
+        factors.get(0).setName("");
+
+        DecisionState state = new DecisionState(initData);
+        Map<String, Object> result = validateNode.apply(state);
+
+        assertTrue(result.containsKey("errorMsg"));
+        assertTrue(((String) result.get("errorMsg")).contains("factors[0].name"));
+    }
+
+    /**
+     * 测试场景 6：五维分数超出 1-5 值域（PRD 4.3 要求均为 1-5）。
+     * 预期：返回包含 "options[0].scores.cost" 的 errorMsg。
+     */
+    @Test
+    void testValidate_ScoreOutOfRange_ShouldReturnErrorMsg() throws Exception {
+        Map<String, Object> initData = buildPerfectInitData();
+
+        @SuppressWarnings("unchecked")
+        List<Option> options = (List<Option>) initData.get("options");
+        options.get(0).getScores().put("cost", 8);
+
+        DecisionState state = new DecisionState(initData);
+        Map<String, Object> result = validateNode.apply(state);
+
+        assertTrue(result.containsKey("errorMsg"));
+        assertTrue(((String) result.get("errorMsg")).contains("options[0].scores.cost"));
+    }
+
+    /**
+     * 测试场景 7：推荐方案指向不存在的方案 id（PRD 4.2 要求推荐必须引用候选方案之一）。
+     * 预期：返回包含 "recommendation.optionId" 的 errorMsg。
+     */
+    @Test
+    void testValidate_RecommendationNotReferencingOption_ShouldReturnErrorMsg() throws Exception {
+        Map<String, Object> initData = buildPerfectInitData();
+
+        AnalysisResultDto.Recommendation rec =
+                (AnalysisResultDto.Recommendation) initData.get("recommendation");
+        rec.setOptionId("opt_999");
+
+        DecisionState state = new DecisionState(initData);
+        Map<String, Object> result = validateNode.apply(state);
+
+        assertTrue(result.containsKey("errorMsg"));
+        assertTrue(((String) result.get("errorMsg")).contains("recommendation.optionId"));
+    }
+
+    /**
+     * 测试场景 8：推荐理由缺失（PRD 4.2 recommendation 含 optionId 和 reason）。
+     * 预期：返回包含 "recommendation.reason" 的 errorMsg。
+     */
+    @Test
+    void testValidate_MissingRecommendationReason_ShouldReturnErrorMsg() throws Exception {
+        Map<String, Object> initData = buildPerfectInitData();
+
+        AnalysisResultDto.Recommendation rec =
+                (AnalysisResultDto.Recommendation) initData.get("recommendation");
+        rec.setReason("  ");
+
+        DecisionState state = new DecisionState(initData);
+        Map<String, Object> result = validateNode.apply(state);
+
+        assertTrue(result.containsKey("errorMsg"));
+        assertTrue(((String) result.get("errorMsg")).contains("recommendation.reason"));
     }
 }
