@@ -35,11 +35,13 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [RequirementAnalysis] executing for decision: {}", state.getDecisionId());
 
+        String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
         String background = state.getBackground() != null ? state.getBackground() : "无";
         String goal = state.getGoal() != null ? state.getGoal() : "未明确";
         String constraints = state.getConstraints() != null ? state.getConstraints() : "无";
 
         Map<String, Object> params = Map.of(
+            "title", title,
             "background", background,
             "goal", goal,
             "constraints", constraints

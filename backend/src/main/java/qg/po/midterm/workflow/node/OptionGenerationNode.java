@@ -58,7 +58,10 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
                     .map(f -> String.format("- %s (权重: %.2f): %s", f.getName(), f.getWeight(), f.getDescription()))
                     .collect(Collectors.joining("\n"));
 
+            String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
+
             Map<String, Object> params = Map.of(
+                    "title", title,
                     "understanding", understanding != null ? understanding : "无",
                     "constraints", constraints != null ? constraints : "无",
                     "factors", factorStr

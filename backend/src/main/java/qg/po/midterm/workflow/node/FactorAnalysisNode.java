@@ -51,10 +51,12 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
             log.info("Node [FactorAnalysis] executing for decision: {}", state.getDecisionId());
 
+            String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
             String understanding = state.getUnderstanding();
             String background = state.getBackground();
 
             Map<String, Object> params = Map.of(
+                    "title", title,
                     "background", background != null ? background : "无",
                     "understanding", understanding != null ? understanding : "无"
             );

@@ -53,7 +53,10 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
                 .map(o -> String.format("- 方案ID: %s, 名称: %s, 描述: %s", o.getId(), o.getName(), o.getDescription()))
                 .collect(Collectors.joining("\n"));
 
+            String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
+
             Map<String, Object> params = Map.of(
+                "title", title,
                 "understanding", understanding != null ? understanding : "无",
                 "options", optionStr
             );
