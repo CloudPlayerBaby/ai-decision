@@ -12,7 +12,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      refetchOnWindowFocus: false,
+      refetchOnWindowFocus: false,//窗口请求不会刷新
       staleTime: 30_000,//30s内不会刷新
       gcTime: 5 * 60_000,//5min后会删除缓存
     },

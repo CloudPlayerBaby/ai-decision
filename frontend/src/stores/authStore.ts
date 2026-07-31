@@ -11,8 +11,11 @@ interface AuthState {
   user: AuthUser | null
   setSession: (token: string, user: AuthUser) => void
   clearSession: () => void
+  /** 以 Local Storage 为准同步内存（DevTools 改 token 后立刻生效） */
+  hydrateFromStorage: () => string | null
   isAuthenticated: () => boolean
 }
+
 function readStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
 }
@@ -56,6 +59,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
     set({ token: null, user: null })
+  },
+  hydrateFromStorage: () => {
+    const token = readStoredToken()
+    const user = readStoredUser()
+    const current = get()
+    const userChanged =
+      (current.user?.id ?? null) !== (user?.id ?? null) ||
+      (current.user?.username ?? null) !== (user?.username ?? null) ||
+      (current.user?.email ?? null) !== (user?.email ?? null)
+    if (current.token !== token || userChanged) {
+      set({ token, user })
+    }
+    return token
   },
   isAuthenticated: () => Boolean(get().token),
 }))

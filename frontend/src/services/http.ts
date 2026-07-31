@@ -28,10 +28,68 @@ function redirectToLogin() {
   }
 }
 
+/** 登录/注册不携带旧 Token，避免坏掉的 accessToken 干扰重新登录 */
+function isAuthPublicRequest(config: InternalAxiosRequestConfig): boolean {
+  const url = config.url ?? ''
+  return url.includes('/auth/login') || url.includes('/auth/register')
+}
+
+function handleUnauthorized(
+  messageText: string,
+  config?: InternalAxiosRequestConfig,
+  data?: unknown,
+) {
+  // 账号密码错误等：只提示，不清会话、不整页跳转
+  if (config && isAuthPublicRequest(config)) {
+    return Promise.reject(
+      new ApiError(messageText, {
+        code: BusinessCode.Unauthorized,
+        httpStatus: 401,
+        data,
+      }),
+    )
+  }
+
+  // 过期请求：发出时用的是旧 Token，登录后已换新 Token，忽略此次 401
+  const reqAuth = config?.headers?.Authorization
+  const currentToken = useAuthStore.getState().token
+  if (
+    currentToken &&
+    typeof reqAuth === 'string' &&
+    reqAuth !== `Bearer ${currentToken}`
+  ) {
+    return Promise.reject(
+      new ApiError(messageText, {
+        code: BusinessCode.Unauthorized,
+        httpStatus: 401,
+        data,
+      }),
+    )
+  }
+
+  message.error(messageText)
+  redirectToLogin()
+  return Promise.reject(
+    new ApiError(messageText, {
+      code: BusinessCode.Unauthorized,
+      httpStatus: 401,
+      data,
+    }),
+  )
+}
+
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = useAuthStore.getState().token
+  if (isAuthPublicRequest(config)) {
+    delete config.headers.Authorization
+    return config
+  }
+
+  // 每次请求前从 Local Storage 同步，避免面板改 token 后仍带旧值
+  const token = useAuthStore.getState().hydrateFromStorage()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  } else {
+    delete config.headers.Authorization
   }
   return config
 })
@@ -58,14 +116,10 @@ http.interceptors.response.use(
       payload.code === BusinessCode.Unauthorized ||
       response.status === 401
     ) {
-      message.error(payload.message || '登录已失效，请重新登录')
-      redirectToLogin()
-      return Promise.reject(
-        new ApiError(payload.message || '未登录或 Token 失效', {
-          code: BusinessCode.Unauthorized,
-          httpStatus: response.status,
-          data: payload.data,
-        }),
+      return handleUnauthorized(
+        payload.message || '登录已失效，请重新登录',
+        response.config,
+        payload.data,
       )
     }
 
@@ -84,14 +138,10 @@ http.interceptors.response.use(
       const payload = error.response?.data as ApiResponse<unknown> | undefined
 
       if (status === 401 || payload?.code === BusinessCode.Unauthorized) {
-        message.error(payload?.message || '登录已失效，请重新登录')
-        redirectToLogin()
-        return Promise.reject(
-          new ApiError(payload?.message || '未登录或 Token 失效', {
-            code: BusinessCode.Unauthorized,
-            httpStatus: status,
-            data: payload?.data,
-          }),
+        return handleUnauthorized(
+          payload?.message || '登录已失效，请重新登录',
+          error.config,
+          payload?.data,
         )
       }
 
