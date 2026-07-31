@@ -21,13 +21,6 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     private final DecisionWorkflow decisionWorkflow;
 
-    @Override
-    public String startAnalysis(String decisionId, String background, String goal, String constraints) {
-        String taskId = UUID.randomUUID().toString();
-
-        return startAnalysis(taskId, decisionId, background, goal, constraints);
-    }
-
     public String startAnalysis(
             String taskId,
             String decisionId,
@@ -54,13 +47,6 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
         // 恢复上一次挂起的图状态并继续执行失败的节点。
         runGraph(taskId, null);
         return "RETRY_TRIGGERED";
-    }
-
-    @Override
-    public String startPartialAnalysis(String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState) {
-        String taskId = UUID.randomUUID().toString();
-
-        return startPartialAnalysis(taskId, decisionId, changedNodeIds, currentState);
     }
 
     public String startPartialAnalysis(

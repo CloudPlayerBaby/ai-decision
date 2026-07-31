@@ -16,24 +16,6 @@ import qg.po.midterm.workflow.state.DecisionState;
 public interface WorkflowExecutor {
 
     /**
-     * 【给 B 同学 / C 同学使用】：全新发起一次全量决策推演任务
-     * <p>
-     * 对应 PRD 7.1 节。这是最标准的图引擎执行入口。
-     * 引擎接收最原始的业务请求参数，会经历完整的节点：背景分析 -> 因素拆解 -> 生成方案 -> 方案对比 -> 结果输出。
-     * 
-     * ⚠️ 注意事项：
-     * 1. 此方法内部是**异步执行或阻塞执行**（取决于实现方式），建议 B 同学在调用时，把它包在 `CompletableFuture` 或 Spring Async 中。
-     * 2. 执行过程中，引擎会自动通过 `ApplicationEventPublisher` 抛出 `NodeExecutionEvent`。B 同学需要配置 `@EventListener` 全局监听该事件，将其转为 SSE 推给前端。
-     *
-     * @param decisionId  所属的决策问题唯一标识 (对应 PRD 4.1，用于持久化绑定)
-     * @param background  用户填写的补充背景（可空，最大 2000 字，引擎内部不校验超长，上游 C 组负责前置截断）
-     * @param goal        用户填写的核心决策目标（必填，引擎分析的锚点）
-     * @param constraints 用户填写的约束条件（可空，例如“时间不超过2天”）
-     * @return 引擎自动生成的全新推演 taskId。B 同学需要把这个 taskId 落库，用来应对前端断线重连。
-     */
-    String startAnalysis(String decisionId, String background, String goal, String constraints);
-
-    /**
      * 【给 B 同学使用】：死机读档复活（原点重试失败步骤）
      * <p>
      * 对应 PRD 7.3 节。当引擎执行某个节点由于网络闪断、AI 校验彻底挂掉（状态变成 FAILED）后，
@@ -47,24 +29,6 @@ public interface WorkflowExecutor {
      * @return 返回 "RETRY_TRIGGERED" 代表成功丢入队列；如果该 taskId 的快照不存在，可能会抛出异常。
      */
     String retryStep(String taskId);
-
-    /**
-     * 【给 C 同学使用】：基于用户修改画布触发的“局部重推”
-     * <p>
-     * 对应 PRD 10.3 节。用户在前端微调了某个因素权重或某个方案描述，点击【重新评估】。
-     * 
-     * 🧠 智能路由机制：
-     * A 组引擎会根据你传过来的 `changedNodeIds`（被改掉的组件标识）：
-     * - 改了因素 (f_xxx)：自动将起点算为 `GENERATE_OPTIONS`
-     * - 改了方案 (opt_xxx)：自动将起点算为 `COMPARE_OPTIONS`
-     * 随后图启动时，引擎会空间跳跃，绕过前面又贵又慢的节点，直接基于旧数据继续往下算。
-     * 
-     * @param decisionId     当前决策问题 ID
-     * @param changedNodeIds 前端提交上来的，被修改的节点 ID 集合（比如 ["f_time", "opt_redis"]）
-     * @param currentState   修改后、且包含历史推演满血数据的上下文大满贯对象 (由 C 组从数据库组装并传入)
-     * @return 返回全新生成的 taskId（注意：局部重推是生成新的草案，所以是新任务）
-     */
-    String startPartialAnalysis(String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState);
 
     /**
      * 【给 B 同学 / C 同学使用】：全新发起一次全量决策推演任务

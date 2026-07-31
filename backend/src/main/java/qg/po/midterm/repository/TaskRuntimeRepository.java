@@ -23,7 +23,6 @@ public class TaskRuntimeRepository {
     private static final String TICKET_KEY_PREFIX = "sse_ticket:";
     private static final String EVENT_ID_KEY_PREFIX = "sse_event_id:";
     private static final String EVENT_SEQUENCE_KEY = "sse_event_sequence";
-    private static final String WORKFLOW_TASK_KEY_PREFIX = "workflow_task:";
 
     private final StringRedisTemplate stringRedisTemplate;
     private final Map<String, CopyOnWriteArrayList<SseEmitter>> connections = new ConcurrentHashMap<>();
@@ -96,26 +95,5 @@ public class TaskRuntimeRepository {
     // 从redis里面读取
     public String getLastEventId(String taskId) {
         return stringRedisTemplate.opsForValue().get(EVENT_ID_KEY_PREFIX + taskId);
-    }
-
-    /**
-     * 保存数据库任务 ID 与 Workflow 自己生成的 taskId 的对应关系
-     */
-    public void saveWorkflowTaskId(
-            String databaseTaskId,
-            String workflowTaskId) {
-        stringRedisTemplate.opsForValue().set(
-                WORKFLOW_TASK_KEY_PREFIX + databaseTaskId,
-                workflowTaskId
-        );
-    }
-
-    /**
-     * 重试时根据数据库任务 ID 找回 Workflow checkpoint 的 taskId
-     */
-    public String getWorkflowTaskId(String databaseTaskId) {
-        return stringRedisTemplate.opsForValue().get(
-                WORKFLOW_TASK_KEY_PREFIX + databaseTaskId
-        );
     }
 }

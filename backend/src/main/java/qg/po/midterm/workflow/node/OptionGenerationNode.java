@@ -30,7 +30,13 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
     @Value("classpath:prompts/option.st")
     private Resource promptResource;
 
-    public record OptionGenerationResult(List<Option> options) {}
+    public record OptionGenerationResult(
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("不超过15个字的简短总结，例如：'已生成3个候选方案'")
+            String summary,
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("对本阶段生成方案的详细总结文本，适合直接展示给用户看")
+            String content,
+            List<Option> options
+    ) {}
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
@@ -66,7 +72,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("options", result.options()));
+            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             return Map.of("options", result.options());
         } catch (Exception e) {

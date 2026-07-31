@@ -30,7 +30,13 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
     @Value("classpath:prompts/factor.st")
     private Resource promptResource;
 
-    public record FactorAnalysisResult(List<Factor> factors) {}
+    public record FactorAnalysisResult(
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("不超过15个字的简短总结，例如：'已提取3个关键因素'")
+            String summary,
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("对本阶段提取因素的详细总结文本，适合直接展示给用户看")
+            String content,
+            List<Factor> factors
+    ) {}
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
@@ -62,7 +68,7 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("factors", result.factors()));
+            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             
             return Map.of("factors", result.factors());

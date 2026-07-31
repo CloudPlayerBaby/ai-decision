@@ -28,14 +28,11 @@ public class AnalysisWorkflowDispatcher {
         try {
             // 调用提供的整轮推演接口
             String workflowTaskId = workflowExecutor.startAnalysis(
+                    taskId,
                     decisionId,
                     decision.getBackground(),
                     decision.getGoal(),
                     decision.getConstraints()
-            );
-            runtimeRepository.saveWorkflowTaskId(
-                    taskId,
-                    workflowTaskId
             );
         } catch (Exception exception) {
             log.error("整体推演调用失败, taskId={}", taskId, exception);
@@ -56,13 +53,10 @@ public class AnalysisWorkflowDispatcher {
         try {
             // 局部起点由 WorkflowExecutor 根据 changedNodeIds 判断。
             String workflowTaskId = workflowExecutor.startPartialAnalysis(
+                    taskId,
                     decisionId,
                     changedNodeIds,
                     currentState
-            );
-            runtimeRepository.saveWorkflowTaskId(
-                    taskId,
-                    workflowTaskId
             );
         } catch (Exception exception) {
             log.error(
@@ -74,16 +68,11 @@ public class AnalysisWorkflowDispatcher {
         }
     }
 
+    // 异步发起失败步骤尝试
     @Async
     public void retryStep(String taskId, String stepId) {
         try {
-            String workflowTaskId =
-                    runtimeRepository.getWorkflowTaskId(taskId);
-            workflowExecutor.retryStep(
-                    workflowTaskId == null
-                            ? taskId
-                            : workflowTaskId
-            );
+            workflowExecutor.retryStep(taskId);
         } catch (Exception exception) {
             log.error("Failed to dispatch retry, taskId={}, stepId={}", taskId, stepId, exception);
         }

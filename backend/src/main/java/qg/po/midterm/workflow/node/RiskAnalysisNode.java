@@ -30,7 +30,14 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
     @Value("classpath:prompts/risk.st")
     private Resource promptResource;
 
-    public record RiskAnalysisResult(AnalysisResultDto.Recommendation recommendation, List<String> nextActions) {}
+    public record RiskAnalysisResult(
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("不超过15个字的简短总结，例如：'已完成风险评估与对比'")
+            String summary,
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("对本阶段评估对比结果的详细总结文本，适合直接展示给用户看，主要概括你最终推荐的方案及其核心理由")
+            String content,
+            AnalysisResultDto.Recommendation recommendation, 
+            List<String> nextActions
+    ) {}
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
@@ -64,9 +71,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
-                Map.of("recommendation", result.recommendation(), "nextActions", result.nextActions())
-            );
+            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             
             return Map.of(

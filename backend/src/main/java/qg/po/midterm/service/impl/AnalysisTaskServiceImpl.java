@@ -22,6 +22,7 @@ import qg.po.midterm.vo.*;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
+import qg.po.midterm.workflow.utils.StepDisplayUtils;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -102,7 +103,6 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
         String taskId = "t_" + task.getId();
 
-        // TODO 查看这里的逻辑，怎么开始运行workflow的
         // 数据库事务提交后再启动 Workflow，避免第一批节点事件查不到任务
         runAfterCommit(() -> workflowDispatcher.startFullAnalysis(
                 taskId,
@@ -238,23 +238,18 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         // 将数据库实体转换为接口 VO
         List<NodeProgressVO> stepVOList = new ArrayList<>();
         for (AnalysisStep step : steps) {
-            StepText stepText = readStepText(step.getStepName(), step.getOutputData());
-            String summary = stepText.summary() == null
-                    ? getDefaultSummary(
-                    step.getStepName(),
-                    step.getStatus()
-            )
-                    : stepText.summary();
+            StepDisplayUtils.StepDisplay display = StepDisplayUtils.parseDisplay(
+                    step.getStepName(), step.getStatus(), step.getOutputData(), step.getErrorMessage());
 
             stepVOList.add(new NodeProgressVO(
                     "s_" + step.getId(),
                     step.getStepName(),
-                    getDisplayName(step.getStepName()),
+                    StepDisplayUtils.getDisplayName(step.getStepName()),
                     step.getStatus(),
                     toOffsetTime(step.getStartedAt()),
                     toOffsetTime(step.getFinishedAt()),
-                    summary,
-                    stepText.content()
+                    display.summary(),
+                    display.content()
             ));
         }
 
@@ -742,69 +737,9 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         );
     }
 
-    // TODO 看看要不要让模型生成
-    private StepText readStepText(String stepName, String outputData) {
-        if (outputData == null || outputData.isBlank()) {
-            return new StepText(null, null);
-        }
-        try {
-            JsonNode node = objectMapper.readTree(outputData);
-
-            String summary = switch (stepName) {
-                case "UNDERSTAND" -> "问题理解完成";
-                case "EXTRACT_FACTORS" -> "关键因素提取完成";
-                case "GENERATE_OPTIONS" -> "候选方案生成完成";
-                case "COMPARE_OPTIONS" -> "评估与对比完成";
-                default -> "执行完成";
-            };
-
-            String content = switch (stepName) {
-                case "UNDERSTAND" -> textOrNull(node.get("understanding"));
-                case "EXTRACT_FACTORS" -> {
-                    JsonNode factors = node.get("factors");
-                    if (factors != null && factors.isArray()) {
-                        StringBuilder sb = new StringBuilder("关键因素包括：");
-                        for (JsonNode f : factors) {
-                            sb.append(textOrNull(f.get("name"))).append("、");
-                        }
-                        yield sb.substring(0, sb.length() - 1);
-                    }
-                    yield outputData;
-                }
-                case "GENERATE_OPTIONS" -> {
-                    JsonNode options = node.get("options");
-                    if (options != null && options.isArray()) {
-                        StringBuilder sb = new StringBuilder("生成了 " + options.size() + " 个候选方案：");
-                        for (JsonNode o : options) {
-                            sb.append(textOrNull(o.get("name"))).append("、");
-                        }
-                        yield sb.substring(0, sb.length() - 1);
-                    }
-                    yield outputData;
-                }
-                case "COMPARE_OPTIONS" -> {
-                    JsonNode recommendation = node.get("recommendation");
-                    if (recommendation != null) {
-                        yield "最终推荐：方案 " + textOrNull(recommendation.get("optionId")) + "。\n理由：" + textOrNull(recommendation.get("reason"));
-                    }
-                    yield textOrNull(node.get("reportSummary"));
-                }
-                default -> outputData;
-            };
-
-            if (content == null) {
-                content = outputData;
-            }
-
-            return new StepText(summary, content);
-        } catch (JacksonException exception) {
-            // 兼容旧数据：旧版本曾直接把文本放进 output_data
-            return new StepText(outputData, outputData);
-        }
-    }
 
     private String textOrNull(JsonNode node) {
-        return node == null || node.isNull() ? null : node.asString();
+        return node == null || node.isNull() ? null : node.asText();
     }
 
     /**
@@ -882,40 +817,10 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         }
     }
 
-    /**
-     * 步骤英文名对应的中文展示名
-     */
-    private String getDisplayName(String name) {
-        return switch (name) {
-            case "UNDERSTAND" -> "理解问题";
-            case "EXTRACT_FACTORS" -> "提取关键因素";
-            case "TOOL_CALL" -> "调用工具";
-            case "GENERATE_OPTIONS" -> "生成候选方案";
-            case "COMPARE_OPTIONS" -> "比较候选方案";
-            default -> name;
-        };
-    }
-
-    // 根据step的名称和status生成展示字符串
-    private String getDefaultSummary(String stepName, String status) {
-        String displayName = getDisplayName(stepName);
-        return switch (status) {
-            case "WAITING" -> "等待" + displayName;
-            case "RUNNING" -> "正在" + displayName;
-            case "SUCCEEDED" -> "已完成" + displayName;
-            case "FAILED" -> displayName + "失败";
-            default -> displayName;
-        };
-    }
-
-    // 把 LocalDateTime 转换成 offsetTime 格式
     private OffsetDateTime toOffsetTime(LocalDateTime time) {
         if (time == null) {
             return null;
         }
         return time.atZone(ZoneId.systemDefault()).toOffsetDateTime();
-    }
-
-    private record StepText(String summary, String content) {
     }
 }

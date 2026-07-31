@@ -185,90 +185,17 @@ public class NodeExecutionEventListener {
         data.put("stepId", "s_" + step.getId());
         data.put("status", step.getStatus());
         
-        // 解析 summary 和 content
-        String summary = "";
-        String content = "";
-        if ("RUNNING".equals(step.getStatus())) {
-            summary = getRunningSummary(step.getStepName());
-            content = "AI 正在深度思考中，请稍候...";
-        } else if ("SUCCEEDED".equals(step.getStatus())) {
-            summary = getSucceededSummary(step.getStepName());
-            content = parseContentFromOutputData(step.getStepName(), step.getOutputData());
-        } else if ("FAILED".equals(step.getStatus())) {
-            summary = "执行失败";
-            content = step.getErrorMessage() != null ? step.getErrorMessage() : "未知错误";
-        }
+        qg.po.midterm.workflow.utils.StepDisplayUtils.StepDisplay display = qg.po.midterm.workflow.utils.StepDisplayUtils.parseDisplay(
+                step.getStepName(), step.getStatus(), step.getOutputData(), step.getErrorMessage());
 
-        data.put("summary", summary);
-        data.put("content", content);
+        data.put("summary", display.summary());
+        data.put("content", display.content());
         data.put("progress", progress);
         data.put("occurredAt", OffsetDateTime.now());
         eventService.sendStepUpdate("t_" + task.getId(), data);
     }
 
-    private String getRunningSummary(String stepName) {
-        return switch (stepName) {
-            case "UNDERSTAND" -> "正在理解问题上下文";
-            case "EXTRACT_FACTORS" -> "正在分析关键因素";
-            case "GENERATE_OPTIONS" -> "正在生成候选方案";
-            case "COMPARE_OPTIONS" -> "正在进行风险与收益对比";
-            default -> "正在执行";
-        };
-    }
 
-    private String getSucceededSummary(String stepName) {
-        return switch (stepName) {
-            case "UNDERSTAND" -> "问题理解完成";
-            case "EXTRACT_FACTORS" -> "关键因素提取完成";
-            case "GENERATE_OPTIONS" -> "候选方案生成完成";
-            case "COMPARE_OPTIONS" -> "评估与对比完成";
-            default -> "执行完成";
-        };
-    }
-
-    private String parseContentFromOutputData(String stepName, String outputData) {
-        if (outputData == null || outputData.isBlank()) {
-            return "无输出内容";
-        }
-        try {
-            Map<String, Object> map = new com.fasterxml.jackson.databind.ObjectMapper().readValue(outputData, Map.class);
-            return switch (stepName) {
-                case "UNDERSTAND" -> (String) map.getOrDefault("understanding", outputData);
-                case "EXTRACT_FACTORS" -> {
-                    List<Map<String, Object>> factors = (List<Map<String, Object>>) map.get("factors");
-                    if (factors != null) {
-                        StringBuilder sb = new StringBuilder("关键因素包括：");
-                        for (Map<String, Object> f : factors) {
-                            sb.append(f.get("name")).append("、");
-                        }
-                        yield sb.substring(0, sb.length() - 1);
-                    }
-                    yield outputData;
-                }
-                case "GENERATE_OPTIONS" -> {
-                    List<Map<String, Object>> options = (List<Map<String, Object>>) map.get("options");
-                    if (options != null) {
-                        StringBuilder sb = new StringBuilder("生成了 " + options.size() + " 个候选方案：");
-                        for (Map<String, Object> o : options) {
-                            sb.append(o.get("name")).append("、");
-                        }
-                        yield sb.substring(0, sb.length() - 1);
-                    }
-                    yield outputData;
-                }
-                case "COMPARE_OPTIONS" -> {
-                    Map<String, Object> recommendation = (Map<String, Object>) map.get("recommendation");
-                    if (recommendation != null) {
-                        yield "最终推荐：方案 " + recommendation.get("optionId") + "。\n理由：" + recommendation.get("reason");
-                    }
-                    yield (String) map.getOrDefault("reportSummary", outputData);
-                }
-                default -> outputData;
-            };
-        } catch (Exception e) {
-            return outputData; // 解析失败则返回原始内容
-        }
-    }
 
     /**
      * Workflow 节点名转换为 API 步骤名
