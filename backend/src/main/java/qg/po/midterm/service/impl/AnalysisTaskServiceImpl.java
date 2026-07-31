@@ -450,8 +450,9 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         }
     }
 
-    // 过滤掉无效的
+    // 过滤掉空白的和重复的节点，只剩下需要修改的节点
     private List<String> cleanChangedNodeIds(PartialAnalysisRequest request) {
+        // 传入的 IDs 不能更改
         if (request == null || request.getChangedNodeIds() == null) {
             throw new BusinessException(
                     ErrorCode.BAD_REQUEST,
@@ -461,7 +462,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
         List<String> ids = request.getChangedNodeIds().stream()
                 .filter(id -> id != null && !id.isBlank())
-                .distinct()
+                .distinct() // 去重
                 .toList();
         if (ids.isEmpty()) {
             throw new BusinessException(

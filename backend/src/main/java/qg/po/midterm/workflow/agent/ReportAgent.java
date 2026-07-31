@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.ReportContent;
 
 import java.util.Map;
+import qg.po.midterm.workflow.utils.MarkdownStrippingConverter;
 
 /**
  * 专门负责生成决策报告的 Agent。
@@ -30,7 +31,8 @@ public class ReportAgent {
      * 将 JSON 结果和用户的选择，转化为精美的报告
      */
     public ReportContent generateReport(String analysisResultJson, String selectedOptionName) {
-        BeanOutputConverter<ReportContent> converter = new BeanOutputConverter<>(ReportContent.class);
+        MarkdownStrippingConverter<ReportContent> converter = new MarkdownStrippingConverter<>(ReportContent.class);
+
 
         Map<String, Object> params = Map.of(
                 "analysisResult", analysisResultJson != null ? analysisResultJson : "{}",
