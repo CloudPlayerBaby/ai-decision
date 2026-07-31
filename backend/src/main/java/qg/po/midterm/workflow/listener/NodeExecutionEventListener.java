@@ -110,7 +110,7 @@ public class NodeExecutionEventListener {
         Long taskDbId = parseTaskId(event.getTaskId());
         AnalysisTask task = (taskDbId != null) ? taskMapper.selectById(taskDbId) : null;
         if (task != null) {
-            failTask(task, null, event.getErrorMessage());
+            failTask(task, null, event.getErrorMessage(), null);
         }
     }
 
@@ -127,7 +127,7 @@ public class NodeExecutionEventListener {
         // 如果是修复节点，不展示，但是如果判断修复失败，直接标记为任务失败
         if ("Repair".equals(event.getNodeName())) {
             if ("FAILED".equals(event.getStatus())) {
-                failTask(task, null, event.getErrorMessage());
+                failTask(task, null, event.getErrorMessage(), event.getException());
             }
             return;
         }
@@ -186,7 +186,7 @@ public class NodeExecutionEventListener {
             }
             stepMapper.updateById(step);
         } else if ("FAILED".equals(event.getStatus())) {
-            failTask(task, step, event.getErrorMessage());
+            failTask(task, step, event.getErrorMessage(), event.getException());
         } else {
             return;
         }
@@ -200,7 +200,8 @@ public class NodeExecutionEventListener {
     private void failTask(
             AnalysisTask task,
             AnalysisStep step,
-            String message) {
+            String message,
+            Exception exception) {
         LocalDateTime now = LocalDateTime.now();
 
         if (step != null) {
@@ -229,6 +230,13 @@ public class NodeExecutionEventListener {
         data.put("message", message);
         data.put("failedStepId", step == null ? null : "s_" + step.getId());
         data.put("retryable", step != null);
+        
+        if (exception instanceof qg.po.midterm.common.exception.AiValidationException aiEx) {
+            data.put("missingFields", aiEx.getMissingFields());
+            data.put("repairAttempted", aiEx.isRepairAttempted());
+            data.put("errorCode", qg.po.midterm.common.enums.ErrorCode.AI_VALIDATION_FAILED.getCode());
+        }
+
         eventService.sendTaskFailed("t_" + task.getId(), data);
     }
 
