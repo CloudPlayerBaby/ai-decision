@@ -10,18 +10,15 @@ import {
   BulbFilled,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
-import { LAYOUT_LIMITS, useLayoutStore } from '../stores/layoutStore'
-import { ResizeHandle } from '../components/layout/ResizeHandle'
+import { useQuery } from '@tanstack/react-query'
+import { useAuthStore } from '@/stores/authStore'
+import { LAYOUT_LIMITS, useLayoutStore } from '@/stores/layoutStore'
+import { ResizeHandle } from '@/components/layout/ResizeHandle'
+import { listDecisions } from '@/services/decision.service'
+import { queryKeys } from '@/services/queryKeys'
 
 const { Sider, Content } = Layout
 const { Text, Title } = Typography
-
-const RECENT_DECISIONS = [
-  { id: 'demo-1', title: 'Redis 与 Docker 的优先级' },
-  { id: 'demo-2', title: '毕业旅行预算规划' },
-  { id: 'demo-3', title: '小组项目方向选择' },
-] as const
 
 export function MainLayout() {
   const location = useLocation()
@@ -37,14 +34,33 @@ export function MainLayout() {
   const { token } = theme.useToken()
   const isEyeCare = themeMode === 'eyeCare'
 
-  const isWorkbench =
-    /^\/decisions\/(?!new$)[^/]+$/.test(location.pathname) ||
-    location.pathname.startsWith('/workbench')
+  const leftDragMax = Math.max(
+    LAYOUT_LIMITS.leftMin,
+    Math.min(
+      LAYOUT_LIMITS.leftMax,
+      (typeof window !== 'undefined' ? window.innerWidth : 1440) -
+        LAYOUT_LIMITS.minCenterWidth -
+        LAYOUT_LIMITS.rightMin -
+        12,
+    ),
+  )
+
+  const recentQuery = useQuery({
+    queryKey: queryKeys.decisions.list({ page: 1, pageSize: 5 }),
+    queryFn: () => listDecisions({ page: 1, pageSize: 5 }),
+    staleTime: 60_000,
+  })
+  const recentDecisions = recentQuery.data?.list ?? []
+  const workbenchTarget = recentDecisions[0]?.id
+    ? `/workbench/${recentDecisions[0].id}`
+    : '/decisions'
+
+  const isWorkbench = location.pathname.startsWith('/workbench')
 
   let selectedKey = '/decisions'
   if (location.pathname.startsWith('/reports')) {
     selectedKey = '/reports'
-  } else if (isWorkbench || location.pathname === '/workbench') {
+  } else if (isWorkbench) {
     selectedKey = '/workbench'
   } else if (location.pathname.startsWith('/decisions')) {
     selectedKey = '/decisions'
@@ -73,7 +89,7 @@ export function MainLayout() {
   )
 
   return (
-    <Layout style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
+    <Layout className="app-shell">
       <div className="app-sider-shell">
         <Sider
           collapsible
@@ -135,10 +151,10 @@ export function MainLayout() {
                   label: leftCollapsed ? (
                     '决策工作台'
                   ) : (
-                    <Link to="/decisions/demo-1">决策工作台</Link>
+                    <Link to={workbenchTarget}>决策工作台</Link>
                   ),
                   onClick: leftCollapsed
-                    ? () => navigate('/decisions/demo-1')
+                    ? () => navigate(workbenchTarget)
                     : undefined,
                 },
                 {
@@ -174,19 +190,26 @@ export function MainLayout() {
                   最近决策
                 </Text>
                 <div className="app-sider__recent">
-                  {RECENT_DECISIONS.map((item) => {
-                    const active = location.pathname === `/decisions/${item.id}`
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={`app-sider__recent-item${active ? ' is-active' : ''}`}
-                        onClick={() => navigate(`/decisions/${item.id}`)}
-                      >
-                        {item.title}
-                      </button>
-                    )
-                  })}
+                  {recentDecisions.length === 0 ? (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      暂无最近决策
+                    </Text>
+                  ) : (
+                    recentDecisions.map((item) => {
+                      const active =
+                        location.pathname === `/workbench/${item.id}`
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`app-sider__recent-item${active ? ' is-active' : ''}`}
+                          onClick={() => navigate(`/workbench/${item.id}`)}
+                        >
+                          {item.title}
+                        </button>
+                      )
+                    })
+                  )}
                 </div>
               </>
             ) : (
@@ -233,7 +256,7 @@ export function MainLayout() {
             value={leftWidth}
             onChange={setLeftWidth}
             min={LAYOUT_LIMITS.leftMin}
-            max={LAYOUT_LIMITS.leftMax}
+            max={leftDragMax}
             title="拖动调整左侧栏宽度（双击收起）"
             onDoubleClick={() => setLeftCollapsed(true)}
           />

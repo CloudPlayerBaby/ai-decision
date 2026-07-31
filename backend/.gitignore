@@ -35,3 +35,8 @@ build/
 # Local secrets and Docker data (do not commit)
 .env
 docker/mysql/data/
+
+# AI documentation and rules
+AI_RULES.md
+AI情景推演决策系统*.md
+/src/test/

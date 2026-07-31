@@ -1,17 +1,20 @@
-import type { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfigProvider, App as AntApp, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { BrowserRouter } from 'react-router-dom'
-import { AppRouter } from './router'
-import { useLayoutStore } from '../stores/layoutStore'
-import { ThemeDocumentSync } from '../components/layout/ThemeDocumentSync'
+import type { ReactNode } from 'react'
+import { AppRouter } from '@/app/router'
+import { useLayoutStore } from '@/stores/layoutStore'
+import { ThemeDocumentSync } from '@/components/layout/ThemeDocumentSync'
+import { LayoutViewportSync } from '@/components/layout/LayoutViewportSync'
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
     },
   },
 })
@@ -53,6 +56,7 @@ function ThemedApp({ children }: { children?: ReactNode }) {
       }}
     >
       <ThemeDocumentSync />
+      <LayoutViewportSync />
       <AntApp>
         <BrowserRouter>{children ?? <AppRouter />}</BrowserRouter>
       </AntApp>

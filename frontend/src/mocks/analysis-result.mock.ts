@@ -4,16 +4,16 @@
  */
 
 import type { CanvasViewModel, FactorDetail, OptionDetail } from '../types/canvas'
+import type { AnalysisResult } from '../types/analysis'
 import { mockCanvas } from './canvas.mock'
 
 /**
- * Mock AnalysisResult
- * 用于 CanvasViewModel 组装时注入 factorsDetail / optionsDetail
+ * Mock AnalysisResult（供 buildMockCanvasViewModel 和 mockGetAnalysisResult 共用）
  */
-export const mockAnalysisResult = {
+export const mockAnalysisResult: AnalysisResult = {
   id: 'ar_40001',
   status: 'PENDING_CONFIRM',
-  understanding: '用户希望在一周内选择优先学习方向。',
+  understanding: '用户希望在一周内选择优先学习方向，提升 Java 后端面试竞争力。核心矛盾是有限时间内的学习路径选择。',
   factors: [
     {
       id: 'f_time',
@@ -83,6 +83,13 @@ export const mockAnalysisResult = {
   createdAt: '2026-07-30T21:38:00+08:00',
 }
 
+/** 已确认的草案 */
+export const MOCK_CONFIRMED_RESULT: AnalysisResult = {
+  ...mockAnalysisResult,
+  id: 'ar_40002',
+  status: 'CONFIRMED',
+}
+
 /**
  * Mock DecisionProblem
  * 用于 CanvasViewModel 组装时注入 decision
@@ -121,4 +128,17 @@ export function buildMockCanvasViewModel(): CanvasViewModel {
     optionsDetail,
     recommendedOptionId: mockAnalysisResult.recommendation.optionId,
   }
+}
+
+/**
+ * Mock getAnalysisResult
+ * 对应 analysis.service.ts getAnalysisResult(resultId?) 的 Mock 分支
+ */
+export function mockGetAnalysisResult(
+  _resultId?: string | null,
+): AnalysisResult | null {
+  if (_resultId === MOCK_CONFIRMED_RESULT.id) {
+    return MOCK_CONFIRMED_RESULT
+  }
+  return mockAnalysisResult
 }

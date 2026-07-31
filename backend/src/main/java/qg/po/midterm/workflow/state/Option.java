@@ -1,5 +1,7 @@
 package qg.po.midterm.workflow.state;
 
+import java.io.Serializable;
+
 import java.util.Map;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -10,7 +12,7 @@ import lombok.AllArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Schema(description = "候选决策方案")
-public class Option {
+public class Option implements Serializable {
     @Schema(description = "方案唯一标识")
     private String id;
     

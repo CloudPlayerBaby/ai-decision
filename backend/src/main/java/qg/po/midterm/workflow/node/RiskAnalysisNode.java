@@ -6,6 +6,9 @@ import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.io.Resource;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
@@ -24,39 +27,53 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
 
-    public record RiskAnalysisResult(AnalysisResultDto.Recommendation recommendation, List<String> nextActions) {}
+    @Value("classpath:prompts/risk.st")
+    private Resource promptResource;
+
+    public record RiskAnalysisResult(
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("不超过15个字的简短总结，例如：'已完成风险评估与对比'")
+            String summary,
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("对本阶段评估对比结果的详细总结文本，适合直接展示给用户看，主要概括你最终推荐的方案及其核心理由")
+            String content,
+            AnalysisResultDto.Recommendation recommendation, 
+            List<String> nextActions
+    ) {}
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        qg.po.midterm.workflow.context.TaskContextHolder.setContext(state.getTaskId(), state.getDecisionId());
         try {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [RiskAnalysis] executing for decision: {}", state.getDecisionId());
 
-        String understanding = state.getUnderstanding();
-        List<Option> options = state.getOptions();
-        
-        String optionStr = options == null ? "无" : options.stream()
-            .map(o -> String.format("- 方案ID: %s, 名称: %s, 描述: %s", o.getId(), o.getName(), o.getDescription()))
-            .collect(Collectors.joining("\n"));
+            String understanding = state.getUnderstanding();
+            List<Option> options = state.getOptions();
+            
+            String optionStr = options == null ? "无" : options.stream()
+                .map(o -> String.format("- 方案ID: %s, 名称: %s, 描述: %s", o.getId(), o.getName(), o.getDescription()))
+                .collect(Collectors.joining("\n"));
 
-        String prompt = String.format(
-            "基于以下决策核心理解以及生成的候选方案，请进行最终的风险对比与推荐。\n" +
-            "核心理解：%s\n" +
-            "候选方案：\n%s\n\n" +
-            "要求：\n" +
-            "1. 必须提供 recommendation (推荐方案)，包含 optionId (必须是上面提供的方案ID之一) 和 reason (推荐理由)。\n" +
-            "2. 必须提供 nextActions (下一步行动建议)，包含 3-5 条具体可落地的后续行动。\n" +
-            "3. 以标准的 JSON 格式输出，不要包含任何额外的解释或Markdown格式。",
-            understanding != null ? understanding : "无",
-            optionStr
-        );
+            Map<String, Object> params = Map.of(
+                "understanding", understanding != null ? understanding : "无",
+                "options", optionStr
+            );
+            String prompt = new PromptTemplate(promptResource).create(params).getContents();
+            
+            log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        RiskAnalysisResult result = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(RiskAnalysisResult.class);
+            RiskAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                    chatClient.prompt()
+                            .user(prompt)
+                            .call()
+                            .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(RiskAnalysisResult.class))
+            );
+                    
+            log.info("<<< 【AI Response】\n{}", result);
 
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            // 将大模型结果转换为 JSON 传入状态流，供前端渲染
+            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
+            
             return Map.of(
                 "recommendation", result.recommendation(),
                 "nextActions", result.nextActions()
@@ -64,6 +81,8 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
+        } finally {
+            qg.po.midterm.workflow.context.TaskContextHolder.clear();
         }
     }
 }

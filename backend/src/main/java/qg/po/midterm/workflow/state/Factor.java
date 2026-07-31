@@ -1,5 +1,7 @@
 package qg.po.midterm.workflow.state;
 
+import java.io.Serializable;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -9,7 +11,7 @@ import lombok.AllArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Schema(description = "影响决策的关键因素")
-public class Factor {
+public class Factor implements Serializable {
     @Schema(description = "因素唯一标识")
     private String id;
     

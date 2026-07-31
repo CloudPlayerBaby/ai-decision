@@ -7,6 +7,9 @@
  * 不出现在 CanvasNode 中，也不通过画布保存接口回写。
  */
 
+/** 节点类型枚举 */
+export type CanvasNodeType = 'decision' | 'factor' | 'option'
+
 /** 位置坐标 */
 export interface Position {
   x: number
@@ -66,23 +69,100 @@ export type OptionCanvasNode = {
 export type CanvasNode = DecisionCanvasNode | FactorCanvasNode | OptionCanvasNode
 
 /** Canvas 边 */
-export interface CanvasEdge {
-  id: string
-  source: string
-  target: string
-  relation: EdgeRelation
+/** @deprecated 使用 Position；保留别名以兼容服务层命名 */
+export type CanvasPosition = Position
+
+/**
+ * 决策问题节点数据
+ * 来自 DecisionProblem.title
+ */
+export interface DecisionNodeData {
+  /** 节点类型标识 */
+  nodeType: 'decision'
+  /** 决策问题标题 */
+  label: string
 }
 
-/** Canvas 数据 */
-export interface Canvas {
-  nodes: CanvasNode[]
-  edges: CanvasEdge[]
+/**
+ * 影响因素节点数据
+ * 来自 AnalysisResult.factors
+ */
+export interface FactorNodeData {
+  /** 节点类型标识 */
+  nodeType: 'factor'
+  /** 因素名称 */
+  label: string
+  /** 权重值 0-1，UI 展示为百分比 */
+  weight: number
+  /** 因素描述 */
+  description?: string
 }
+
+/**
+ * 候选方案五维评分
+ * 来自 AnalysisResult.options[].scores
+ * 所有维度 1-5，5 为最优；risk 维度 5 表示低风险
+ */
+export interface OptionScores {
+  cost: number // 成本（1=高成本，5=低成本）
+  time: number // 时间（1=耗时久，5=耗时短）
+  benefit: number // 收益（1=收益低，5=收益高）
+  risk: number // 风险（1=高风险，5=低风险）
+  feasibility: number // 可行性（1=难实现，5=易实现）
+}
+
+/**
+ * 候选方案节点数据
+ * 来自 AnalysisResult.options
+ */
+export interface OptionNodeData {
+  /** 节点类型标识 */
+  nodeType: 'option'
+  /** 方案名称 */
+  label: string
+  /** 五维评分 */
+  scores: OptionScores
+  /** 优点列表 */
+  pros?: string[]
+  /** 缺点列表 */
+  cons?: string[]
+  /** 风险列表 */
+  risks?: string[]
+  /**
+   * 推荐标识
+   * 仅用于前端演示，非 API 契约字段
+   */
+  recommendationBadge?: string
+}
+
+/** 节点联合数据类型 */
+export type CanvasNodeData = DecisionNodeData | FactorNodeData | OptionNodeData
 
 export interface CanvasData {
   nodes: CanvasNode[]
   edges: CanvasEdge[]
 }
+/**
+ * 画布边
+ * 基于 API 契约 10.1 节
+ */
+export interface CanvasEdge {
+  id: string
+  source: string
+  target: string
+  relation?: EdgeRelation
+}
+
+/** Canvas 数据 */
+/**
+ * 完整画布数据结构
+ * 基于 API 契约 10.1 节
+ */
+export interface Canvas {
+  nodes: CanvasNode[]
+  edges: CanvasEdge[]
+}
+
 
 /** 因素详情（来自 AnalysisResult.factors） */
 export interface FactorDetail {
@@ -118,4 +198,10 @@ export interface CanvasViewModel {
   optionsDetail: Record<string, OptionDetail>
   /** AI 推荐方案 id，由 recommendation.optionId === option.id 派生 */
   recommendedOptionId: string | null
+}
+
+/** PUT /decisions/{id}/canvas 响应 */
+export interface SaveCanvasResponse {
+  changedNodeIds: string[]
+  canvas: Canvas
 }

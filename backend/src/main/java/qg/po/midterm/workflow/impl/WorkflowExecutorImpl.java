@@ -5,13 +5,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import qg.po.midterm.dto.result.ValidationResult;
 import qg.po.midterm.workflow.DecisionWorkflow;
 import qg.po.midterm.workflow.WorkflowExecutor;
+import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
+import qg.po.midterm.workflow.event.WorkflowFailedEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -20,30 +24,65 @@ import java.util.UUID;
 public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     private final DecisionWorkflow decisionWorkflow;
+    private final ApplicationEventPublisher eventPublisher;
 
-    @Override
-    public String startAnalysis(String decisionId, String background, String goal, String constraints) {
-        String taskId = UUID.randomUUID().toString();
-        
+    public String startAnalysis(
+            String taskId,
+            String decisionId,
+            String background,
+            String goal,
+            String constraints) {
         Map<String, Object> initData = new HashMap<>();
         initData.put("decisionId", decisionId);
         initData.put("taskId", taskId);
         initData.put("background", background);
         initData.put("goal", goal);
         initData.put("constraints", constraints);
-        
+
         DecisionState state = new DecisionState(initData);
         runGraph(taskId, state);
-        
+
         return taskId;
     }
 
     @Override
-    public String retryStep(String taskId, String stepId) {
-        log.info("Retrying step {} for task {}", stepId, taskId);
-        // B 同学会使用 LangGraph4j 的 checkpointer 获取之前的状态，然后在这个 taskId 上重入
-        // 由于咱们这里只提供底层暴露，B 拿到 getCompiledGraph() 后可以直接恢复图执行
+    public String retryStep(String taskId) {
+        log.info("Retrying task {} from the last failed node checkpoint", taskId);
+        // 传入 null 状态，LangGraph4j 会自动通过 CheckpointSaver (基于 threadId=taskId)
+        // 恢复上一次挂起的图状态并继续执行失败的节点。
+        runGraph(taskId, null);
         return "RETRY_TRIGGERED";
+    }
+
+    public String startPartialAnalysis(
+            String taskId,
+            String decisionId,
+            java.util.List<String> changedNodeIds,
+            DecisionState currentState) {
+        // 根据 changedNodeIds 判断从哪个节点开始重推
+        // 如果改了因素(factor)，需要重新生成方案 -> GENERATE_OPTIONS
+        // 如果只改了方案(option)，只需要重新对比风险 -> COMPARE_OPTIONS
+        String startNode = "UNDERSTAND";
+        boolean factorChanged = changedNodeIds.stream().anyMatch(id -> id.startsWith("f_"));
+        boolean optionChanged = changedNodeIds.stream().anyMatch(id -> id.startsWith("opt_"));
+
+        if (factorChanged) {
+            startNode = "GENERATE_OPTIONS";
+        } else if (optionChanged) {
+            startNode = "COMPARE_OPTIONS";
+        }
+
+        log.info("Starting partial analysis for decision {} with startNode: {}", decisionId, startNode);
+
+        Map<String, Object> initData = new HashMap<>(currentState.data());
+        initData.put("decisionId", decisionId);
+        initData.put("taskId", taskId);
+        initData.put("startNode", startNode);
+
+        DecisionState state = new DecisionState(initData);
+        runGraph(taskId, state);
+
+        return taskId;
     }
 
     @Override
@@ -55,16 +94,19 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     @Override
     public void runGraph(String taskId, DecisionState initialState) {
-        // 构建 RunnableConfig，传入 threadId 启用 Checkpoint 持久化和追踪
-        RunnableConfig config = RunnableConfig.builder()
-                .threadId(taskId)
-                .build();
-                
-        // 调用底层图执行（异步，或者由 B 来进行 stream 消费，这里如果被独立调用则阻塞执行完）
+        RunnableConfig config = RunnableConfig.builder().threadId(taskId).build();
         try {
-            getCompiledGraph().invoke(initialState.data(), config);
+            Map<String, Object> stateData = (initialState != null) ? initialState.data() : null;
+            Optional<DecisionState> resultOpt = getCompiledGraph().invoke(stateData, config);
+            if (resultOpt.isPresent()) {
+                DecisionState finalState = resultOpt.get();
+                eventPublisher.publishEvent(new WorkflowCompletedEvent(this, taskId, finalState.getDecisionId(), finalState.data()));
+            } else {
+                eventPublisher.publishEvent(new WorkflowFailedEvent(this, taskId, "Workflow execution returned empty result"));
+            }
         } catch (Exception e) {
             log.error("Failed to execute graph for task {}", taskId, e);
+            eventPublisher.publishEvent(new WorkflowFailedEvent(this, taskId, e.getMessage()));
         }
     }
 

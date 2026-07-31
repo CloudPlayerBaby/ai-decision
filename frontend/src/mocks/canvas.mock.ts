@@ -115,3 +115,16 @@ export const mockCanvas: Canvas = {
     { id: 'e14', source: 'f_difficulty', target: 'opt_redis', relation: 'AFFECTS' },
   ],
 }
+
+/** 对应 canvas.service.ts getCanvas mock 分支 */
+export function mockGetCanvas(_decisionId: string): Canvas {
+  return mockCanvas
+}
+
+/** 对应 canvas.service.ts saveCanvas mock 分支 */
+export function mockSaveCanvas(
+  _decisionId: string,
+  canvas: Canvas,
+): { changedNodeIds: string[]; canvas: Canvas } {
+  return { changedNodeIds: [], canvas }
+}

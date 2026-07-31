@@ -1,4 +1,6 @@
 .idea/
+.claude/
+out/
 node_modules
 .env
 **/.env

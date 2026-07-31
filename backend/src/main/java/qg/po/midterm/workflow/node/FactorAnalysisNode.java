@@ -4,16 +4,22 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Component;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Component;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
+import qg.po.midterm.workflow.tools.TavilySearchTool;
 
 import java.util.List;
 import java.util.Map;
 
-/** 工作流节点：提取关键因素。 */
+/**
+ * 工作流节点：提取关键因素。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -21,39 +27,59 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final TavilySearchTool tavilySearchTool;
 
-    public record FactorAnalysisResult(List<Factor> factors) {}
+    @Value("classpath:prompts/factor.st")
+    private Resource promptResource;
+
+    public record FactorAnalysisResult(
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("不超过15个字的简短总结，例如：'已提取3个关键因素'")
+            String summary,
+            @com.fasterxml.jackson.annotation.JsonPropertyDescription("对本阶段提取因素的详细总结文本，适合直接展示给用户看")
+            String content,
+            List<Factor> factors
+    ) {
+    }
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
-        eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+        qg.po.midterm.workflow.context.TaskContextHolder.setContext(state.getTaskId(), state.getDecisionId());
         try {
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
+
             log.info("Node [FactorAnalysis] executing for decision: {}", state.getDecisionId());
 
-        String understanding = state.getUnderstanding();
-        String background = state.getBackground();
+            String understanding = state.getUnderstanding();
+            String background = state.getBackground();
 
-        String prompt = String.format(
-            "基于以下决策问题背景和核心理解，请提取出影响该决策的最关键的 3-5 个因素。\n" +
-            "背景：%s\n" +
-            "核心理解：%s\n\n" +
-            "要求：\n" +
-            "1. 每个因素需要包含 id (英文字母下划线组合), name (简短名称), description (详细说明), weight (0到1之间的小数，所有因素权重之和为1)。\n" +
-            "2. 以标准的 JSON 格式输出，不要包含任何额外的解释或Markdown格式。",
-            background != null ? background : "无",
-            understanding != null ? understanding : "无"
-        );
+            Map<String, Object> params = Map.of(
+                    "background", background != null ? background : "无",
+                    "understanding", understanding != null ? understanding : "无"
+            );
+            String prompt = new PromptTemplate(promptResource).create(params).getContents();
 
-        FactorAnalysisResult result = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .entity(FactorAnalysisResult.class);
+            log.info(">>> 【AI Prompt】\n{}", prompt);
 
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED"));
+            FactorAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
+                    chatClient.prompt()
+                            .user(prompt)
+                            .tools(tavilySearchTool)
+                            .call()
+                            .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(FactorAnalysisResult.class))
+            );
+
+            log.info("<<< 【AI Response】\n{}", result);
+
+            // 将大模型结果转换为 JSON 传入状态流，供前端渲染
+            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
+
             return Map.of("factors", result.factors());
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
+        } finally {
+            qg.po.midterm.workflow.context.TaskContextHolder.clear();
         }
     }
 }

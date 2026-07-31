@@ -1,7 +1,12 @@
 package qg.po.midterm.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Mapper;
+import qg.po.midterm.entity.Decision;
+
 /**
- * 决策问题实体与数据库之间的映射接口。
+ * 决策问题 Mapper
  */
-public class DecisionMapper {
+@Mapper
+public interface DecisionMapper extends BaseMapper<Decision> {
 }

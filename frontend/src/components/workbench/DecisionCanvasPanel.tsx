@@ -185,8 +185,6 @@ function OptionNode({ data, id }: OptionNodeProps) {
 type OptionModalTab = 'settings' | 'analysis'
 
 export interface DecisionCanvasPanelProps {
-  onDirtyChange?: (dirty: boolean) => void
-  onCanvasChange?: (canvas: CanvasData) => void
   /** 画布展示模型（由 DecisionProblem + AnalysisResult + Canvas 组装） */
   viewModel?: CanvasViewModel
   /** 方案详情（pros / cons / risks），key = option 节点 id */
@@ -195,6 +193,15 @@ export interface DecisionCanvasPanelProps {
   recommendedOptionId?: string | null
   /** 因素描述，key = factor 节点 id */
   factorsDetail?: Record<string, { description: string }>
+  onDirtyChange?: (dirty: boolean) => void
+  onCanvasChange?: (canvas: CanvasData) => void
+  /** 以下为 WorkbenchSlot 契约槽位 props（暂由 viewModel 承载，接口对齐用） */
+  decisionId?: string
+  taskId?: string | null
+  pendingResultId?: string | null
+  hasPendingResult?: boolean
+  decisionStatus?: string
+  onRequestRefresh?: () => void
 }
 
 // ── 辅助函数 ─────────────────────────────────────────────────
@@ -260,12 +267,18 @@ function createNode(type: 'factor' | 'option', existingNodes: FlowNode[]): FlowN
 // ── 主组件 ───────────────────────────────────────────────────
 
 export function DecisionCanvasPanel({
-  onDirtyChange,
-  onCanvasChange,
   viewModel,
   optionsDetail,
   recommendedOptionId,
   factorsDetail,
+  onDirtyChange,
+  onCanvasChange,
+  decisionId,
+  taskId,
+  pendingResultId,
+  hasPendingResult,
+  decisionStatus,
+  onRequestRefresh,
 }: DecisionCanvasPanelProps) {
   const resolvedOptionsDetail = viewModel?.optionsDetail ?? optionsDetail ?? {}
   const resolvedRecommendedId = viewModel?.recommendedOptionId ?? recommendedOptionId ?? null

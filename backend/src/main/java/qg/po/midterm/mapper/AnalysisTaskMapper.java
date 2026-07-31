@@ -1,7 +1,12 @@
 package qg.po.midterm.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Mapper;
+import qg.po.midterm.entity.AnalysisTask;
+
 /**
- * 分析任务实体与数据库之间的映射接口。
+ * 分析任务 Mapper
  */
-public class AnalysisTaskMapper {
+@Mapper
+public interface AnalysisTaskMapper extends BaseMapper<AnalysisTask> {
 }
