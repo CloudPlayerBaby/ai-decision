@@ -65,11 +65,11 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
-            OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
-                    chatClient.prompt()
-                            .user(prompt)
-                            .call()
-                            .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(OptionGenerationResult.class))
+            OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepair(
+                    chatClient,
+                    prompt,
+                    null, // 没有 tools
+                    OptionGenerationResult.class
             );
 
             log.info("<<< 【AI Response】\n{}", result);
@@ -79,7 +79,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             return Map.of("options", result.options());
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
+            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();
