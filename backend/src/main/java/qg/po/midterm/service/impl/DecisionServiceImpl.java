@@ -253,7 +253,7 @@ public class DecisionServiceImpl implements DecisionService {
         }
         Option option = getOptionOrThrow(result, request.getOptionId());
 
-        decision.setPreferredOptionId(parseFlexibleId(option.getId(), "opt_"));
+        decision.setPreferredOptionId(option.getId());
         decision.setUpdatedAt(LocalDateTime.now());
         decisionMapper.updateById(decision);
     }
@@ -298,6 +298,7 @@ public class DecisionServiceImpl implements DecisionService {
         // 2. 生成报告（结构化内容）
         Report report = new Report();
         report.setDecisionId(id);
+        report.setAnalysisResultId(result.getId());
         report.setContent(objectMapper.writeValueAsString(content));
         report.setCreatedAt(now);
         reportMapper.insert(report);
@@ -307,9 +308,7 @@ public class DecisionServiceImpl implements DecisionService {
         decision.setReportId(report.getId());
         decision.setHasPendingResult(false);
         decision.setPendingResultId(null);
-        decision.setPreferredOptionId(
-                parseFlexibleId(selectedOption.getId(), "opt_")
-        );
+        decision.setPreferredOptionId(selectedOption.getId());
         decision.setUpdatedAt(now);
         decisionMapper.updateById(decision);
 
@@ -685,17 +684,6 @@ public class DecisionServiceImpl implements DecisionService {
     }
 
     /**
-     * 解析形如 "opt_1" 或 "opt_redis" 的ID，返回数字部分（用于存储到 preferredOptionId）
-     */
-    private Long parseFlexibleId(String externalId, String prefix) {
-        try {
-            return Long.parseLong(externalId.substring(prefix.length()));
-        } catch (NumberFormatException e) {
-            return (long) Math.abs(externalId.substring(prefix.length()).hashCode());
-        }
-    }
-
-    /**
      * 解析 AnalysisResult.resultData JSON 为 AnalysisResultDto
      */
     private AnalysisResultDto parseAnalysisResultDto(String resultData) {
@@ -759,8 +747,7 @@ public class DecisionServiceImpl implements DecisionService {
                 .goal(entity.getGoal())
                 .constraints(entity.getConstraints())
                 .status(entity.getStatus())
-                .preferredOptionId(entity.getPreferredOptionId() != null
-                        ? "opt_" + entity.getPreferredOptionId() : null)
+                .preferredOptionId(entity.getPreferredOptionId())
                 .latestTaskId(entity.getLatestTaskId() != null
                         ? "t_" + entity.getLatestTaskId() : null)
                 .hasPendingResult(entity.getHasPendingResult())
