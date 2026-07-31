@@ -52,12 +52,13 @@ public class TaskRuntimeRepository {
 
     // ==================== SSE 连接（内存绑定，不可序列化） ====================
 
+    // 把这个 emitter 加入连接
     public void addConnection(String taskId, SseEmitter emitter) {
-        connections
-                .computeIfAbsent(taskId, key -> new CopyOnWriteArrayList<>())
+        connections.computeIfAbsent(taskId, key -> new CopyOnWriteArrayList<>())
                 .add(emitter);
     }
 
+    // 移除连接
     public void removeConnection(String taskId, SseEmitter emitter) {
         List<SseEmitter> emitters = connections.get(taskId);
         if (emitters == null) {
@@ -69,20 +70,20 @@ public class TaskRuntimeRepository {
         }
     }
 
-    /**
-     * 返回副本，避免发送过程中连接列表变化
-     */
+    // 获取taskId所有的Emitter
     public List<SseEmitter> getConnections(String taskId) {
         List<SseEmitter> emitters = connections.get(taskId);
         return emitters == null ? List.of() : List.copyOf(emitters);
     }
 
+    // 直接把 connections 返回
     public Map<String, CopyOnWriteArrayList<SseEmitter>> getAllConnections() {
         return connections;
     }
 
     // ==================== Event ID ====================
 
+    // 使用 redis 实现全局唯一 id
     public String nextEventId(String taskId) {
         Long eventNumber = stringRedisTemplate
                 .opsForValue()
@@ -92,7 +93,7 @@ public class TaskRuntimeRepository {
         return eventId;
     }
 
-    // 从redis里面读取
+    // 从 redis 里面读取最新的 eventId
     public String getLastEventId(String taskId) {
         return stringRedisTemplate.opsForValue().get(EVENT_ID_KEY_PREFIX + taskId);
     }

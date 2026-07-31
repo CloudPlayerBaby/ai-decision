@@ -74,7 +74,7 @@ public class AnalysisWorkflowDispatcher {
         try {
             workflowExecutor.retryStep(taskId);
         } catch (Exception exception) {
-            log.error("Failed to dispatch retry, taskId={}, stepId={}", taskId, stepId, exception);
+            log.error("发起异步推演失败, taskId={}, stepId={}", taskId, stepId, exception);
         }
     }
 }
