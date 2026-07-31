@@ -26,7 +26,6 @@ public class DecisionWorkflow {
     private final FactorAnalysisNode factorAnalysisNode;
     private final OptionGenerationNode optionGenerationNode;
     private final RiskAnalysisNode riskAnalysisNode;
-    private final ReportGenerationNode reportGenerationNode;
     private final RepairNode repairNode;
     private final ValidateNode validateNode;
 
@@ -43,7 +42,6 @@ public class DecisionWorkflow {
         graph.addNode("EXTRACT_FACTORS", node_async(factorAnalysisNode));
         graph.addNode("GENERATE_OPTIONS", node_async(optionGenerationNode));
         graph.addNode("COMPARE_OPTIONS", node_async(riskAnalysisNode));
-        graph.addNode("GENERATE_REPORT", node_async(reportGenerationNode));
         graph.addNode("REPAIR", node_async(repairNode));
         graph.addNode("VALIDATE", node_async(validateNode));
 
@@ -94,20 +92,18 @@ public class DecisionWorkflow {
         /*
          * 审查后的条件分流：
          * - 如果 errorMsg 存在，说明数据残缺，导流去 REPAIR 节点让 AI 修补。
-         * - 如果 errorMsg 为空，说明完美符合 PRD 12.1 规范，放行去生成报告！
+         * - 如果 errorMsg 为空，说明完美符合 PRD 12.1 规范，放行结束！
          */
         graph.addConditionalEdges("VALIDATE",
             state -> {
                 String errorMsg = state.getErrorMsg();
-                return java.util.concurrent.CompletableFuture.completedFuture((errorMsg != null && !errorMsg.isEmpty()) ? "REPAIR" : "GENERATE_REPORT");
+                return java.util.concurrent.CompletableFuture.completedFuture((errorMsg != null && !errorMsg.isEmpty()) ? "REPAIR" : END);
             },
             Map.of(
                 "REPAIR", "REPAIR",
-                "GENERATE_REPORT", "GENERATE_REPORT"
+                END, END
             )
         );
-
-        graph.addEdge("GENERATE_REPORT", END);
 
         if (checkpointSaver != null) {
             this.compiledGraph = graph.compile(CompileConfig.builder().checkpointSaver(checkpointSaver).build());

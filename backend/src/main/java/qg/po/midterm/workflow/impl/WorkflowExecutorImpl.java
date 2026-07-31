@@ -5,13 +5,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import qg.po.midterm.dto.result.ValidationResult;
 import qg.po.midterm.workflow.DecisionWorkflow;
 import qg.po.midterm.workflow.WorkflowExecutor;
+import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
+import qg.po.midterm.workflow.event.WorkflowFailedEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -20,6 +24,7 @@ import java.util.UUID;
 public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     private final DecisionWorkflow decisionWorkflow;
+    private final ApplicationEventPublisher eventPublisher;
 
     public String startAnalysis(
             String taskId,
@@ -92,9 +97,16 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
         RunnableConfig config = RunnableConfig.builder().threadId(taskId).build();
         try {
             Map<String, Object> stateData = (initialState != null) ? initialState.data() : null;
-            getCompiledGraph().invoke(stateData, config);
+            Optional<DecisionState> resultOpt = getCompiledGraph().invoke(stateData, config);
+            if (resultOpt.isPresent()) {
+                DecisionState finalState = resultOpt.get();
+                eventPublisher.publishEvent(new WorkflowCompletedEvent(this, taskId, finalState.getDecisionId(), finalState.data()));
+            } else {
+                eventPublisher.publishEvent(new WorkflowFailedEvent(this, taskId, "Workflow execution returned empty result"));
+            }
         } catch (Exception e) {
             log.error("Failed to execute graph for task {}", taskId, e);
+            eventPublisher.publishEvent(new WorkflowFailedEvent(this, taskId, e.getMessage()));
         }
     }
 

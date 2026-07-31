@@ -10,10 +10,12 @@ import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 
 import java.util.List;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 @Schema(description = "AI 推演返回的规范化JSON结构（API v2.0 4.2 AnalysisResult）")
 public class AnalysisResultDto implements Serializable {
 
@@ -47,6 +49,7 @@ public class AnalysisResultDto implements Serializable {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Recommendation implements Serializable {
         @Schema(description = "推荐方案的唯一ID")
         private String optionId;

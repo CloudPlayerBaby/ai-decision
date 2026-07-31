@@ -6,14 +6,20 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import qg.po.midterm.common.enums.ErrorCode;
+import qg.po.midterm.common.enums.DecisionStatus;
+import qg.po.midterm.entity.AnalysisResult;
 import qg.po.midterm.entity.AnalysisStep;
 import qg.po.midterm.entity.AnalysisTask;
 import qg.po.midterm.entity.Decision;
+import qg.po.midterm.mapper.AnalysisResultMapper;
 import qg.po.midterm.mapper.AnalysisStepMapper;
 import qg.po.midterm.mapper.AnalysisTaskMapper;
 import qg.po.midterm.mapper.DecisionMapper;
 import qg.po.midterm.service.AnalysisEventService;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
+import qg.po.midterm.workflow.event.WorkflowFailedEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -32,7 +38,77 @@ public class NodeExecutionEventListener {
     private final AnalysisTaskMapper taskMapper;
     private final AnalysisStepMapper stepMapper;
     private final DecisionMapper decisionMapper;
+    private final AnalysisResultMapper resultMapper;
     private final AnalysisEventService eventService;
+    private final ObjectMapper objectMapper;
+
+    @EventListener
+    @Transactional
+    public void handleWorkflowCompleted(WorkflowCompletedEvent event) {
+        Long taskDbId = parseTaskId(event.getTaskId());
+        AnalysisTask task = (taskDbId != null) ? taskMapper.selectById(taskDbId) : null;
+        if (task == null) {
+            Long decisionDbId = parseDecisionId(event.getDecisionId());
+            if (decisionDbId != null) {
+                Decision decision = decisionMapper.selectById(decisionDbId);
+                if (decision != null && decision.getLatestTaskId() != null) {
+                    task = taskMapper.selectById(decision.getLatestTaskId());
+                }
+            }
+        }
+        if (task == null) return;
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 1. 标记任务成功
+        task.setStatus("SUCCEEDED");
+        task.setCurrentStep(task.getTotalSteps());
+        task.setFinishedAt(now);
+        task.setUpdatedAt(now);
+        taskMapper.updateById(task);
+
+        // 2. 生成 AnalysisResult
+        AnalysisResult result = new AnalysisResult();
+        result.setDecisionId(task.getDecisionId());
+        result.setTaskId(task.getId());
+        result.setStatus("PENDING_CONFIRM");
+        try {
+            result.setResultData(objectMapper.writeValueAsString(event.getFinalStateData()));
+        } catch (Exception e) {
+            log.error("Failed to serialize final state data", e);
+            result.setResultData("{}");
+        }
+        result.setCreatedAt(now);
+        result.setUpdatedAt(now);
+        resultMapper.insert(result);
+
+        // 3. 更新 Decision 状态
+        Decision decision = decisionMapper.selectById(task.getDecisionId());
+        if (decision != null) {
+            decision.setStatus(DecisionStatus.WAITING_CONFIRM.name());
+            decision.setHasPendingResult(true);
+            decision.setPendingResultId(result.getId());
+            decision.setUpdatedAt(now);
+            decisionMapper.updateById(decision);
+        }
+
+        // 4. 通知前端结果已就绪
+        Map<String, Object> sseData = new LinkedHashMap<>();
+        sseData.put("taskId", "t_" + task.getId());
+        sseData.put("decisionId", "d_" + task.getDecisionId());
+        sseData.put("analysisResultId", "ar_" + result.getId());
+        eventService.sendResultReady("t_" + task.getId(), sseData);
+    }
+
+    @EventListener
+    @Transactional
+    public void handleWorkflowFailed(WorkflowFailedEvent event) {
+        Long taskDbId = parseTaskId(event.getTaskId());
+        AnalysisTask task = (taskDbId != null) ? taskMapper.selectById(taskDbId) : null;
+        if (task != null) {
+            failTask(task, null, event.getErrorMessage());
+        }
+    }
 
     @EventListener
     @Transactional
@@ -52,24 +128,7 @@ public class NodeExecutionEventListener {
             return;
         }
 
-        // 当前 Workflow 的 ReportGeneration 是最后一个节点，不展示
-        if ("ReportGeneration".equals(event.getNodeName())) {
-            if ("SUCCEEDED".equals(event.getStatus())) {
-                task.setStatus("SUCCEEDED");
-                task.setCurrentStep(task.getTotalSteps());
-                task.setFinishedAt(LocalDateTime.now());
-                task.setUpdatedAt(LocalDateTime.now());
-                taskMapper.updateById(task);
 
-                // TODO 结果处理模块完成 analysis_result 入库后调用 sendResultReady。
-
-
-            } else if ("FAILED".equals(event.getStatus())) {
-                // 如果是失败了，就标记为失败
-                failTask(task, null, event.getErrorMessage());
-            }
-            return;
-        }
 
         // 把 workflow 里面的名转换成我们需要的名称
         String stepName = getStepName(event.getNodeName());
