@@ -470,7 +470,8 @@ public class DecisionServiceImpl implements DecisionService {
             Option o = options.get(i);
             double x = 140 + (double) i * (560.0 / Math.max(1, optionCount - 1));
             if (optionCount == 1) x = 360;
-            Map<String, Object> optionData = new HashMap<>(o.getScores() != null
+            Map<String, Object> optionData = new HashMap<>();
+            optionData.put("scores", o.getScores() != null
                     ? o.getScores() : Collections.emptyMap());
             nodes.add(createNode(o.getId(), "option", o.getName(),
                     new Canvas.Position(x, 340), optionData));
@@ -580,11 +581,7 @@ public class DecisionServiceImpl implements DecisionService {
     }
 
     private boolean nodeEquals(Canvas.CanvasNode a, Canvas.CanvasNode b) {
-        if (!Objects.equals(a.getPosition().getX() + "," + a.getPosition().getY(),
-                b.getPosition().getX() + "," + b.getPosition().getY())) {
-            return false;
-        }
-        // 比较 data（深度比较 JSON）
+        // 只比较 data（weight / scores 等业务数据），忽略 position 变化
         try {
             String jsonA = objectMapper.writeValueAsString(a.getData());
             String jsonB = objectMapper.writeValueAsString(b.getData());
