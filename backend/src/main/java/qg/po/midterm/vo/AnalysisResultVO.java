@@ -1,11 +1,13 @@
 package qg.po.midterm.vo;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.ValidationResult;
+import qg.po.midterm.dto.result.Canvas;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 
@@ -18,6 +20,7 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class AnalysisResultVO {
 
     private String id;
@@ -27,6 +30,7 @@ public class AnalysisResultVO {
     private List<Option> options;
     private AnalysisResultDto.Recommendation recommendation;
     private List<String> nextActions;
+    private Canvas canvas;
     private ValidationResult validation;
     private String createdAt;
 
@@ -42,6 +46,7 @@ public class AnalysisResultVO {
                 .options(dto.getOptions())
                 .recommendation(dto.getRecommendation())
                 .nextActions(dto.getNextActions())
+                .canvas(dto.getCanvas())
                 .validation(dto.getValidation())
                 .createdAt(createdAt)
                 .build();

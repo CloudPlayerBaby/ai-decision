@@ -12,7 +12,6 @@ import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.tools.CalculatorTool;
-import qg.po.midterm.workflow.utils.JsonOutputOptions;
 
 import java.util.Map;
 
@@ -36,11 +35,13 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [RequirementAnalysis] executing for decision: {}", state.getDecisionId());
 
+        String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
         String background = state.getBackground() != null ? state.getBackground() : "无";
         String goal = state.getGoal() != null ? state.getGoal() : "未明确";
         String constraints = state.getConstraints() != null ? state.getConstraints() : "无";
 
         Map<String, Object> params = Map.of(
+            "title", title,
             "background", background,
             "goal", goal,
             "constraints", constraints
@@ -49,12 +50,10 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        RequirementAnalysisResult result = chatClient.prompt()
-                .options(JsonOutputOptions.create())
-                .user(prompt)
-                .tools(calculatorTool)
-                .call()
-                .entity(RequirementAnalysisResult.class);
+        qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<RequirementAnalysisResult> execution =
+                qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
+                        chatClient, prompt, new Object[]{calculatorTool}, RequirementAnalysisResult.class);
+        RequirementAnalysisResult result = execution.value();
                 
         log.info("<<< 【AI Response】\n{}", result);
 
@@ -62,9 +61,11 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
 
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
-        return Map.of("understanding", result.understanding());
+        return Map.of(
+                "understanding", result.understanding() != null ? result.understanding() : "",
+                "repairAttempted", state.isRepairAttempted() || execution.repaired()
+        );
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

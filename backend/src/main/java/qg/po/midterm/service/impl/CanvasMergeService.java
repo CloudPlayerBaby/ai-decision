@@ -1,0 +1,89 @@
+package qg.po.midterm.service.impl;
+
+import org.springframework.stereotype.Component;
+import qg.po.midterm.dto.result.AnalysisResultDto;
+import qg.po.midterm.dto.result.Canvas;
+import qg.po.midterm.workflow.state.Factor;
+import qg.po.midterm.workflow.state.Option;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/** Merges fresh analysis data with user-maintained canvas positions. */
+@Component
+public class CanvasMergeService {
+
+    public Canvas merge(Canvas existing, AnalysisResultDto result, String decisionTitle) {
+        Map<String, Canvas.CanvasNode> oldNodes = indexNodes(existing);
+        List<Canvas.CanvasNode> nodes = new ArrayList<>();
+        List<Canvas.CanvasEdge> edges = new ArrayList<>();
+
+        nodes.add(node("root", "decision", decisionTitle,
+                position(oldNodes, "root", 360, 40), Collections.emptyMap()));
+
+        List<Factor> factors = result != null && result.getFactors() != null
+                ? result.getFactors() : List.of();
+        for (int index = 0; index < factors.size(); index++) {
+            Factor factor = factors.get(index);
+            if (factor == null || factor.getId() == null) continue;
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("description", factor.getDescription());
+            data.put("weight", factor.getWeight());
+            nodes.add(node(factor.getId(), "factor", factor.getName(),
+                    position(oldNodes, factor.getId(), spread(index, factors.size()), 180), data));
+            edges.add(edge("e_factor_" + factor.getId(), "root", factor.getId(), "HAS_FACTOR"));
+        }
+
+        List<Option> options = result != null && result.getOptions() != null
+                ? result.getOptions() : List.of();
+        for (int index = 0; index < options.size(); index++) {
+            Option option = options.get(index);
+            if (option == null || option.getId() == null) continue;
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("description", option.getDescription());
+            data.put("pros", option.getPros());
+            data.put("cons", option.getCons());
+            data.put("risks", option.getRisks());
+            data.put("scores", option.getScores());
+            nodes.add(node(option.getId(), "option", option.getName(),
+                    position(oldNodes, option.getId(), spread(index, options.size()), 340), data));
+            edges.add(edge("e_option_" + option.getId(), "root", option.getId(), "HAS_OPTION"));
+        }
+        return new Canvas(nodes, edges);
+    }
+
+    private Map<String, Canvas.CanvasNode> indexNodes(Canvas canvas) {
+        Map<String, Canvas.CanvasNode> nodes = new HashMap<>();
+        if (canvas != null && canvas.getNodes() != null) {
+            for (Canvas.CanvasNode node : canvas.getNodes()) {
+                if (node != null && node.getId() != null) nodes.put(node.getId(), node);
+            }
+        }
+        return nodes;
+    }
+
+    private Canvas.Position position(Map<String, Canvas.CanvasNode> oldNodes,
+                                     String id, double defaultX, double defaultY) {
+        Canvas.CanvasNode oldNode = oldNodes.get(id);
+        if (oldNode != null && oldNode.getPosition() != null) return oldNode.getPosition();
+        return new Canvas.Position(defaultX, defaultY);
+    }
+
+    private double spread(int index, int count) {
+        if (count <= 1) return 360;
+        return 140 + (double) index * (560.0 / (count - 1));
+    }
+
+    private Canvas.CanvasNode node(String id, String type, String label,
+                                   Canvas.Position position, Map<String, Object> data) {
+        return new Canvas.CanvasNode(id, type, label, position, data);
+    }
+
+    private Canvas.CanvasEdge edge(String id, String source, String target, String relation) {
+        return new Canvas.CanvasEdge(id, source, target, relation);
+    }
+}

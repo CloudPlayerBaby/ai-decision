@@ -6,12 +6,12 @@ import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.AnalysisResultDto;
+import qg.po.midterm.common.exception.AiValidationException;
 import qg.po.midterm.workflow.state.DecisionState;
-import qg.po.midterm.workflow.utils.JsonOutputOptions;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -25,7 +25,7 @@ import java.util.Map;
 public class RepairNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
-    private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/repair.st")
     private Resource promptResource;
@@ -40,18 +40,34 @@ public class RepairNode implements NodeAction<DecisionState> {
         int retryCount = state.getRetryCount();
 
         // 将之前大模型写错的数据结构，配合具体的错误提示传给大模型
+        AnalysisResultDto originalResult = new AnalysisResultDto();
+        originalResult.setUnderstanding(state.getUnderstanding());
+        originalResult.setFactors(state.getFactors());
+        originalResult.setOptions(state.getOptions());
+        originalResult.setRecommendation(state.getRecommendation());
+        originalResult.setNextActions(state.getNextActions());
+        String originalJson = objectMapper.writeValueAsString(originalResult);
         Map<String, Object> params = Map.of(
-                "errorMsg", errorMsg != null ? errorMsg : "未知错误"
+                "errorMsg", errorMsg != null ? errorMsg : "未知错误",
+                "originalJson", originalJson
         );
         String prompt = new PromptTemplate(promptResource).create(params).getContents();
 
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        AnalysisResultDto repairedResult = chatClient.prompt()
-                .options(JsonOutputOptions.create())
-                .user(prompt)
-                .call()
-                .entity(AnalysisResultDto.class);
+        AnalysisResultDto repairedResult;
+        try {
+            repairedResult = chatClient.prompt()
+                    .user(prompt)
+                    .call()
+                    .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(AnalysisResultDto.class));
+        } catch (Exception exception) {
+            throw new AiValidationException(
+                    "AI 结果修复后仍无法解析：" + exception.getMessage(),
+                    parseMissingFields(errorMsg),
+                    true
+            );
+        }
 
         log.info("<<< 【AI Response】\n{}", repairedResult);
 
@@ -62,7 +78,17 @@ public class RepairNode implements NodeAction<DecisionState> {
                 "recommendation", repairedResult.getRecommendation() != null ? repairedResult.getRecommendation() : new AnalysisResultDto.Recommendation(),
                 "nextActions", repairedResult.getNextActions() != null ? repairedResult.getNextActions() : List.of(),
                 "retryCount", retryCount + 1,
+                "repairAttempted", true,
                 "errorMsg", "" // 修复后清空 errorMsg，流转回 ValidateNode 进行二次校验
         );
+    }
+
+    private List<String> parseMissingFields(String errorMsg) {
+        if (errorMsg == null || errorMsg.isBlank()) return List.of();
+        return errorMsg.lines()
+                .map(String::trim)
+                .filter(line -> line.startsWith("- "))
+                .map(line -> line.substring(2))
+                .toList();
     }
 }

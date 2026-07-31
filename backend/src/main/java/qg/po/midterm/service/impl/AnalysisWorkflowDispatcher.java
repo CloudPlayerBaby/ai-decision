@@ -2,11 +2,13 @@ package qg.po.midterm.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.entity.Decision;
 import qg.po.midterm.repository.TaskRuntimeRepository;
 import qg.po.midterm.workflow.WorkflowExecutor;
+import qg.po.midterm.workflow.event.WorkflowFailedEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 
 import java.util.List;
@@ -21,6 +23,7 @@ public class AnalysisWorkflowDispatcher {
 
     private final WorkflowExecutor workflowExecutor;
     private final TaskRuntimeRepository runtimeRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     // 异步调用整体推演
     @Async
@@ -30,12 +33,14 @@ public class AnalysisWorkflowDispatcher {
             String workflowTaskId = workflowExecutor.startAnalysis(
                     taskId,
                     decisionId,
+                    decision.getTitle(),
                     decision.getBackground(),
                     decision.getGoal(),
                     decision.getConstraints()
             );
         } catch (Exception exception) {
             log.error("整体推演调用失败, taskId={}", taskId, exception);
+            publishWorkflowFailed(taskId, exception);
         }
     }
 
@@ -48,14 +53,14 @@ public class AnalysisWorkflowDispatcher {
     public void startPartialAnalysis(
             String taskId,
             String decisionId,
-            List<String> changedNodeIds,
+            String startNode,
             DecisionState currentState) {
         try {
-            // 局部起点由 WorkflowExecutor 根据 changedNodeIds 判断。
+            // 局部起点已由服务层按画布节点业务类型计算完成。
             String workflowTaskId = workflowExecutor.startPartialAnalysis(
                     taskId,
                     decisionId,
-                    changedNodeIds,
+                    startNode,
                     currentState
             );
         } catch (Exception exception) {
@@ -65,16 +70,24 @@ public class AnalysisWorkflowDispatcher {
                     decisionId,
                     exception
             );
+            publishWorkflowFailed(taskId, exception);
         }
     }
 
     // 异步发起失败步骤尝试
     @Async
-    public void retryStep(String taskId, String stepId) {
+    public void retryStep(String taskId, String stepId, String startNode, DecisionState currentState) {
         try {
-            workflowExecutor.retryStep(taskId);
+            workflowExecutor.retryStep(taskId, startNode, currentState);
         } catch (Exception exception) {
             log.error("发起异步推演失败, taskId={}, stepId={}", taskId, stepId, exception);
+            publishWorkflowFailed(taskId, exception);
         }
+    }
+
+    private void publishWorkflowFailed(String taskId, Exception exception) {
+        eventPublisher.publishEvent(
+                new WorkflowFailedEvent(this, taskId, exception)
+        );
     }
 }

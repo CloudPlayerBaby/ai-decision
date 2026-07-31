@@ -20,9 +20,11 @@ public class Report {
     /** 所属决策问题ID */
     private Long decisionId;
 
+    /** 生成该报告所使用的分析结果 ID */
+    private Long analysisResultId;
+
     /** 报告内容（JSON：背景、目标、方案对比、推荐结论、下一步行动等） */
     private String content;
 
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

@@ -1,5 +1,6 @@
 package qg.po.midterm.controller;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -31,12 +32,12 @@ public class AnalysisEventController {
     }
 
     /**
-     * 根据画布中发生变化的节点发起局部推演
+     * 根据画布中发生变化的节点发起局部推演（按接口文档，这里是前端直接传入 IDs）
      */
     @PostMapping("/decisions/{decisionId}/partial-analysis")
     public Result<PartialTaskVO> startPartialAnalysis(
             @PathVariable String decisionId,
-            @RequestBody PartialAnalysisRequest request) {
+            @Valid @RequestBody PartialAnalysisRequest request) {
         return Result.success(
                 taskService.startPartialAnalysis(decisionId, request)
         );

@@ -28,28 +28,29 @@ public interface WorkflowExecutor {
      * @param taskId 之前挂掉的那个推演任务 ID（对应底层的 threadId）
      * @return 返回 "RETRY_TRIGGERED" 代表成功丢入队列；如果该 taskId 的快照不存在，可能会抛出异常。
      */
-    String retryStep(String taskId);
+    String retryStep(String taskId, String startNode, DecisionState currentState);
 
     /**
      * 【给 B 同学 / C 同学使用】：全新发起一次全量决策推演任务
      * @param taskId      外部传入的唯一任务ID
      * @param decisionId  所属的决策问题唯一标识
+     * @param title       用户填写的决策主题
      * @param background  用户填写的补充背景
      * @param goal        用户填写的核心决策目标
      * @param constraints 用户填写的约束条件
      * @return 引擎执行的推演 taskId
      */
-    String startAnalysis(String taskId, String decisionId, String background, String goal, String constraints);
+    String startAnalysis(String taskId, String decisionId, String title, String background, String goal, String constraints);
 
     /**
      * 【给 C 同学使用】：基于用户修改画布触发的“局部重推”
      * @param taskId         外部传入的新任务ID
      * @param decisionId     当前决策问题 ID
-     * @param changedNodeIds 前端提交上来的被修改节点 ID 集合
+     * @param startNode 后端根据节点业务类型计算出的实际重推起点
      * @param currentState   修改后包含历史数据的当前状态
      * @return 引擎执行的推演 taskId
      */
-    String startPartialAnalysis(String taskId, String decisionId, java.util.List<String> changedNodeIds, DecisionState currentState);
+    String startPartialAnalysis(String taskId, String decisionId, String startNode, DecisionState currentState);
 
     /**
      * 【给 A 组内部使用，未来可对外暴露】：JSON 强校验与修复钩子

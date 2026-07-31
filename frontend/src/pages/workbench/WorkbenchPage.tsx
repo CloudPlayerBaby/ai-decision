@@ -16,11 +16,12 @@ import {
 } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
 import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
-import { mockSteps, mockToolCalls, mockOptions, mockResult } from '@/mocks/analysis.mock'
+import { mockOptions, mockResult } from '@/mocks/analysis.mock'
+import { useAnalysisStream } from '@/hooks/useAnalysisStream'
 import { ConfirmResultModal } from '@/components/workbench/ConfirmResultModal'
 import { DecisionStatusTag } from '@/components/common/DecisionStatusTag'
 import { ResizeHandle } from '@/components/layout/ResizeHandle'
@@ -48,6 +49,7 @@ export function WorkbenchPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [animCompleted, setAnimCompleted] = useState(false)
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
@@ -85,20 +87,52 @@ export function WorkbenchPage() {
   const decision = detailQuery.data?.decision
   const pendingResultId =
     detailQuery.data?.pendingResultId ?? decision?.pendingResultId ?? null
+  const confirmedResultId = detailQuery.data?.confirmedResultId ?? null
   const reportId = detailQuery.data?.reportId ?? null
   const taskId = decision?.latestTaskId ?? null
+  const selectedOptionId = decision?.preferredOptionId ?? null
+
+  const historyResultId = pendingResultId ?? confirmedResultId ?? null
+
+  const { steps, connectionStatus, toolCalls } = useAnalysisStream({
+    taskId,
+    onResultReady: async (event) => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.detail(id),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.analysisResult(id, event.analysisResultId),
+      });
+    },
+    onTaskFailed: (event) => {
+      if (event.retryable) {
+        message.warning(`推演失败: ${event.message}`);
+      } else {
+        message.error(`推演失败: ${event.message}`);
+      }
+    },
+  });
+
+  useEffect(() => {
+    setAnimCompleted(false);
+  }, [taskId]);
 
   const resultQuery = useQuery({
-    queryKey: queryKeys.decisions.analysisResult(id, pendingResultId),
-    queryFn: () => getAnalysisResult(id, pendingResultId),
+    queryKey: queryKeys.decisions.analysisResult(id, historyResultId),
+    queryFn: () => getAnalysisResult(id, historyResultId),
     enabled:
       Boolean(id) &&
       Boolean(
         decision?.status === 'WAITING_CONFIRM' ||
+          decision?.status === 'COMPLETED' ||
           decision?.hasPendingResult ||
-          pendingResultId,
+          historyResultId,
       ),
   })
+
+  const displayOptions = resultQuery.data?.options ?? mockOptions
+  const displayRecommendation = resultQuery.data?.recommendation ?? mockResult.recommendation
+  const displayAnalysisResultId = resultQuery.data?.id ?? mockResult.id
 
   const refreshDecision = async () => {
     await queryClient.invalidateQueries({
@@ -182,15 +216,18 @@ export function WorkbenchPage() {
     decision.status === 'PENDING' ||
     decision.status === 'WAITING_CONFIRM' ||
     decision.status === 'COMPLETED' ||
-    decision.status === 'FAILED'
+    decision.status === 'FAILED' ||
+    animCompleted
 
   const analyzing =
-    decision.status === 'ANALYZING' ||
-    decision.status === 'PARTIAL_ANALYZING'
+    (decision.status === 'ANALYZING' ||
+      decision.status === 'PARTIAL_ANALYZING') &&
+    !animCompleted
 
   const canConfirm =
     decision.status === 'WAITING_CONFIRM' ||
-    Boolean(decision.hasPendingResult)
+    Boolean(decision.hasPendingResult) ||
+    animCompleted
 
   return (
     <div className="workbench">
@@ -310,12 +347,15 @@ export function WorkbenchPage() {
             >
               <AnalysisChatPanel
                 userMessage={decision.title}
-                steps={mockSteps}
-                toolCalls={mockToolCalls}
-                analysisCompleted={false}
-                options={mockOptions}
-                recommendation={mockResult.recommendation}
-                analysisResultId={mockResult.id}
+                steps={steps}
+                toolCalls={toolCalls}
+                connectionStatus={connectionStatus}
+                options={displayOptions}
+                recommendation={displayRecommendation}
+                analysisResultId={displayAnalysisResultId}
+                selectedOptionId={selectedOptionId}
+                isHistory={decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM'}
+                onAllStepsCompleted={() => setAnimCompleted(true)}
               />
             </div>
           </>

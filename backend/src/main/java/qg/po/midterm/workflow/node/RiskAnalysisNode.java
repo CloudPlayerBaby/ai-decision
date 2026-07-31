@@ -13,7 +13,6 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Option;
-import qg.po.midterm.workflow.utils.JsonOutputOptions;
 
 import java.util.List;
 import java.util.Map;
@@ -54,7 +53,10 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
                 .map(o -> String.format("- 方案ID: %s, 名称: %s, 描述: %s", o.getId(), o.getName(), o.getDescription()))
                 .collect(Collectors.joining("\n"));
 
+            String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
+
             Map<String, Object> params = Map.of(
+                "title", title,
                 "understanding", understanding != null ? understanding : "无",
                 "options", optionStr
             );
@@ -62,13 +64,14 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
-            RiskAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
-                    chatClient.prompt()
-                            .options(JsonOutputOptions.create())
-                            .user(prompt)
-                            .call()
-                            .entity(RiskAnalysisResult.class)
+            qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<RiskAnalysisResult> execution =
+                    qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
+                    chatClient,
+                    prompt,
+                    null, // 没有 tools
+                    RiskAnalysisResult.class
             );
+            RiskAnalysisResult result = execution.value();
                     
             log.info("<<< 【AI Response】\n{}", result);
 
@@ -77,11 +80,12 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             
             return Map.of(
-                "recommendation", result.recommendation(),
-                "nextActions", result.nextActions()
+                "recommendation", result.recommendation() != null
+                        ? result.recommendation() : new AnalysisResultDto.Recommendation(),
+                "nextActions", result.nextActions() != null ? result.nextActions() : List.of(),
+                "repairAttempted", state.isRepairAttempted() || execution.repaired()
             );
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

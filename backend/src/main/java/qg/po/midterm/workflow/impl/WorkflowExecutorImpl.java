@@ -29,12 +29,14 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
     public String startAnalysis(
             String taskId,
             String decisionId,
+            String title,
             String background,
             String goal,
             String constraints) {
         Map<String, Object> initData = new HashMap<>();
         initData.put("decisionId", decisionId);
         initData.put("taskId", taskId);
+        initData.put("title", title);
         initData.put("background", background);
         initData.put("goal", goal);
         initData.put("constraints", constraints);
@@ -46,32 +48,20 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
     }
 
     @Override
-    public String retryStep(String taskId) {
-        log.info("Retrying task {} from the last failed node checkpoint", taskId);
-        // 传入 null 状态，LangGraph4j 会自动通过 CheckpointSaver (基于 threadId=taskId)
-        // 恢复上一次挂起的图状态并继续执行失败的节点。
-        runGraph(taskId, null);
+    public String retryStep(String taskId, String startNode, DecisionState currentState) {
+        log.info("Retrying task {} from business node {}", taskId, startNode);
+        Map<String, Object> initData = new HashMap<>(currentState.data());
+        initData.put("taskId", taskId);
+        initData.put("startNode", startNode);
+        runGraph(taskId, new DecisionState(initData), taskId + ":retry:" + UUID.randomUUID());
         return "RETRY_TRIGGERED";
     }
 
     public String startPartialAnalysis(
             String taskId,
             String decisionId,
-            java.util.List<String> changedNodeIds,
+            String startNode,
             DecisionState currentState) {
-        // 根据 changedNodeIds 判断从哪个节点开始重推
-        // 如果改了因素(factor)，需要重新生成方案 -> GENERATE_OPTIONS
-        // 如果只改了方案(option)，只需要重新对比风险 -> COMPARE_OPTIONS
-        String startNode = "UNDERSTAND";
-        boolean factorChanged = changedNodeIds.stream().anyMatch(id -> id.startsWith("f_"));
-        boolean optionChanged = changedNodeIds.stream().anyMatch(id -> id.startsWith("opt_"));
-
-        if (factorChanged) {
-            startNode = "GENERATE_OPTIONS";
-        } else if (optionChanged) {
-            startNode = "COMPARE_OPTIONS";
-        }
-
         log.info("Starting partial analysis for decision {} with startNode: {}", decisionId, startNode);
 
         Map<String, Object> initData = new HashMap<>(currentState.data());
@@ -94,7 +84,11 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     @Override
     public void runGraph(String taskId, DecisionState initialState) {
-        RunnableConfig config = RunnableConfig.builder().threadId(taskId).build();
+        runGraph(taskId, initialState, taskId);
+    }
+
+    private void runGraph(String taskId, DecisionState initialState, String checkpointThreadId) {
+        RunnableConfig config = RunnableConfig.builder().threadId(checkpointThreadId).build();
         try {
             Map<String, Object> stateData = (initialState != null) ? initialState.data() : null;
             Optional<DecisionState> resultOpt = getCompiledGraph().invoke(stateData, config);
@@ -102,11 +96,12 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
                 DecisionState finalState = resultOpt.get();
                 eventPublisher.publishEvent(new WorkflowCompletedEvent(this, taskId, finalState.getDecisionId(), finalState.data()));
             } else {
-                eventPublisher.publishEvent(new WorkflowFailedEvent(this, taskId, "Workflow execution returned empty result"));
+                eventPublisher.publishEvent(new WorkflowFailedEvent(
+                        this, taskId, new IllegalStateException("Workflow execution returned empty result")));
             }
         } catch (Exception e) {
             log.error("Failed to execute graph for task {}", taskId, e);
-            eventPublisher.publishEvent(new WorkflowFailedEvent(this, taskId, e.getMessage()));
+            eventPublisher.publishEvent(new WorkflowFailedEvent(this, taskId, e));
         }
     }
 

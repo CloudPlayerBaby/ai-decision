@@ -28,6 +28,11 @@ public class AnalysisTask {
     private String runType;
 
     /**
+     * 局部推演开始前的 Decision 状态，用于完成或失败后恢复正确状态。
+     */
+    private String previousDecisionStatus;
+
+    /**
      * 任务状态：PENDING / RUNNING / SUCCEEDED / FAILED
      */
     private String status;
@@ -49,6 +54,16 @@ public class AnalysisTask {
      * 失败信息
      */
     private String errorMessage;
+
+    /** Stable API error code persisted for REST recovery. */
+    private Integer errorCode;
+
+    /** JSON array of invalid AI result field paths. */
+    private String missingFields;
+
+    private Boolean repairAttempted;
+
+    private Boolean retryable;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

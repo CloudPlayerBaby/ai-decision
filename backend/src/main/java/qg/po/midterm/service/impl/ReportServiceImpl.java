@@ -3,6 +3,7 @@ package qg.po.midterm.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import qg.po.midterm.common.enums.ErrorCode;
@@ -18,11 +19,14 @@ import qg.po.midterm.mapper.ReportMapper;
 import qg.po.midterm.service.ReportService;
 import qg.po.midterm.vo.ReportSummaryVO;
 import qg.po.midterm.vo.ReportVO;
+import qg.po.midterm.workflow.agent.ReportAgent;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -36,6 +40,7 @@ public class ReportServiceImpl implements ReportService {
     private final DecisionMapper decisionMapper;
     private final AnalysisResultMapper analysisResultMapper;
     private final ObjectMapper objectMapper;
+    private final ReportAgent reportAgent;
 
     private static final DateTimeFormatter ISO_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX");
@@ -53,6 +58,7 @@ public class ReportServiceImpl implements ReportService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
         if (decision.getReportId() == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "该决策尚无报告");
         }
@@ -66,6 +72,12 @@ public class ReportServiceImpl implements ReportService {
     @Override
     public List<ReportSummaryVO> getReportHistory(String decisionId) {
         Long id = parseId(decisionId, "d_", "decisionId");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+        checkOwner(decision);
+
         List<Report> reports = reportMapper.selectList(
                 new LambdaQueryWrapper<Report>()
                         .eq(Report::getDecisionId, id)
@@ -74,10 +86,10 @@ public class ReportServiceImpl implements ReportService {
         return reports.stream()
                 .map(r -> ReportSummaryVO.builder()
                         .id("r_" + r.getId())
-                        .analysisResultId(findAssociatedResultId(r.getDecisionId()))
+                        .analysisResultId(toAnalysisResultId(r))
                         .status("READY")
                         .generatedAt(r.getCreatedAt() != null
-                                ? r.getCreatedAt().format(ISO_FORMATTER)
+                                ? r.getCreatedAt().atZone(ZoneId.systemDefault()).format(ISO_FORMATTER)
                                 : null)
                         .build())
                 .collect(Collectors.toList());
@@ -91,6 +103,7 @@ public class ReportServiceImpl implements ReportService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
         if (decision.getReportId() == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "该决策尚无报告，请先确认分析结果");
         }
@@ -101,17 +114,28 @@ public class ReportServiceImpl implements ReportService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "没有已确认的分析结果");
         }
 
-        // 格式化报告内容（不调AI）
-        AnalysisResultDto dto = parseAnalysisResultDto(confirmed.getResultData());
-        ReportContent newContent = buildReportContent(decision, dto);
+        // 格式化报告内容（调用AI）
+        String selectedOptionName = null;
+        if (decision.getPreferredOptionId() != null) {
+            AnalysisResultDto dto = parseAnalysisResultDto(confirmed.getResultData());
+            String optId = decision.getPreferredOptionId();
+            if (dto.getOptions() != null) {
+                selectedOptionName = dto.getOptions().stream()
+                        .filter(o -> o.getId() != null && o.getId().equals(optId))
+                        .map(qg.po.midterm.workflow.state.Option::getName)
+                        .findFirst()
+                        .orElse(null);
+            }
+        }
+        ReportContent newContent = reportAgent.generateReport(confirmed.getResultData(), selectedOptionName);
 
         // 创建新报告（保留历史）
         LocalDateTime now = LocalDateTime.now();
         Report report = new Report();
         report.setDecisionId(id);
+        report.setAnalysisResultId(confirmed.getId());
         report.setContent(toJson(newContent));
         report.setCreatedAt(now);
-        report.setUpdatedAt(now);
         reportMapper.insert(report);
 
         // 更新决策指向新报告
@@ -130,6 +154,11 @@ public class ReportServiceImpl implements ReportService {
         if (report == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "报告不存在");
         }
+        Decision decision = decisionMapper.selectById(report.getDecisionId());
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "报告不存在");
+        }
+        checkOwner(decision);
         return report;
     }
 
@@ -142,25 +171,40 @@ public class ReportServiceImpl implements ReportService {
         return analysisResultMapper.selectOne(wrapper);
     }
 
-    private String findAssociatedResultId(Long decisionId) {
-        AnalysisResult result = findConfirmedResult(decisionId);
-        return result != null ? "ar_" + result.getId() : null;
+    private String toAnalysisResultId(Report report) {
+        return report.getAnalysisResultId() != null
+                ? "ar_" + report.getAnalysisResultId()
+                : null;
     }
 
     private ReportVO toReportVO(Report report) {
-        Decision decision = decisionMapper.selectById(report.getDecisionId());
         ReportContent content = parseReportContent(report.getContent());
 
         return ReportVO.builder()
                 .id("r_" + report.getId())
                 .decisionId("d_" + report.getDecisionId())
-                .analysisResultId(findAssociatedResultId(report.getDecisionId()))
+                .analysisResultId(toAnalysisResultId(report))
                 .status("READY")
                 .content(content)
                 .generatedAt(report.getCreatedAt() != null
-                        ? report.getCreatedAt().format(ISO_FORMATTER)
+                        ? report.getCreatedAt().atZone(ZoneId.systemDefault()).format(ISO_FORMATTER)
                         : null)
                 .build();
+    }
+
+    private void checkOwner(Decision decision) {
+        if (!Objects.equals(decision.getUserId(), getCurrentUserId())) {
+            throw new BusinessException(
+                    ErrorCode.NOT_FOUND,
+                    "报告不存在"
+            );
+        }
+    }
+
+    private Long getCurrentUserId() {
+        return (Long) SecurityContextHolder.getContext()
+                .getAuthentication()
+                .getPrincipal();
     }
 
     /**
