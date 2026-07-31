@@ -31,7 +31,8 @@
         <mybatis-plus.version>3.5.17</mybatis-plus.version>
         <spring-ai.version>2.0.0</spring-ai.version>
         <langgraph4j.version>1.8.20</langgraph4j.version>
-        <springdoc.version>2.7.0</springdoc.version>
+        <!-- Spring Boot 4.x 需要使用 SpringDoc 3.x -->
+        <springdoc.version>3.0.3</springdoc.version>
     </properties>
 
     <dependencyManagement>

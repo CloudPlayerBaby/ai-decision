@@ -2,7 +2,6 @@ package qg.po.midterm.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -32,8 +31,10 @@ import qg.po.midterm.service.DecisionService;
 import qg.po.midterm.vo.*;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
@@ -221,8 +222,7 @@ public class DecisionServiceImpl implements DecisionService {
                 "ar_" + result.getId(),
                 result.getStatus(),
                 dto,
-                result.getCreatedAt() != null
-                        ? result.getCreatedAt().format(ISO_FORMATTER) : null);
+                formatTime(result.getCreatedAt()));
     }
 
     @Override
@@ -743,10 +743,19 @@ public class DecisionServiceImpl implements DecisionService {
                 .hasPendingResult(entity.getHasPendingResult())
                 .pendingResultId(entity.getPendingResultId() != null
                         ? "ar_" + entity.getPendingResultId() : null)
-                .createdAt(entity.getCreatedAt() != null
-                        ? entity.getCreatedAt().format(ISO_FORMATTER) : null)
-                .updatedAt(entity.getUpdatedAt() != null
-                        ? entity.getUpdatedAt().format(ISO_FORMATTER) : null)
+                .createdAt(formatTime(entity.getCreatedAt()))
+                .updatedAt(formatTime(entity.getUpdatedAt()))
                 .build();
+    }
+
+    /**
+     * 数据库存的是不带时区的 LocalDateTime。
+     * 接口要求返回 +08:00 这样的偏移，因此格式化前先补上系统时区。
+     */
+    private String formatTime(LocalDateTime time) {
+        if (time == null) {
+            return null;
+        }
+        return time.atZone(ZoneId.systemDefault()).format(ISO_FORMATTER);
     }
 }

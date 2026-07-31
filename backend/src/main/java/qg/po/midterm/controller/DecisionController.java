@@ -114,12 +114,12 @@ public class DecisionController {
         return Result.success(vo);
     }
 
-    /** 10.3 发起局部重推 */
-    @PostMapping("/{decisionId}/partial-analysis")
-    public Result<PartialAnalysisVO> startPartialAnalysis(
-            @PathVariable String decisionId,
-            @RequestBody PartialAnalysisRequest request) {
-        PartialAnalysisVO vo = decisionService.startPartialAnalysis(decisionId, request);
-        return Result.success(vo);
-    }
+//    /** 10.3 发起局部重推 */
+//    @PostMapping("/{decisionId}/partial-analysis")
+//    public Result<PartialAnalysisVO> startPartialAnalysis(
+//            @PathVariable String decisionId,
+//            @RequestBody PartialAnalysisRequest request) {
+//        PartialAnalysisVO vo = decisionService.startPartialAnalysis(decisionId, request);
+//        return Result.success(vo);
+//    }
 }
