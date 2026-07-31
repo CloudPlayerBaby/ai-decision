@@ -31,6 +31,7 @@ import qg.po.midterm.service.DecisionService;
 import qg.po.midterm.vo.*;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
+import qg.po.midterm.workflow.agent.ReportAgent;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
@@ -53,6 +54,7 @@ public class DecisionServiceImpl implements DecisionService {
     private final ReportMapper reportMapper;
     private final DecisionCanvasMapper decisionCanvasMapper;
     private final ObjectMapper objectMapper;
+    private final ReportAgent reportAgent;
 
     /** 6.4 中不可删除的状态 */
     private static final Set<String> UNDELETABLE_STATUSES =
@@ -283,9 +285,21 @@ public class DecisionServiceImpl implements DecisionService {
         result.setUpdatedAt(now);
         analysisResultMapper.updateById(result);
 
-        // 2. 生成报告（结构化内容）
+        // 获取用户选择的方案名称
+        String selectedOptionName = null;
         AnalysisResultDto dto = parseAnalysisResultDto(result.getResultData());
-        ReportContent content = buildReportContent(decision, dto);
+        if (StringUtils.hasText(request.getSelectedOptionId()) && dto.getOptions() != null) {
+            selectedOptionName = dto.getOptions().stream()
+                    .filter(o -> o.getId() != null && o.getId().equals(request.getSelectedOptionId()))
+                    .map(Option::getName)
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        // 调用大模型生成报告内容
+        ReportContent content = reportAgent.generateReport(result.getResultData(), selectedOptionName);
+
+        // 2. 生成报告（结构化内容）
         Report report = new Report();
         report.setDecisionId(id);
         report.setContent(objectMapper.writeValueAsString(content));
