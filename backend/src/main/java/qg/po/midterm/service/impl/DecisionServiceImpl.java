@@ -12,11 +12,11 @@ import qg.po.midterm.common.enums.ErrorCode;
 import qg.po.midterm.common.exception.BusinessException;
 import qg.po.midterm.dto.request.ConfirmDecisionRequest;
 import qg.po.midterm.dto.request.CreateDecisionRequest;
-import qg.po.midterm.dto.request.PartialAnalysisRequest;
 import qg.po.midterm.dto.request.PreferredOptionRequest;
 import qg.po.midterm.dto.request.SaveCanvasRequest;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.Canvas;
+import qg.po.midterm.dto.result.ReportContent;
 import qg.po.midterm.entity.AnalysisResult;
 import qg.po.midterm.entity.AnalysisTask;
 import qg.po.midterm.entity.Decision;
@@ -37,6 +37,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 决策问题服务实现（API v2.0 第 6、9、10 节）
@@ -281,10 +283,12 @@ public class DecisionServiceImpl implements DecisionService {
         result.setUpdatedAt(now);
         analysisResultMapper.updateById(result);
 
-        // 2. 生成报告
+        // 2. 生成报告（结构化内容）
+        AnalysisResultDto dto = parseAnalysisResultDto(result.getResultData());
+        ReportContent content = buildReportContent(decision, dto);
         Report report = new Report();
         report.setDecisionId(id);
-        report.setContent(result.getResultData());
+        report.setContent(objectMapper.writeValueAsString(content));
         report.setCreatedAt(now);
         report.setUpdatedAt(now);
         reportMapper.insert(report);
@@ -400,53 +404,6 @@ public class DecisionServiceImpl implements DecisionService {
         return SaveCanvasVO.builder()
                 .changedNodeIds(changedNodeIds)
                 .canvas(newCanvas)
-                .build();
-    }
-
-    @Override
-    public PartialAnalysisVO startPartialAnalysis(String decisionId, PartialAnalysisRequest request) {
-        Long id = parseId(decisionId, "d_");
-        Decision decision = decisionMapper.selectById(id);
-        if (decision == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
-        }
-
-        if (request.getChangedNodeIds() == null || request.getChangedNodeIds().isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "changedNodeIds 不能为空");
-        }
-
-        // 计算受影响的节点
-        List<String> affectedNodeIds = computeAffectedNodeIds(id, request.getChangedNodeIds());
-
-        // 创建局部重推任务
-        LocalDateTime now = LocalDateTime.now();
-        AnalysisTask task = new AnalysisTask();
-        task.setDecisionId(id);
-        task.setRunType("PARTIAL");
-        task.setStatus("RUNNING");
-        task.setCurrentStep(0);
-        task.setTotalSteps(2); // GENERATE_OPTIONS + COMPARE_OPTIONS
-        task.setStartedAt(now);
-        task.setCreatedAt(now);
-        task.setUpdatedAt(now);
-        analysisTaskMapper.insert(task);
-
-        // 更新 decision 状态
-        decision.setStatus(DecisionStatus.PARTIAL_ANALYZING.name());
-        decision.setLatestTaskId(task.getId());
-        decision.setUpdatedAt(now);
-        decisionMapper.updateById(decision);
-
-        String taskId = "t_" + task.getId();
-
-        // TODO 异步分派局部重推：等第 7 节完善后，调用 workflowDispatcher.startPartialAnalysis(...)
-        // 当前先创建任务记录并返回
-
-        return PartialAnalysisVO.builder()
-                .taskId(taskId)
-                .taskType("PARTIAL_ANALYSIS")
-                .status("RUNNING")
-                .affectedNodeIds(affectedNodeIds)
                 .build();
     }
 
@@ -624,47 +581,6 @@ public class DecisionServiceImpl implements DecisionService {
         }
     }
 
-    /**
-     * 根据变更节点计算受影响的节点（用于局部重推）
-     * 规则：factor 变更 → 影响所有 option；option 变更 → 仅影响自身
-     */
-    private List<String> computeAffectedNodeIds(Long decisionId, List<String> changedNodeIds) {
-        java.util.Set<String> affected = new LinkedHashSet<>();
-
-        // 获取当前画布
-        Canvas canvas = null;
-        LambdaQueryWrapper<DecisionCanvas> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DecisionCanvas::getDecisionId, decisionId)
-                .orderByDesc(DecisionCanvas::getUpdatedAt)
-                .last("LIMIT 1");
-        DecisionCanvas dc = decisionCanvasMapper.selectOne(wrapper);
-        if (dc != null && dc.getCanvasData() != null) {
-            try {
-                canvas = objectMapper.readValue(dc.getCanvasData(), Canvas.class);
-            } catch (Exception e) {
-                // ignore
-            }
-        }
-
-        if (canvas == null) {
-            return new java.util.ArrayList<>(changedNodeIds);
-        }
-
-        for (String changedId : changedNodeIds) {
-            affected.add(changedId);
-            // factor 变更 → 所有 option 受影响
-            if (changedId.startsWith("f_") && canvas.getNodes() != null) {
-                for (Canvas.CanvasNode node : canvas.getNodes()) {
-                    if ("option".equals(node.getType())) {
-                        affected.add(node.getId());
-                    }
-                }
-            }
-        }
-
-        return new java.util.ArrayList<>(affected);
-    }
-
     // ==================== 私有工具方法 ====================
 
     private Long getCurrentUserId() {
@@ -726,6 +642,48 @@ public class DecisionServiceImpl implements DecisionService {
         } catch (Exception e) {
             return new AnalysisResultDto();
         }
+    }
+
+    /**
+     * 从已确认的分析结果构建结构化报告内容
+     */
+    private ReportContent buildReportContent(Decision decision, AnalysisResultDto dto) {
+        return ReportContent.builder()
+                .background(decision.getBackground())
+                .objective(decision.getGoal())
+                .factorAnalysis(dto.getFactors() != null
+                        ? dto.getFactors().stream()
+                            .map(f -> ReportContent.FactorItem.builder()
+                                    .name(f.getName())
+                                    .weight(f.getWeight())
+                                    .description(f.getDescription())
+                                    .build())
+                            .collect(Collectors.toList())
+                        : Collections.emptyList())
+                .optionComparison(dto.getOptions() != null
+                        ? dto.getOptions().stream()
+                            .map(o -> ReportContent.OptionComparison.builder()
+                                    .name(o.getName())
+                                    .pros(o.getPros())
+                                    .cons(o.getCons())
+                                    .risks(o.getRisks())
+                                    .scores(o.getScores())
+                                    .build())
+                            .collect(Collectors.toList())
+                        : Collections.emptyList())
+                .conclusion(dto.getRecommendation() != null
+                        ? dto.getRecommendation().getReason()
+                        : null)
+                .riskAnalysis(dto.getOptions() != null
+                        ? dto.getOptions().stream()
+                            .flatMap(o -> o.getRisks() != null
+                                    ? o.getRisks().stream()
+                                    : Stream.empty())
+                            .distinct()
+                            .collect(Collectors.toList())
+                        : Collections.emptyList())
+                .nextActions(dto.getNextActions())
+                .build();
     }
 
     private DecisionVO toVO(Decision entity) {

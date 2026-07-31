@@ -5,19 +5,17 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
-
 /**
- * 局部重推响应（API v2.0 10.3 节）
+ * 历史报告摘要（API v2.0 11.1 历史列表）
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PartialAnalysisVO {
+public class ReportSummaryVO {
 
-    private String taskId;
-    private String taskType;
+    private String id;
+    private String analysisResultId;
     private String status;
-    private List<String> affectedNodeIds;
+    private String generatedAt;
 }
