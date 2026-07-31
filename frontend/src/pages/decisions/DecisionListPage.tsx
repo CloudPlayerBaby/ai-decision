@@ -54,6 +54,7 @@ export function DecisionListPage() {
     <PagePlaceholder
       title="决策记录"
       description="查看历史推演记录，进入工作台继续分析。"
+      wide
       hint={
         isMockEnabled()
           ? '当前为 Mock 数据（VITE_USE_MOCK=true）'
@@ -112,6 +113,7 @@ export function DecisionListPage() {
         rowKey="id"
         loading={isLoading || isFetching}
         dataSource={data?.list ?? []}
+        scroll={{ x: 720 }}
         pagination={{
           current: data?.page ?? page,
           pageSize: data?.pageSize ?? pageSize,

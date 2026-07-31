@@ -51,8 +51,24 @@ export function WorkbenchPage() {
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
+  const leftCollapsed = useLayoutStore((state) => state.leftCollapsed)
+  const leftWidth = useLayoutStore((state) => state.leftWidth)
   const setRightCollapsed = useLayoutStore((state) => state.setRightCollapsed)
   const setRightWidth = useLayoutStore((state) => state.setRightWidth)
+
+  const leftOccupied = leftCollapsed
+    ? LAYOUT_LIMITS.leftCollapsedWidth
+    : leftWidth
+  const rightDragMax = Math.max(
+    LAYOUT_LIMITS.rightMin,
+    Math.min(
+      LAYOUT_LIMITS.rightMax,
+      (typeof window !== 'undefined' ? window.innerWidth : 1440) -
+        leftOccupied -
+        LAYOUT_LIMITS.minCenterWidth -
+        12,
+    ),
+  )
 
   const detailQuery = useQuery({
     queryKey: queryKeys.decisions.detail(id),
@@ -192,7 +208,7 @@ export function WorkbenchPage() {
           />
         }
         description={
-          <Space size="middle" wrap>
+          <div className="workbench__meta">
             <Text type="secondary" style={{ fontSize: 12 }}>
               ID: {decision.id}
             </Text>
@@ -207,10 +223,10 @@ export function WorkbenchPage() {
               </Text>
             ) : null}
             {isMockEnabled() ? <Tag>Mock</Tag> : null}
-          </Space>
+          </div>
         }
         extra={
-          <Space wrap>
+          <Space size={[8, 8]} wrap>
             <Tooltip title={rightCollapsed ? '展开推演对话' : '收起推演对话'}>
               <Button
                 icon={
@@ -284,7 +300,7 @@ export function WorkbenchPage() {
               value={rightWidth}
               onChange={setRightWidth}
               min={LAYOUT_LIMITS.rightMin}
-              max={LAYOUT_LIMITS.rightMax}
+              max={rightDragMax}
               title="拖动调整右侧栏宽度（双击收起）"
               onDoubleClick={() => setRightCollapsed(true)}
             />
