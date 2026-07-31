@@ -13,7 +13,6 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
-import qg.po.midterm.workflow.utils.JsonOutputOptions;
 
 import java.util.List;
 import java.util.Map;
@@ -65,10 +64,9 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
             OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
                     chatClient.prompt()
-                            .options(JsonOutputOptions.create())
                             .user(prompt)
                             .call()
-                            .entity(OptionGenerationResult.class)
+                            .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(OptionGenerationResult.class))
             );
                     
             log.info("<<< 【AI Response】\n{}", result);

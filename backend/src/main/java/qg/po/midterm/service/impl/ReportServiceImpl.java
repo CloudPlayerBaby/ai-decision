@@ -18,6 +18,7 @@ import qg.po.midterm.mapper.ReportMapper;
 import qg.po.midterm.service.ReportService;
 import qg.po.midterm.vo.ReportSummaryVO;
 import qg.po.midterm.vo.ReportVO;
+import qg.po.midterm.workflow.agent.ReportAgent;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -36,6 +37,7 @@ public class ReportServiceImpl implements ReportService {
     private final DecisionMapper decisionMapper;
     private final AnalysisResultMapper analysisResultMapper;
     private final ObjectMapper objectMapper;
+    private final ReportAgent reportAgent;
 
     private static final DateTimeFormatter ISO_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX");
@@ -101,9 +103,20 @@ public class ReportServiceImpl implements ReportService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "没有已确认的分析结果");
         }
 
-        // 格式化报告内容（不调AI）
-        AnalysisResultDto dto = parseAnalysisResultDto(confirmed.getResultData());
-        ReportContent newContent = buildReportContent(decision, dto);
+        // 格式化报告内容（调用AI）
+        String selectedOptionName = null;
+        if (decision.getPreferredOptionId() != null) {
+            AnalysisResultDto dto = parseAnalysisResultDto(confirmed.getResultData());
+            String optId = "opt_" + decision.getPreferredOptionId();
+            if (dto.getOptions() != null) {
+                selectedOptionName = dto.getOptions().stream()
+                        .filter(o -> o.getId() != null && o.getId().equals(optId))
+                        .map(qg.po.midterm.workflow.state.Option::getName)
+                        .findFirst()
+                        .orElse(null);
+            }
+        }
+        ReportContent newContent = reportAgent.generateReport(confirmed.getResultData(), selectedOptionName);
 
         // 创建新报告（保留历史）
         LocalDateTime now = LocalDateTime.now();

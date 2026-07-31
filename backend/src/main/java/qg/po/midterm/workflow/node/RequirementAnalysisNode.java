@@ -12,7 +12,6 @@ import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.tools.CalculatorTool;
-import qg.po.midterm.workflow.utils.JsonOutputOptions;
 
 import java.util.Map;
 
@@ -50,11 +49,10 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
         RequirementAnalysisResult result = chatClient.prompt()
-                .options(JsonOutputOptions.create())
                 .user(prompt)
                 .tools(calculatorTool)
                 .call()
-                .entity(RequirementAnalysisResult.class);
+                .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(RequirementAnalysisResult.class));
                 
         log.info("<<< 【AI Response】\n{}", result);
 

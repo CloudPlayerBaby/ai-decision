@@ -11,7 +11,6 @@ import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
-import qg.po.midterm.workflow.utils.JsonOutputOptions;
 
 import java.util.List;
 import java.util.Map;
@@ -48,10 +47,9 @@ public class RepairNode implements NodeAction<DecisionState> {
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
         AnalysisResultDto repairedResult = chatClient.prompt()
-                .options(JsonOutputOptions.create())
                 .user(prompt)
                 .call()
-                .entity(AnalysisResultDto.class);
+                .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(AnalysisResultDto.class));
 
         log.info("<<< 【AI Response】\n{}", repairedResult);
 
