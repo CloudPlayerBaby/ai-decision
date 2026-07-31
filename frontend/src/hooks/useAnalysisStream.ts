@@ -66,12 +66,22 @@ export function useAnalysisStream({
 
     if (!taskId) {
       setSteps([]);
+      setToolCalls([]);
+      setResultReady(null);
+      setTaskFailed(null);
       setProgress(0);
       setConnectionStatus('idle');
       closeEventSource();
       clearTimer();
       return;
     }
+
+    // taskId 变化：重置步骤和结果，等待新连接
+    setSteps([]);
+    setToolCalls([]);
+    setResultReady(null);
+    setTaskFailed(null);
+    setProgress(0);
 
     let cancelled = false;
 
