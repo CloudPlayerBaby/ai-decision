@@ -48,19 +48,19 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        String understanding = chatClient.prompt()
+        RequirementAnalysisResult result = chatClient.prompt()
                 .user(prompt)
                 .tools(calculatorTool)
                 .call()
-                .content();
+                .entity(RequirementAnalysisResult.class);
                 
-        log.info("<<< 【AI Response】\n{}", understanding);
+        log.info("<<< 【AI Response】\n{}", result);
 
         // 使用 ObjectMapper 将结果序列化为 JSON 字符串
-        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("understanding", understanding));
+        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
 
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
-        return Map.of("understanding", understanding);
+        return Map.of("understanding", result.understanding());
         } catch (Exception e) {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
