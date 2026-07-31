@@ -262,6 +262,7 @@ public class DecisionServiceImpl implements DecisionService {
                     "仅 PENDING_CONFIRM 状态的草案可以选择倾向方案"
             );
         }
+        checkCurrentPendingResult(decision, result);
         Option option = getOptionOrThrow(result, request.getOptionId());
 
         decision.setPreferredOptionId(option.getId());
@@ -288,6 +289,7 @@ public class DecisionServiceImpl implements DecisionService {
             throw new BusinessException(ErrorCode.CONFLICT,
                     "仅 PENDING_CONFIRM 状态的草案可以确认，当前: " + result.getStatus());
         }
+        checkCurrentPendingResult(decision, result);
 
         Option selectedOption = getOptionOrThrow(
                 result,
@@ -392,6 +394,14 @@ public class DecisionServiceImpl implements DecisionService {
                 oldCanvas = objectMapper.readValue(existing.getCanvasData(), Canvas.class);
             } catch (Exception e) {
                 // ignore
+            }
+        } else {
+            AnalysisResult baselineResult = findLatestResultForCanvas(id);
+            if (baselineResult != null && baselineResult.getResultData() != null) {
+                oldCanvas = buildAutoCanvas(
+                        parseAnalysisResultDto(baselineResult.getResultData()),
+                        decision.getTitle()
+                );
             }
         }
 
@@ -541,28 +551,15 @@ public class DecisionServiceImpl implements DecisionService {
         }
 
         // 边变更也视为关联节点变更
-        Set<String> oldEdges = indexEdges(oldCanvas);
-        Set<String> newEdges = indexEdges(newCanvas);
-        if (!oldEdges.equals(newEdges)) {
-            // 找出边变更影响的节点
-            Set<String> edgeAffected = new HashSet<>();
-            if (oldCanvas.getEdges() != null) {
-                oldCanvas.getEdges().forEach(e -> {
-                    edgeAffected.add(e.getSource());
-                    edgeAffected.add(e.getTarget());
-                });
-            }
-            if (newCanvas.getEdges() != null) {
-                newCanvas.getEdges().forEach(e -> {
-                    edgeAffected.add(e.getSource());
-                    edgeAffected.add(e.getTarget());
-                });
-            }
-            for (String nodeId : edgeAffected) {
-                if (!changed.contains(nodeId)) {
-                    changed.add(nodeId);
-                }
-            }
+        Map<String, Canvas.CanvasEdge> oldEdges = indexEdgeMap(oldCanvas);
+        Map<String, Canvas.CanvasEdge> newEdges = indexEdgeMap(newCanvas);
+        Set<String> changedEdges = new LinkedHashSet<>(oldEdges.keySet());
+        changedEdges.addAll(newEdges.keySet());
+        changedEdges.removeIf(signature -> oldEdges.containsKey(signature) && newEdges.containsKey(signature));
+        for (String signature : changedEdges) {
+            Canvas.CanvasEdge edge = newEdges.getOrDefault(signature, oldEdges.get(signature));
+            addBusinessEndpoint(changed, edge.getSource());
+            addBusinessEndpoint(changed, edge.getTarget());
         }
 
         return changed;
@@ -589,7 +586,11 @@ public class DecisionServiceImpl implements DecisionService {
     }
 
     private boolean nodeEquals(Canvas.CanvasNode a, Canvas.CanvasNode b) {
-        // 只比较 data（weight / scores 等业务数据），忽略 position 变化
+        // position 只影响布局；type、label 和 data 都属于业务变更。
+        if (!Objects.equals(a.getType(), b.getType())
+                || !Objects.equals(a.getLabel(), b.getLabel())) {
+            return false;
+        }
         try {
             String jsonA = objectMapper.writeValueAsString(a.getData());
             String jsonB = objectMapper.writeValueAsString(b.getData());
@@ -651,6 +652,21 @@ public class DecisionServiceImpl implements DecisionService {
         );
     }
 
+    private Map<String, Canvas.CanvasEdge> indexEdgeMap(Canvas canvas) {
+        Map<String, Canvas.CanvasEdge> map = new LinkedHashMap<>();
+        if (canvas != null && canvas.getEdges() != null) {
+            for (Canvas.CanvasEdge edge : canvas.getEdges()) {
+                String signature = edge.getSource() + "->" + edge.getTarget() + ":" + edge.getRelation();
+                map.put(signature, edge);
+            }
+        }
+        return map;
+    }
+
+    private void addBusinessEndpoint(List<String> changed, String nodeId) {
+        if (nodeId != null && !"root".equals(nodeId) && !changed.contains(nodeId)) changed.add(nodeId);
+    }
+
     private AnalysisResult getAnalysisResultOrThrow(
             Long decisionId,
             String analysisResultId) {
@@ -697,6 +713,18 @@ public class DecisionServiceImpl implements DecisionService {
                         ErrorCode.BAD_REQUEST,
                         "所选方案不属于该分析结果"
                 ));
+    }
+
+    private void checkCurrentPendingResult(Decision decision, AnalysisResult result) {
+        if (!Set.of(DecisionStatus.WAITING_CONFIRM.name(), DecisionStatus.COMPLETED.name())
+                .contains(decision.getStatus())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "当前决策状态不允许操作待确认结果");
+        }
+        if (!Boolean.TRUE.equals(decision.getHasPendingResult())
+                || decision.getPendingResultId() == null
+                || !Objects.equals(decision.getPendingResultId(), result.getId())) {
+            throw new BusinessException(ErrorCode.CONFLICT, "该分析结果已不是当前待确认草案");
+        }
     }
 
     private Long getCurrentUserId() {

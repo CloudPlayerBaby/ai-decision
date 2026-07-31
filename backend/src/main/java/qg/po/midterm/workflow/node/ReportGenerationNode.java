@@ -55,7 +55,6 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
             // 实际生成报告可能需要保存到特定实体中，这里先作为结果之一存入 State
             return Map.of("reportSummary", reportSummary);
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

@@ -48,11 +48,10 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
-        RequirementAnalysisResult result = chatClient.prompt()
-                .user(prompt)
-                .tools(calculatorTool)
-                .call()
-                .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(RequirementAnalysisResult.class));
+        qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<RequirementAnalysisResult> execution =
+                qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
+                        chatClient, prompt, new Object[]{calculatorTool}, RequirementAnalysisResult.class);
+        RequirementAnalysisResult result = execution.value();
                 
         log.info("<<< 【AI Response】\n{}", result);
 
@@ -60,9 +59,11 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
 
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
-        return Map.of("understanding", result.understanding());
+        return Map.of(
+                "understanding", result.understanding() != null ? result.understanding() : "",
+                "repairAttempted", state.isRepairAttempted() || execution.repaired()
+        );
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e.getMessage()));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

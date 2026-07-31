@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import java.time.Duration;
 
 import java.util.List;
 import java.util.Map;
@@ -30,8 +32,15 @@ public class TavilySearchTool {
     @Value("${tavily.api-key:}")
     private String apiKey;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate = createRestTemplate();
     private final ApplicationEventPublisher eventPublisher;
+
+    private static RestTemplate createRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));
+        factory.setReadTimeout(Duration.ofSeconds(20));
+        return new RestTemplate(factory);
+    }
 
     private void publishToolEvent(String status, String inputSummary, String outputSummary) {
         TaskContextHolder.TaskContext ctx = TaskContextHolder.getContext();

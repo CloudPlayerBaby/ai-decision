@@ -61,12 +61,14 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
-            RiskAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepair(
+            qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<RiskAnalysisResult> execution =
+                    qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
                     chatClient,
                     prompt,
                     null, // 没有 tools
                     RiskAnalysisResult.class
             );
+            RiskAnalysisResult result = execution.value();
                     
             log.info("<<< 【AI Response】\n{}", result);
 
@@ -75,11 +77,12 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             
             return Map.of(
-                "recommendation", result.recommendation(),
-                "nextActions", result.nextActions()
+                "recommendation", result.recommendation() != null
+                        ? result.recommendation() : new AnalysisResultDto.Recommendation(),
+                "nextActions", result.nextActions() != null ? result.nextActions() : List.of(),
+                "repairAttempted", state.isRepairAttempted() || execution.repaired()
             );
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

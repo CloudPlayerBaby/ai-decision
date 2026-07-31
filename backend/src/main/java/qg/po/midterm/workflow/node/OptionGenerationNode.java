@@ -13,6 +13,7 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
+import qg.po.midterm.workflow.tools.CalculatorTool;
 
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final CalculatorTool calculatorTool;
 
     @Value("classpath:prompts/option.st")
     private Resource promptResource;
@@ -65,21 +67,25 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
-            OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepair(
+            qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<OptionGenerationResult> execution =
+                    qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
                     chatClient,
                     prompt,
-                    null, // 没有 tools
+                    new Object[]{calculatorTool},
                     OptionGenerationResult.class
             );
+            OptionGenerationResult result = execution.value();
 
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
             String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
-            return Map.of("options", result.options());
+            return Map.of(
+                    "options", result.options() != null ? result.options() : List.of(),
+                    "repairAttempted", state.isRepairAttempted() || execution.repaired()
+            );
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "FAILED", e));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

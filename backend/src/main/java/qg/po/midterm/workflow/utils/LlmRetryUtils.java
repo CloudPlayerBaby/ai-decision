@@ -32,6 +32,14 @@ public class LlmRetryUtils {
             String userPrompt,
             Object[] tools,
             Class<T> returnType) {
+        return executeWithRepairResult(chatClient, userPrompt, tools, returnType).value();
+    }
+
+    public static <T> ExecutionResult<T> executeWithRepairResult(
+            ChatClient chatClient,
+            String userPrompt,
+            Object[] tools,
+            Class<T> returnType) {
 
         MarkdownStrippingConverter<T> converter = new MarkdownStrippingConverter<>(returnType);
         String formatInstruction = converter.getFormat();
@@ -46,7 +54,7 @@ public class LlmRetryUtils {
         }
 
         try {
-            return converter.convert(rawResponse);
+            return new ExecutionResult<>(converter.convert(rawResponse), false);
         } catch (Exception e) {
             log.warn("大模型第一次返回非标准 JSON 格式，触发修复流程。报错: {}", e.getMessage());
             
@@ -70,13 +78,15 @@ public class LlmRetryUtils {
             }
 
             try {
-                return converter.convert(repairedRawResponse);
+                return new ExecutionResult<>(converter.convert(repairedRawResponse), true);
             } catch (Exception e2) {
                 log.error("大模型修复 JSON 失败: {}", e2.getMessage());
                 throw new AiValidationException("AI 结果结构校验失败：" + e2.getMessage(), missingFields, true);
             }
         }
     }
+
+    public record ExecutionResult<T>(T value, boolean repaired) {}
 
     private static List<String> extractMissingFields(String errorMessage) {
         List<String> missingFields = new ArrayList<>();

@@ -52,6 +52,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     private final AnalysisResultMapper resultMapper;
     private final DecisionCanvasMapper canvasMapper;
     private final AnalysisWorkflowDispatcher workflowDispatcher;
+    private final PartialAnalysisPlanner partialAnalysisPlanner;
     private final TaskRuntimeRepository runtimeRepository;
     private final ObjectMapper objectMapper;
 
@@ -93,7 +94,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         );
 
         // 创建任务
-        AnalysisTask task = createTask(decisionDbId, "FULL", null, stepNames, now);
+        AnalysisTask task = createTask(decisionDbId, "FULL", decision.getStatus(), stepNames, now);
 
         // 告诉数据库：任务开始跑了！
         decision.setStatus(DecisionStatus.ANALYZING.name()); // 推演完成前，决策处于分析中
@@ -163,6 +164,11 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         AnalysisResultDto oldResult = getCurrentResult(decision);
         // 读取用户刚刚保存的最新画布
         Canvas latestCanvas = getLatestCanvas(decisionDbId);
+        PartialAnalysisPlanner.Plan partialPlan = partialAnalysisPlanner.plan(
+                latestCanvas,
+                oldResult,
+                changedNodeIds
+        );
 
         // 使用旧分析结果作为基础，再用最新画布覆盖用户修改的因素和方案
         DecisionState currentState = buildCurrentState(
@@ -189,7 +195,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 stepNames,
                 now
         );
-        markReusedPartialSteps(task.getId(), changedNodeIds, now);
+        markReusedPartialSteps(task.getId(), partialPlan.startNode(), now);
 
         // 先持久化到数据库
         decision.setStatus(DecisionStatus.PARTIAL_ANALYZING.name());
@@ -203,7 +209,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         runAfterCommit(() -> workflowDispatcher.startPartialAnalysis(
                 taskId,
                 "d_" + decisionDbId,
-                changedNodeIds,
+                partialPlan.startNode(),
                 currentState
         ));
 
@@ -212,7 +218,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 taskId,
                 "PARTIAL_ANALYSIS",
                 "RUNNING",
-                changedNodeIds
+                partialPlan.affectedNodeIds()
         );
     }
 
@@ -266,25 +272,19 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             progress = 100;
         }
 
-        // 如果有失败步骤，返回文档要求的 error。
         TaskErrorVO error = null;
-        for (AnalysisStep step : steps) {
-            if ("FAILED".equals(step.getStatus())) {
-                error = new TaskErrorVO(
-                        ErrorCode.INTERNAL_ERROR.getCode(),
-                        step.getErrorMessage(),
-                        true,
-                        "s_" + step.getId()
-                );
-                break;
-            }
-        }
-        if (error == null && "FAILED".equals(task.getStatus())) {
+        if ("FAILED".equals(task.getStatus())) {
+            AnalysisStep failedStep = steps.stream()
+                    .filter(item -> "FAILED".equals(item.getStatus()))
+                    .findFirst()
+                    .orElse(null);
             error = new TaskErrorVO(
-                    ErrorCode.INTERNAL_ERROR.getCode(),
+                    task.getErrorCode() != null ? task.getErrorCode() : ErrorCode.INTERNAL_ERROR.getCode(),
                     task.getErrorMessage(),
-                    false,
-                    null
+                    Boolean.TRUE.equals(task.getRetryable()),
+                    failedStep == null ? null : "s_" + failedStep.getId(),
+                    parseMissingFields(task.getMissingFields()),
+                    Boolean.TRUE.equals(task.getRepairAttempted())
             );
         }
 
@@ -312,6 +312,13 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
         // 检查是不是决策的所有者
         Decision decision = checkTaskOwner(task);
+
+        if (!"FAILED".equals(task.getStatus()) || !Boolean.TRUE.equals(task.getRetryable())) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "当前任务不是可重试的失败状态"
+            );
+        }
 
         // 查询步骤，并确认它属于当前任务
         AnalysisStep step = stepMapper.selectById(stepDbId);
@@ -343,6 +350,8 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             );
         }
 
+        DecisionState retryState = buildRetryState(decision, task, step);
+
         // 确定 count 次数
         int retryCount = step.getRetryCount() == null ? 1 : step.getRetryCount() + 1;
 
@@ -354,10 +363,15 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         step.setRetryCount(retryCount);
         step.setUpdatedAt(LocalDateTime.now());
         stepMapper.updateById(step);
+        resetDownstreamForRetry(task.getId(), step.getStepOrder(), LocalDateTime.now());
 
         // 保存到数据库，任务恢复为 RUNNING
         task.setStatus("RUNNING");
         task.setErrorMessage(null);
+        task.setErrorCode(null);
+        task.setMissingFields(null);
+        task.setRepairAttempted(false);
+        task.setRetryable(false);
         task.setFinishedAt(null);
         task.setUpdatedAt(LocalDateTime.now());
         taskMapper.updateById(task);
@@ -373,7 +387,9 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
         runAfterCommit(() -> workflowDispatcher.retryStep(
                 "t_" + task.getId(),
-                "s_" + step.getId()
+                "s_" + step.getId(),
+                step.getStepName(),
+                retryState
         ));
 
         // 返回给前端
@@ -383,6 +399,85 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 "WAITING",
                 "已加入重试队列"
         );
+    }
+
+    private DecisionState buildRetryState(Decision decision, AnalysisTask task, AnalysisStep failedStep) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("decisionId", "d_" + decision.getId());
+        data.put("taskId", "t_" + task.getId());
+        data.put("background", decision.getBackground());
+        data.put("goal", decision.getGoal());
+        data.put("constraints", decision.getConstraints());
+
+        if ("PARTIAL".equals(task.getRunType())) {
+            DecisionState base = buildCurrentState(
+                    decision,
+                    getCurrentResult(decision),
+                    getLatestCanvas(decision.getId()),
+                    task.getPreviousDecisionStatus()
+            );
+            data.putAll(base.data());
+        }
+
+        List<AnalysisStep> completedSteps = stepMapper.selectList(
+                new LambdaQueryWrapper<AnalysisStep>()
+                        .eq(AnalysisStep::getRunId, task.getId())
+                        .lt(AnalysisStep::getStepOrder, failedStep.getStepOrder())
+                        .eq(AnalysisStep::getStatus, "SUCCEEDED")
+                        .orderByAsc(AnalysisStep::getStepOrder)
+        );
+        for (AnalysisStep completedStep : completedSteps) {
+            applyStepOutput(data, completedStep);
+        }
+        data.put("startNode", failedStep.getStepName());
+        return new DecisionState(data);
+    }
+
+    private void applyStepOutput(Map<String, Object> state, AnalysisStep step) {
+        if (step.getOutputData() == null || step.getOutputData().isBlank()) return;
+        try {
+            JsonNode output = objectMapper.readTree(step.getOutputData());
+            if (output.path("reused").asBoolean(false)) return;
+            if (output.hasNonNull("understanding")) {
+                state.put("understanding", output.get("understanding").asText());
+            }
+            if (output.hasNonNull("factors")) {
+                Factor[] factors = objectMapper.readValue(output.get("factors").toString(), Factor[].class);
+                state.put("factors", Arrays.asList(factors));
+            }
+            if (output.hasNonNull("options")) {
+                Option[] options = objectMapper.readValue(output.get("options").toString(), Option[].class);
+                state.put("options", Arrays.asList(options));
+            }
+            if (output.hasNonNull("recommendation")) {
+                AnalysisResultDto.Recommendation recommendation = objectMapper.readValue(
+                        output.get("recommendation").toString(), AnalysisResultDto.Recommendation.class);
+                state.put("recommendation", recommendation);
+            }
+            if (output.hasNonNull("nextActions")) {
+                String[] actions = objectMapper.readValue(output.get("nextActions").toString(), String[].class);
+                state.put("nextActions", Arrays.asList(actions));
+            }
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "无法恢复失败步骤的历史状态");
+        }
+    }
+
+    private void resetDownstreamForRetry(Long taskId, Integer stepOrder, LocalDateTime now) {
+        List<AnalysisStep> downstream = stepMapper.selectList(
+                new LambdaQueryWrapper<AnalysisStep>()
+                        .eq(AnalysisStep::getRunId, taskId)
+                        .gt(AnalysisStep::getStepOrder, stepOrder)
+        );
+        for (AnalysisStep item : downstream) {
+            item.setStatus("WAITING");
+            item.setOutputData(null);
+            item.setErrorMessage(null);
+            item.setStartedAt(null);
+            item.setFinishedAt(null);
+            item.setUpdatedAt(now);
+            stepMapper.updateById(item);
+        }
     }
 
     /**
@@ -480,27 +575,22 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
     private void markReusedPartialSteps(
             Long taskId,
-            List<String> changedNodeIds,
+            String startNode,
             LocalDateTime now) {
-        boolean factorChanged = changedNodeIds.stream()
-                .anyMatch(id -> id.startsWith("f_"));
         List<String> reusedStepNames;
-        if (factorChanged) {
+        if ("GENERATE_OPTIONS".equals(startNode)) {
             reusedStepNames = List.of(
                     "UNDERSTAND",
                     "EXTRACT_FACTORS"
             );
-        } else {
-            boolean optionChanged = changedNodeIds.stream()
-                    .anyMatch(id -> id.startsWith("opt_"));
-            if (!optionChanged) {
-                return;
-            }
+        } else if ("COMPARE_OPTIONS".equals(startNode)) {
             reusedStepNames = List.of(
                     "UNDERSTAND",
                     "EXTRACT_FACTORS",
                     "GENERATE_OPTIONS"
             );
+        } else {
+            return;
         }
 
         List<AnalysisStep> reusedSteps = stepMapper.selectList(
@@ -788,6 +878,19 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
     private String textOrNull(JsonNode node) {
         return node == null || node.isNull() ? null : node.asText();
+    }
+
+    private List<String> parseMissingFields(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (!node.isArray()) return null;
+            List<String> fields = new ArrayList<>();
+            node.forEach(item -> fields.add(item.asText()));
+            return fields;
+        } catch (Exception exception) {
+            return null;
+        }
     }
 
     /**

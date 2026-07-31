@@ -8,12 +8,12 @@ import org.springframework.context.ApplicationEvent;
 public class WorkflowFailedEvent extends ApplicationEvent {
     
     private final String taskId;
-    private final String errorMessage;
+    private final Exception exception;
 
-    public WorkflowFailedEvent(Object source, String taskId, String errorMessage) {
+    public WorkflowFailedEvent(Object source, String taskId, Exception exception) {
         super(source);
         this.taskId = taskId;
-        this.errorMessage = errorMessage;
+        this.exception = exception;
     }
 
     public String getTaskId() {
@@ -21,6 +21,13 @@ public class WorkflowFailedEvent extends ApplicationEvent {
     }
 
     public String getErrorMessage() {
-        return errorMessage;
+        if (exception == null || exception.getMessage() == null || exception.getMessage().isBlank()) {
+            return exception == null ? "Workflow execution failed" : exception.getClass().getSimpleName();
+        }
+        return exception.getMessage();
+    }
+
+    public Exception getException() {
+        return exception;
     }
 }
