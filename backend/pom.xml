@@ -66,12 +66,12 @@
         <dependency>
             <groupId>io.sentry</groupId>
             <artifactId>sentry-spring-boot-starter-jakarta</artifactId>
-            <version>7.14.0</version> <!-- 注意：具体版本按网页上的来，一般用较新的 7.x 即可，8.x 也可以 -->
+            <version>8.34.1</version>
         </dependency>
         <dependency>
             <groupId>io.sentry</groupId>
             <artifactId>sentry-logback</artifactId>
-            <version>7.14.0</version>
+            <version>8.34.1</version>
         </dependency>
 
         <dependency>
