@@ -266,20 +266,15 @@ function createNode(type: 'factor' | 'option', existingNodes: FlowNode[]): FlowN
 
 // ── 主组件 ───────────────────────────────────────────────────
 
-export function DecisionCanvasPanel({
-  viewModel,
-  optionsDetail,
-  recommendedOptionId,
-  factorsDetail,
-  onDirtyChange,
-  onCanvasChange,
-  decisionId,
-  taskId,
-  pendingResultId,
-  hasPendingResult,
-  decisionStatus,
-  onRequestRefresh,
-}: DecisionCanvasPanelProps) {
+export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
+  const {
+    viewModel,
+    optionsDetail,
+    recommendedOptionId,
+    factorsDetail,
+    onDirtyChange,
+    onCanvasChange,
+  } = props
   const resolvedOptionsDetail = viewModel?.optionsDetail ?? optionsDetail ?? {}
   const resolvedRecommendedId = viewModel?.recommendedOptionId ?? recommendedOptionId ?? null
   const resolvedFactorsDetail = viewModel?.factorsDetail ?? factorsDetail ?? {}
@@ -298,7 +293,7 @@ export function DecisionCanvasPanel({
     id: e.id,
     source: e.source,
     target: e.target,
-    relation: e.relation,
+    relation: e.relation ?? '',
   }))
 
   const [nodes, setNodes] = useNodesState(initialNodes)

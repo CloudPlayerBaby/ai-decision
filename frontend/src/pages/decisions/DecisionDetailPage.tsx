@@ -112,7 +112,7 @@ export function DecisionDetailPage() {
               className="workbench__right"
               style={{ width: rightWidth, flex: `0 0 ${rightWidth}px` }}
             >
-              <ConversationPanel />
+              <ConversationPanel decisionId={decisionId} />
             </div>
           </>
         ) : null}
