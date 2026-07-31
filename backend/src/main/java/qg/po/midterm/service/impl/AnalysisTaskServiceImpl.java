@@ -172,7 +172,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 previousDecisionStatus
         );
 
-        // Task 层只保存完整步骤；从哪个节点开始由 WorkflowExecutor 判断
+        // 保留完整业务链路；未重新执行的前置步骤会标记为复用历史结果。
         List<String> stepNames = List.of(
                 "UNDERSTAND",
                 "EXTRACT_FACTORS",
@@ -189,6 +189,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 stepNames,
                 now
         );
+        markReusedPartialSteps(task.getId(), changedNodeIds, now);
 
         // 先持久化到数据库
         decision.setStatus(DecisionStatus.PARTIAL_ANALYZING.name());
@@ -475,6 +476,50 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             );
         }
         return ids;
+    }
+
+    private void markReusedPartialSteps(
+            Long taskId,
+            List<String> changedNodeIds,
+            LocalDateTime now) {
+        boolean factorChanged = changedNodeIds.stream()
+                .anyMatch(id -> id.startsWith("f_"));
+        List<String> reusedStepNames;
+        if (factorChanged) {
+            reusedStepNames = List.of(
+                    "UNDERSTAND",
+                    "EXTRACT_FACTORS"
+            );
+        } else {
+            boolean optionChanged = changedNodeIds.stream()
+                    .anyMatch(id -> id.startsWith("opt_"));
+            if (!optionChanged) {
+                return;
+            }
+            reusedStepNames = List.of(
+                    "UNDERSTAND",
+                    "EXTRACT_FACTORS",
+                    "GENERATE_OPTIONS"
+            );
+        }
+
+        List<AnalysisStep> reusedSteps = stepMapper.selectList(
+                new LambdaQueryWrapper<AnalysisStep>()
+                        .eq(AnalysisStep::getRunId, taskId)
+                        .in(AnalysisStep::getStepName, reusedStepNames)
+        );
+        for (AnalysisStep step : reusedSteps) {
+            step.setStatus("SUCCEEDED");
+            step.setStartedAt(now);
+            step.setFinishedAt(now);
+            step.setOutputData(
+                    "{\"summary\":\"复用历史结果\",\"content\":"
+                            + "\"本步骤沿用上一次推演结果，本次局部推演未重新执行。\","
+                            + "\"reused\":true}"
+            );
+            step.setUpdatedAt(now);
+            stepMapper.updateById(step);
+        }
     }
 
     /**

@@ -18,14 +18,20 @@ import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.Canvas;
 import qg.po.midterm.dto.result.ReportContent;
 import qg.po.midterm.entity.AnalysisResult;
+import qg.po.midterm.entity.AnalysisStep;
 import qg.po.midterm.entity.AnalysisTask;
 import qg.po.midterm.entity.Decision;
 import qg.po.midterm.entity.DecisionCanvas;
+import qg.po.midterm.entity.DecisionFactor;
+import qg.po.midterm.entity.DecisionSolution;
 import qg.po.midterm.entity.Report;
 import qg.po.midterm.mapper.AnalysisResultMapper;
+import qg.po.midterm.mapper.AnalysisStepMapper;
 import qg.po.midterm.mapper.AnalysisTaskMapper;
 import qg.po.midterm.mapper.DecisionCanvasMapper;
+import qg.po.midterm.mapper.DecisionFactorMapper;
 import qg.po.midterm.mapper.DecisionMapper;
+import qg.po.midterm.mapper.DecisionSolutionMapper;
 import qg.po.midterm.mapper.ReportMapper;
 import qg.po.midterm.service.DecisionService;
 import qg.po.midterm.vo.*;
@@ -53,6 +59,9 @@ public class DecisionServiceImpl implements DecisionService {
     private final AnalysisResultMapper analysisResultMapper;
     private final ReportMapper reportMapper;
     private final DecisionCanvasMapper decisionCanvasMapper;
+    private final AnalysisStepMapper analysisStepMapper;
+    private final DecisionFactorMapper decisionFactorMapper;
+    private final DecisionSolutionMapper decisionSolutionMapper;
     private final ObjectMapper objectMapper;
     private final ReportAgent reportAgent;
 
@@ -173,6 +182,7 @@ public class DecisionServiceImpl implements DecisionService {
     }
 
     @Override
+    @Transactional
     public void delete(String decisionId) {
         Long id = parseId(decisionId, "d_");
         Decision entity = decisionMapper.selectById(id);
@@ -186,6 +196,7 @@ public class DecisionServiceImpl implements DecisionService {
                     "当前状态 " + entity.getStatus() + " 不允许删除，请等待推演完成");
         }
 
+        deleteDecisionRelations(id);
         decisionMapper.deleteById(id);
     }
 
@@ -597,6 +608,47 @@ public class DecisionServiceImpl implements DecisionService {
                     "决策问题不存在"
             );
         }
+    }
+
+    private void deleteDecisionRelations(Long decisionId) {
+        reportMapper.delete(
+                new LambdaQueryWrapper<Report>()
+                        .eq(Report::getDecisionId, decisionId)
+        );
+        analysisResultMapper.delete(
+                new LambdaQueryWrapper<AnalysisResult>()
+                        .eq(AnalysisResult::getDecisionId, decisionId)
+        );
+
+        List<Long> taskIds = analysisTaskMapper.selectList(
+                        new LambdaQueryWrapper<AnalysisTask>()
+                                .eq(AnalysisTask::getDecisionId, decisionId)
+                ).stream()
+                .map(AnalysisTask::getId)
+                .toList();
+        if (!taskIds.isEmpty()) {
+            analysisStepMapper.delete(
+                    new LambdaQueryWrapper<AnalysisStep>()
+                            .in(AnalysisStep::getRunId, taskIds)
+            );
+        }
+
+        analysisTaskMapper.delete(
+                new LambdaQueryWrapper<AnalysisTask>()
+                        .eq(AnalysisTask::getDecisionId, decisionId)
+        );
+        decisionCanvasMapper.delete(
+                new LambdaQueryWrapper<DecisionCanvas>()
+                        .eq(DecisionCanvas::getDecisionId, decisionId)
+        );
+        decisionFactorMapper.delete(
+                new LambdaQueryWrapper<DecisionFactor>()
+                        .eq(DecisionFactor::getDecisionId, decisionId)
+        );
+        decisionSolutionMapper.delete(
+                new LambdaQueryWrapper<DecisionSolution>()
+                        .eq(DecisionSolution::getDecisionId, decisionId)
+        );
     }
 
     private AnalysisResult getAnalysisResultOrThrow(
