@@ -20,6 +20,7 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
 import qg.po.midterm.workflow.event.WorkflowFailedEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import qg.po.midterm.workflow.utils.StepDisplayUtils;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -128,15 +129,13 @@ public class NodeExecutionEventListener {
             return;
         }
 
-
-
         // 把 workflow 里面的名转换成我们需要的名称
         String stepName = getStepName(event.getNodeName());
         // 没有的话就是 tool call 节点
         if (stepName == null) {
             if ("ToolCall".equals(event.getNodeName())) {
                 try {
-                    Map<String, Object> toolData = new com.fasterxml.jackson.databind.ObjectMapper().readValue(event.getOutputData(), Map.class);
+                    Map<String, Object> toolData = objectMapper.readValue(event.getOutputData(), Map.class);
                     Map<String, Object> sseData = new LinkedHashMap<>();
                     sseData.put("taskId", "t_" + task.getId());
                     sseData.put("toolName", toolData.get("toolName"));
@@ -244,7 +243,7 @@ public class NodeExecutionEventListener {
         data.put("stepId", "s_" + step.getId());
         data.put("status", step.getStatus());
         
-        qg.po.midterm.workflow.utils.StepDisplayUtils.StepDisplay display = qg.po.midterm.workflow.utils.StepDisplayUtils.parseDisplay(
+        StepDisplayUtils.StepDisplay display = StepDisplayUtils.parseDisplay(
                 step.getStepName(), step.getStatus(), step.getOutputData(), step.getErrorMessage());
 
         data.put("summary", display.summary());
@@ -253,8 +252,6 @@ public class NodeExecutionEventListener {
         data.put("occurredAt", OffsetDateTime.now());
         eventService.sendStepUpdate("t_" + task.getId(), data);
     }
-
-
 
     /**
      * Workflow 节点名转换为 API 步骤名
@@ -281,7 +278,6 @@ public class NodeExecutionEventListener {
     }
 
     /**
-     * Workflow 的 taskId 是它自己生成的 UUID
      * 数据库任务通过 decision.latestTaskId 找回，不要求修改 Workflow 接口
      */
     private AnalysisTask findDatabaseTask(NodeExecutionEvent event) {
