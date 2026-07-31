@@ -93,7 +93,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         );
 
         // 创建任务
-        AnalysisTask task = createTask(decisionDbId, "FULL", stepNames, now);
+        AnalysisTask task = createTask(decisionDbId, "FULL", null, stepNames, now);
 
         // 告诉数据库：任务开始跑了！
         decision.setStatus(DecisionStatus.ANALYZING.name()); // 推演完成前，决策处于分析中
@@ -157,6 +157,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         }
 
         // 清除空白的
+        String previousDecisionStatus = decision.getStatus();
         List<String> changedNodeIds = cleanChangedNodeIds(request);
         // 获取之前的结果
         AnalysisResultDto oldResult = getCurrentResult(decision);
@@ -168,7 +169,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 decision,
                 oldResult,
                 latestCanvas,
-                decision.getStatus()
+                previousDecisionStatus
         );
 
         // Task 层只保存完整步骤；从哪个节点开始由 WorkflowExecutor 判断
@@ -184,6 +185,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         AnalysisTask task = createTask(
                 decisionDbId,
                 "PARTIAL",
+                previousDecisionStatus,
                 stepNames,
                 now
         );
@@ -409,12 +411,14 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     private AnalysisTask createTask(
             Long decisionId, // 所属的决策 ID
             String runType, // 全量推演还是局部推演
+            String previousDecisionStatus,
             List<String> stepNames, // 所有的 step 名称
             LocalDateTime now) {
         // 创建一个task实体类
         AnalysisTask task = new AnalysisTask();
         task.setDecisionId(decisionId);
         task.setRunType(runType);
+        task.setPreviousDecisionStatus(previousDecisionStatus);
         task.setStatus("RUNNING");
         task.setCurrentStep(0);
         task.setTotalSteps(stepNames.size());
