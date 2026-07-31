@@ -18,6 +18,7 @@ export function ReportCenterPage() {
     <PagePlaceholder
       title="报告中心"
       description="查看已确认生成的正式决策报告。"
+      wide
       hint={
         isMockEnabled()
           ? '当前 Mock 列表；真接口可从 COMPLETED 决策聚合 reportId'
@@ -29,6 +30,7 @@ export function ReportCenterPage() {
         loading={isLoading}
         dataSource={data ?? []}
         pagination={false}
+        scroll={{ x: 640 }}
         columns={[
           { title: '标题', dataIndex: 'title' },
           {
