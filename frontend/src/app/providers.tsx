@@ -7,14 +7,14 @@ import { AppRouter } from '@/app/router'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { ThemeDocumentSync } from '@/components/layout/ThemeDocumentSync'
 import { LayoutViewportSync } from '@/components/layout/LayoutViewportSync'
-
+//全局默认配置
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
-      staleTime: 30_000,
-      gcTime: 5 * 60_000,
+      staleTime: 30_000,//30s内不会刷新
+      gcTime: 5 * 60_000,//5min后会删除缓存
     },
   },
 })

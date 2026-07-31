@@ -13,5 +13,5 @@ export interface WorkbenchSlotProps {
   pendingResultId?: string | null
   hasPendingResult?: boolean
   decisionStatus?: string
-  onRequestRefresh?: () => void
+  onRequestRefresh?: () => void  //abc的通信组件
 }
