@@ -164,6 +164,33 @@
     <build>
         <plugins>
             <plugin>
+                <groupId>io.sentry</groupId>
+                <artifactId>sentry-maven-plugin</artifactId>
+                <version>0.11.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <!-- for showing output of sentry-cli -->
+                    <debugSentryCli>true</debugSentryCli>
+
+                    <org>guangdong-university-of-tec-qh</org>
+
+                    <project>java-spring</project>
+
+                    <!-- in case you're self hosting, provide the URL here -->
+                    <!--<url>http://localhost:8000/</url>-->
+
+                    <!-- provide your auth token via SENTRY_AUTH_TOKEN environment variable -->
+                    <authToken>${env.SENTRY_AUTH_TOKEN}</authToken>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>uploadSourceBundle</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
