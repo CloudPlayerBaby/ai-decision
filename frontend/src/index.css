@@ -481,6 +481,15 @@ body.is-resizing .resize-handle::before {
   font-size: 12px;
 }
 
+.canvas-panel__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .canvas-panel__toolbar .ant-btn {
   font-size: 12px;
 }

@@ -16,7 +16,7 @@ import {
 } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
 import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
@@ -34,6 +34,8 @@ import {
   confirmAnalysis,
   getAnalysisResult,
 } from '@/services/analysis.service'
+import { getCanvas, saveCanvas } from '@/services/canvas.service'
+import { buildCanvasViewModel } from '@/utils/canvasMapper'
 import { queryKeys } from '@/services/queryKeys'
 import { ApiError, BusinessCode } from '@/types/api'
 import { isMockEnabled } from '@/services/config'
@@ -134,15 +136,6 @@ export function WorkbenchPage() {
   const displayRecommendation = resultQuery.data?.recommendation ?? mockResult.recommendation
   const displayAnalysisResultId = resultQuery.data?.id ?? mockResult.id
 
-  const refreshDecision = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.decisions.detail(id),
-    })
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.decisions.analysisResult(id, pendingResultId),
-    })
-  }
-
   const startMutation = useMutation({
     mutationFn: () => startFullAnalysis(id),
     onSuccess: async (data) => {
@@ -178,6 +171,48 @@ export function WorkbenchPage() {
       navigate(`/reports/${data.reportId}`)
     },
   })
+
+  // ── 画布数据（GET /decisions/:id/canvas）─────────────────────
+  const canvasQuery = useQuery({
+    queryKey: queryKeys.decisions.canvas(id),
+    queryFn: () => getCanvas(id),
+    enabled: Boolean(id),
+  })
+
+  // 组装 CanvasViewModel：画布节点/边来自 canvasQuery，方案详情来自 resultQuery
+  const viewModel =
+    canvasQuery.data && decision
+      ? buildCanvasViewModel(decision, canvasQuery.data, resultQuery.data ?? undefined)
+      : undefined
+
+  // ── 画布保存（PUT /decisions/:id/canvas）─────────────────────
+  const saveMutation = useMutation({
+    mutationFn: (canvasData: import('@/types/canvas').CanvasData) =>
+      saveCanvas(id, canvasData),
+    onSuccess: () => {
+      message.success('画布已保存')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+    },
+  })
+
+  const [isDirty, setIsDirty] = useState(false)
+  const canvasRef = useRef<import('@/types/canvas').CanvasData | null>(null)
+
+  const refreshDecision = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.decisions.detail(id),
+    })
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.decisions.analysisResult(id, pendingResultId),
+    })
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.decisions.canvas(id),
+    })
+  }
 
   if (detailQuery.isError) {
     const err = detailQuery.error
@@ -283,9 +318,13 @@ export function WorkbenchPage() {
             >
               {analyzing ? '推演中…' : '开始推演'}
             </Button>
-            <Tooltip title="由 A 组接入保存画布">
-              <Button disabled>保存画布</Button>
-            </Tooltip>
+            <Button
+              onClick={() => canvasRef.current && saveMutation.mutate(canvasRef.current)}
+              loading={saveMutation.isPending}
+              disabled={!isDirty}
+            >
+              {saveMutation.isPending ? '保存中…' : '保存画布'}
+            </Button>
             <Button
               type="primary"
               disabled={!canConfirm || confirmMutation.isPending}
@@ -322,6 +361,13 @@ export function WorkbenchPage() {
 
       <div className="workbench__body">
         <DecisionCanvasPanel
+          viewModel={viewModel}
+          onDirtyChange={(dirty) => {
+            setIsDirty(dirty)
+          }}
+          onCanvasChange={(canvasData) => {
+            canvasRef.current = canvasData
+          }}
           decisionId={decision.id}
           taskId={taskId}
           pendingResultId={pendingResultId}

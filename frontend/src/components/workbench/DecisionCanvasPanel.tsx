@@ -18,8 +18,6 @@ import { Modal, Form, Input, Slider, Rate, Button, Space, Divider, Popconfirm, P
 import { DeleteOutlined, CloseOutlined, PlusOutlined } from '@ant-design/icons'
 import '@xyflow/react/dist/style.css'
 import { useLayoutStore } from '../../stores/layoutStore'
-import { mockCanvas } from '../../mocks/canvas.mock'
-import { buildMockCanvasViewModel } from '../../mocks/analysis-result.mock'
 import type { CanvasData, CanvasViewModel } from '../../types/canvas'
 import type {
   FlowNode,
@@ -185,17 +183,16 @@ function OptionNode({ data, id }: OptionNodeProps) {
 type OptionModalTab = 'settings' | 'analysis'
 
 export interface DecisionCanvasPanelProps {
-  /** 画布展示模型（由 DecisionProblem + AnalysisResult + Canvas 组装） */
+  /**
+   * 画布展示模型。
+   * 由父组件（WorkbenchPage）通过 React Query 获取 canvas 数据，
+   * 再与 analysisResult 中的 factorsDetail / optionsDetail 组装后传入。
+   * viewModel 缺失时组件显示空状态提示。
+   */
   viewModel?: CanvasViewModel
-  /** 方案详情（pros / cons / risks），key = option 节点 id */
-  optionsDetail?: Record<string, { pros: string[]; cons: string[]; risks: string[] }>
-  /** 推荐方案 id（由 AnalysisResult.recommendation.optionId 派生） */
-  recommendedOptionId?: string | null
-  /** 因素描述，key = factor 节点 id */
-  factorsDetail?: Record<string, { description: string }>
   onDirtyChange?: (dirty: boolean) => void
   onCanvasChange?: (canvas: CanvasData) => void
-  /** 以下为 WorkbenchSlot 契约槽位 props（暂由 viewModel 承载，接口对齐用） */
+  /** 以下为 WorkbenchSlot 契约槽位 props（DecisionCanvasPanel 目前不直接使用，由父组件按需传递） */
   decisionId?: string
   taskId?: string | null
   pendingResultId?: string | null
@@ -267,29 +264,38 @@ function createNode(type: 'factor' | 'option', existingNodes: FlowNode[]): FlowN
 // ── 主组件 ───────────────────────────────────────────────────
 
 export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
+  const { viewModel, onDirtyChange, onCanvasChange } = props
+
+  // viewModel 缺失时显示空状态，由父组件通过 React Query 获取后传入
+  if (!viewModel) {
+    return (
+      <div className="canvas-panel">
+        <div className="canvas-panel__empty">
+          <span>暂无画布数据</span>
+        </div>
+      </div>
+    )
+  }
+
+  // 展示字段统一从 viewModel 读取，不再单独接收 optionsDetail / factorsDetail 等 prop
   const {
-    viewModel,
+    canvas,
+    factorsDetail = {},
+    optionsDetail = {},
+    recommendedOptionId = null,
+  } = viewModel
+
+  const decisionInfo = viewModel.decision
+
+  // 通过 mapper 将后端 CanvasData → FlowNode/FlowEdge（丢弃仅展示字段）
+  const initialNodes = toFlowNodes(canvas.nodes, {
+    factorsDetail,
     optionsDetail,
     recommendedOptionId,
-    factorsDetail,
-    onDirtyChange,
-    onCanvasChange,
-  } = props
-  const resolvedOptionsDetail = viewModel?.optionsDetail ?? optionsDetail ?? {}
-  const resolvedRecommendedId = viewModel?.recommendedOptionId ?? recommendedOptionId ?? null
-  const resolvedFactorsDetail = viewModel?.factorsDetail ?? factorsDetail ?? {}
-
-  const mockViewModel = viewModel ?? buildMockCanvasViewModel()
-
-  // 通过 mapper 初始化 FlowNode，展示字段由 toFlowNode 注入
-  const initialNodes = toFlowNodes(mockCanvas.nodes, {
-    factorsDetail: resolvedFactorsDetail,
-    optionsDetail: resolvedOptionsDetail,
-    recommendedOptionId: resolvedRecommendedId,
-    decisionInfo: mockViewModel.decision,
+    decisionInfo,
   })
 
-  const initialEdges: FlowEdge[] = mockCanvas.edges.map((e) => ({
+  const initialEdges: FlowEdge[] = canvas.edges.map((e) => ({
     id: e.id,
     source: e.source,
     target: e.target,
