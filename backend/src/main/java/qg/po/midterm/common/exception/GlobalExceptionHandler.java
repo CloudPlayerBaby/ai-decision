@@ -7,6 +7,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import qg.po.midterm.common.enums.ErrorCode;
 import qg.po.midterm.common.result.Result;
 
@@ -23,6 +24,14 @@ import java.util.Map;
 @Slf4j // Lombok 注解，自动生成 log 日志对象（用来记录日志 log.warn / log.error）
 @RestControllerAdvice // 相当于 @ControllerAdvice + @ResponseBody，表明这是个全局控制器增强类，所有方法返回值自动转 JSON
 public class GlobalExceptionHandler {
+
+    /**
+     * 客户端关闭 SSE/异步连接后，响应已经不可写，不能再返回统一 JSON 错误体。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncRequestNotUsable(AsyncRequestNotUsableException ex) {
+        log.debug("客户端已断开异步连接: {}", ex.getMessage());
+    }
 
     // =========================================================================
     // 1. 拦截【参数校验失败异常】（如 @Valid / @Validated 校验注解不通过时抛出的异常）
