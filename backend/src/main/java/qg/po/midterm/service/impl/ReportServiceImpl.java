@@ -124,7 +124,6 @@ public class ReportServiceImpl implements ReportService {
         report.setDecisionId(id);
         report.setContent(toJson(newContent));
         report.setCreatedAt(now);
-        report.setUpdatedAt(now);
         reportMapper.insert(report);
 
         // 更新决策指向新报告
