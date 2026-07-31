@@ -640,7 +640,7 @@ public class DecisionServiceImpl implements DecisionService {
         try {
             return Long.parseLong(externalId.substring(prefix.length()));
         } catch (NumberFormatException e) {
-            return (long) externalId.substring(prefix.length()).hashCode();
+            return (long) Math.abs(externalId.substring(prefix.length()).hashCode());
         }
     }
 
