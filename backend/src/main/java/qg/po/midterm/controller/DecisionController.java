@@ -1,7 +1,11 @@
 package qg.po.midterm.controller;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import qg.po.midterm.common.result.Result;
 import qg.po.midterm.dto.request.ConfirmDecisionRequest;
@@ -18,6 +22,7 @@ import qg.po.midterm.vo.*;
 @RestController
 @RequestMapping("/api/v1/decisions")
 @RequiredArgsConstructor
+@Validated
 public class DecisionController {
 
     private final DecisionService decisionService;
@@ -29,7 +34,7 @@ public class DecisionController {
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public Result<DecisionVO> create(@RequestBody CreateDecisionRequest request) {
+    public Result<DecisionVO> create(@Valid @RequestBody CreateDecisionRequest request) {
         DecisionVO vo = decisionService.create(request);
         return Result.success(vo);
     }
@@ -39,8 +44,8 @@ public class DecisionController {
      */
     @GetMapping
     public Result<PageVO<DecisionVO>> list(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(defaultValue = "1") @Min(1) int page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(100) int pageSize,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword) {
         PageVO<DecisionVO> pageVO = decisionService.list(page, pageSize, status, keyword);
@@ -84,7 +89,7 @@ public class DecisionController {
     @PutMapping("/{decisionId}/preferred-option")
     public Result<Void> setPreferredOption(
             @PathVariable String decisionId,
-            @RequestBody PreferredOptionRequest request) {
+            @Valid @RequestBody PreferredOptionRequest request) {
         decisionService.setPreferredOption(decisionId, request);
         return Result.success();
     }
@@ -95,7 +100,7 @@ public class DecisionController {
     @PostMapping("/{decisionId}/confirm")
     public Result<ConfirmResultVO> confirm(
             @PathVariable String decisionId,
-            @RequestBody ConfirmDecisionRequest request) {
+            @Valid @RequestBody ConfirmDecisionRequest request) {
         ConfirmResultVO vo = decisionService.confirm(decisionId, request);
         return Result.success(vo);
     }
@@ -117,7 +122,7 @@ public class DecisionController {
     @PutMapping("/{decisionId}/canvas")
     public Result<SaveCanvasVO> saveCanvas(
             @PathVariable String decisionId,
-            @RequestBody SaveCanvasRequest request) {
+            @Valid @RequestBody SaveCanvasRequest request) {
         SaveCanvasVO vo = decisionService.saveCanvas(decisionId, request);
         return Result.success(vo);
     }

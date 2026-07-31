@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import qg.po.midterm.common.enums.ErrorCode;
@@ -45,6 +46,12 @@ public class GlobalExceptionHandler {
         // 返回 HTTP 400 状态码，Result.data 中附带错误明细 Map
         return ResponseEntity.badRequest()
                 .body(Result.fail(ErrorCode.BAD_REQUEST.getCode(), ErrorCode.BAD_REQUEST.getMessage(), errors));
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<Result<Void>> handleConstraintViolation(ConstraintViolationException ex) {
+        return ResponseEntity.badRequest()
+                .body(Result.fail(ErrorCode.BAD_REQUEST.getCode(), ex.getMessage()));
     }
 
     // =========================================================================

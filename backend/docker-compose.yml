@@ -4,7 +4,7 @@ services:
     container_name: local_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: "1234"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
       MYSQL_DATABASE: ai_decision
       TZ: Asia/Shanghai
     ports:
@@ -21,7 +21,7 @@ services:
     container_name: local_redis
     restart: always
     ports:
-      # Windows 本地 Redis 已占用 6379，所以 Docker Redis 使用宿主机 6380。
+      # 与 application.yaml 和 .env.example 的默认端口保持一致。
       - "6379:6379"
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-1234}
     volumes:

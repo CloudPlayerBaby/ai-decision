@@ -2,14 +2,12 @@ package qg.po.midterm.workflow.agent;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.ReportContent;
 
 import java.util.Map;
-import qg.po.midterm.workflow.utils.MarkdownStrippingConverter;
 
 /**
  * 专门负责生成决策报告的 Agent。
@@ -31,22 +29,15 @@ public class ReportAgent {
      * 将 JSON 结果和用户的选择，转化为精美的报告
      */
     public ReportContent generateReport(String analysisResultJson, String selectedOptionName) {
-        MarkdownStrippingConverter<ReportContent> converter = new MarkdownStrippingConverter<>(ReportContent.class);
-
-
         Map<String, Object> params = Map.of(
                 "analysisResult", analysisResultJson != null ? analysisResultJson : "{}",
                 "selectedOptionName", selectedOptionName != null ? selectedOptionName : "无",
-                "format", converter.getFormat()
+                "format", ""
         );
 
         String promptText = new PromptTemplate(promptResource).create(params).getContents();
 
-        String response = chatClient.prompt()
-                .user(promptText)
-                .call()
-                .content();
-
-        return converter.convert(response);
+        return qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepair(
+                chatClient, promptText, null, ReportContent.class);
     }
 }

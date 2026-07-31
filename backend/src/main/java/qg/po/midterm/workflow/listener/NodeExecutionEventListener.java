@@ -11,11 +11,16 @@ import qg.po.midterm.entity.AnalysisResult;
 import qg.po.midterm.entity.AnalysisStep;
 import qg.po.midterm.entity.AnalysisTask;
 import qg.po.midterm.entity.Decision;
+import qg.po.midterm.entity.DecisionCanvas;
 import qg.po.midterm.mapper.AnalysisResultMapper;
 import qg.po.midterm.mapper.AnalysisStepMapper;
 import qg.po.midterm.mapper.AnalysisTaskMapper;
 import qg.po.midterm.mapper.DecisionMapper;
+import qg.po.midterm.mapper.DecisionCanvasMapper;
 import qg.po.midterm.service.AnalysisEventService;
+import qg.po.midterm.service.impl.CanvasMergeService;
+import qg.po.midterm.dto.result.AnalysisResultDto;
+import qg.po.midterm.dto.result.Canvas;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
 import qg.po.midterm.workflow.event.WorkflowFailedEvent;
@@ -27,6 +32,10 @@ import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.Comparator;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 把 Workflow 节点事件转换成数据库状态和 SSE 事件
@@ -39,9 +48,11 @@ public class NodeExecutionEventListener {
     private final AnalysisTaskMapper taskMapper;
     private final AnalysisStepMapper stepMapper;
     private final DecisionMapper decisionMapper;
+    private final DecisionCanvasMapper canvasMapper;
     private final AnalysisResultMapper resultMapper;
     private final AnalysisEventService eventService;
     private final ObjectMapper objectMapper;
+    private final CanvasMergeService canvasMergeService;
 
     @EventListener
     @Transactional
@@ -57,9 +68,24 @@ public class NodeExecutionEventListener {
                 }
             }
         }
-        if (task == null) return;
+        if (task == null || !"RUNNING".equals(task.getStatus())) return;
 
         LocalDateTime now = LocalDateTime.now();
+        Decision decision = decisionMapper.selectById(task.getDecisionId());
+        if (decision == null) return;
+
+        AnalysisResultDto resultDto;
+        String resultJson;
+        Canvas mergedCanvas;
+        try {
+            resultDto = objectMapper.convertValue(event.getFinalStateData(), AnalysisResultDto.class);
+            Canvas existingCanvas = readCanvas(task.getDecisionId());
+            mergedCanvas = canvasMergeService.merge(existingCanvas, resultDto, decision.getTitle());
+            resultDto.setCanvas(mergedCanvas);
+            resultJson = objectMapper.writeValueAsString(resultDto);
+        } catch (Exception exception) {
+            throw new IllegalStateException("最终分析结果序列化失败", exception);
+        }
 
         // 1. 标记任务成功
         task.setStatus("SUCCEEDED");
@@ -73,18 +99,12 @@ public class NodeExecutionEventListener {
         result.setDecisionId(task.getDecisionId());
         result.setTaskId(task.getId());
         result.setStatus("PENDING_CONFIRM");
-        try {
-            result.setResultData(objectMapper.writeValueAsString(event.getFinalStateData()));
-        } catch (Exception e) {
-            log.error("Failed to serialize final state data", e);
-            result.setResultData("{}");
-        }
+        result.setResultData(resultJson);
         result.setCreatedAt(now);
         result.setUpdatedAt(now);
         resultMapper.insert(result);
 
         // 3. 更新 Decision 状态
-        Decision decision = decisionMapper.selectById(task.getDecisionId());
         String decisionStatus = resolveCompletedDecisionStatus(task);
         if (decision != null) {
             decision.setStatus(decisionStatus);
@@ -93,6 +113,7 @@ public class NodeExecutionEventListener {
             decision.setUpdatedAt(now);
             decisionMapper.updateById(decision);
         }
+        saveCanvas(task.getDecisionId(), mergedCanvas, now);
 
         // 4. 通知前端结果已就绪
         Map<String, Object> sseData = new LinkedHashMap<>();
@@ -101,7 +122,8 @@ public class NodeExecutionEventListener {
         sseData.put("analysisResultId", "ar_" + result.getId());
         sseData.put("decisionStatus", decisionStatus);
         sseData.put("resultStatus", "PENDING_CONFIRM");
-        eventService.sendResultReady("t_" + task.getId(), sseData);
+        String externalTaskId = "t_" + task.getId();
+        sendAfterCommit(() -> eventService.sendResultReady(externalTaskId, sseData));
     }
 
     @EventListener
@@ -109,8 +131,8 @@ public class NodeExecutionEventListener {
     public void handleWorkflowFailed(WorkflowFailedEvent event) {
         Long taskDbId = parseTaskId(event.getTaskId());
         AnalysisTask task = (taskDbId != null) ? taskMapper.selectById(taskDbId) : null;
-        if (task != null) {
-            failTask(task, null, event.getErrorMessage(), null);
+        if (task != null && "RUNNING".equals(task.getStatus())) {
+            failTask(task, null, event.getErrorMessage(), event.getException());
         }
     }
 
@@ -120,6 +142,9 @@ public class NodeExecutionEventListener {
         // 通过event里面的taskId找到对应的task
         AnalysisTask task = findDatabaseTask(event);
         if (task == null) {
+            return;
+        }
+        if (!"RUNNING".equals(task.getStatus())) {
             return;
         }
         Long taskDbId = task.getId();
@@ -146,7 +171,8 @@ public class NodeExecutionEventListener {
                     sseData.put("inputSummary", toolData.get("inputSummary"));
                     sseData.put("outputSummary", toolData.get("outputSummary"));
                     
-                    eventService.sendToolCall("t_" + task.getId(), sseData);
+                    String externalTaskId = "t_" + task.getId();
+                    sendAfterCommit(() -> eventService.sendToolCall(externalTaskId, sseData));
                 } catch (Exception e) {
                     log.error("Failed to parse tool call event data", e);
                 }
@@ -191,7 +217,7 @@ public class NodeExecutionEventListener {
             return;
         }
 
-        sendStepUpdate(task, step);
+        sendAfterCommit(() -> sendStepUpdate(task, step));
     }
 
     /**
@@ -203,17 +229,35 @@ public class NodeExecutionEventListener {
             String message,
             Exception exception) {
         LocalDateTime now = LocalDateTime.now();
+        Exception rootException = unwrap(exception);
+        if (step == null) {
+            step = resolveFailureStep(task, rootException);
+        }
 
         if (step != null) {
             step.setStatus("FAILED");
             step.setErrorMessage(message);
+            step.setOutputData(null);
             step.setFinishedAt(now);
             step.setUpdatedAt(now);
             stepMapper.updateById(step);
+            resetDownstreamSteps(task.getId(), step.getStepOrder(), now);
         }
+
+        qg.po.midterm.common.exception.AiValidationException aiException =
+                rootException instanceof qg.po.midterm.common.exception.AiValidationException value
+                        ? value : null;
+        int errorCode = aiException == null
+                ? ErrorCode.INTERNAL_ERROR.getCode()
+                : ErrorCode.AI_VALIDATION_FAILED.getCode();
+        boolean retryable = step != null;
 
         task.setStatus("FAILED");
         task.setErrorMessage(message);
+        task.setErrorCode(errorCode);
+        task.setMissingFields(writeMissingFields(aiException));
+        task.setRepairAttempted(aiException != null && aiException.isRepairAttempted());
+        task.setRetryable(retryable);
         task.setFinishedAt(now);
         task.setUpdatedAt(now);
         taskMapper.updateById(task);
@@ -226,18 +270,146 @@ public class NodeExecutionEventListener {
         }
 
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("errorCode", ErrorCode.INTERNAL_ERROR.getCode());
+        data.put("errorCode", errorCode);
         data.put("message", message);
         data.put("failedStepId", step == null ? null : "s_" + step.getId());
-        data.put("retryable", step != null);
+        data.put("retryable", retryable);
         
-        if (exception instanceof qg.po.midterm.common.exception.AiValidationException aiEx) {
-            data.put("missingFields", aiEx.getMissingFields());
-            data.put("repairAttempted", aiEx.isRepairAttempted());
-            data.put("errorCode", qg.po.midterm.common.enums.ErrorCode.AI_VALIDATION_FAILED.getCode());
+        if (aiException != null) {
+            data.put("missingFields", aiException.getMissingFields());
+            data.put("repairAttempted", aiException.isRepairAttempted());
         }
 
-        eventService.sendTaskFailed("t_" + task.getId(), data);
+        sendAfterCommit(() -> eventService.sendTaskFailed("t_" + task.getId(), data));
+    }
+
+    private AnalysisStep resolveFailureStep(AnalysisTask task, Exception exception) {
+        if (exception instanceof qg.po.midterm.common.exception.AiValidationException aiException
+                && aiException.getMissingFields() != null && !aiException.getMissingFields().isEmpty()) {
+            String targetName = mapMissingFieldsToStep(aiException.getMissingFields());
+            AnalysisStep target = stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
+                    .eq(AnalysisStep::getRunId, task.getId())
+                    .eq(AnalysisStep::getStepName, targetName)
+                    .last("LIMIT 1"));
+            if (target != null) return target;
+        }
+        List<AnalysisStep> running = stepMapper.selectList(new LambdaQueryWrapper<AnalysisStep>()
+                .eq(AnalysisStep::getRunId, task.getId())
+                .eq(AnalysisStep::getStatus, "RUNNING")
+                .orderByDesc(AnalysisStep::getStepOrder));
+        if (!running.isEmpty()) return running.get(0);
+        if (task.getCurrentStep() != null && task.getCurrentStep() > 0) {
+            return stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
+                    .eq(AnalysisStep::getRunId, task.getId())
+                    .eq(AnalysisStep::getStepOrder, task.getCurrentStep())
+                    .last("LIMIT 1"));
+        }
+        return stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
+                .eq(AnalysisStep::getRunId, task.getId())
+                .ne(AnalysisStep::getStatus, "SUCCEEDED")
+                .orderByAsc(AnalysisStep::getStepOrder)
+                .last("LIMIT 1"));
+    }
+
+    private String mapMissingFieldsToStep(List<String> missingFields) {
+        int earliest = 4;
+        for (String field : missingFields) {
+            if (field == null) continue;
+            if (field.startsWith("understanding")) earliest = Math.min(earliest, 1);
+            else if (field.startsWith("factors")) earliest = Math.min(earliest, 2);
+            else if (field.startsWith("options")) earliest = Math.min(earliest, 3);
+            else if (field.startsWith("recommendation") || field.startsWith("nextActions")) {
+                earliest = Math.min(earliest, 4);
+            }
+        }
+        return switch (earliest) {
+            case 1 -> "UNDERSTAND";
+            case 2 -> "EXTRACT_FACTORS";
+            case 3 -> "GENERATE_OPTIONS";
+            default -> "COMPARE_OPTIONS";
+        };
+    }
+
+    private void resetDownstreamSteps(Long taskId, Integer failedOrder, LocalDateTime now) {
+        List<AnalysisStep> downstream = stepMapper.selectList(new LambdaQueryWrapper<AnalysisStep>()
+                .eq(AnalysisStep::getRunId, taskId)
+                .gt(AnalysisStep::getStepOrder, failedOrder));
+        for (AnalysisStep item : downstream) {
+            item.setStatus("WAITING");
+            item.setOutputData(null);
+            item.setErrorMessage(null);
+            item.setStartedAt(null);
+            item.setFinishedAt(null);
+            item.setUpdatedAt(now);
+            stepMapper.updateById(item);
+        }
+    }
+
+    private Exception unwrap(Exception exception) {
+        if (exception == null) return null;
+        Throwable current = exception;
+        while (current.getCause() != null && current.getCause() != current) current = current.getCause();
+        return current instanceof Exception value ? value : exception;
+    }
+
+    private String writeMissingFields(qg.po.midterm.common.exception.AiValidationException exception) {
+        if (exception == null || exception.getMissingFields() == null) return null;
+        try {
+            return objectMapper.writeValueAsString(exception.getMissingFields());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Canvas readCanvas(Long decisionId) {
+        DecisionCanvas canvas = canvasMapper.selectOne(new LambdaQueryWrapper<DecisionCanvas>()
+                .eq(DecisionCanvas::getDecisionId, decisionId)
+                .last("LIMIT 1"));
+        if (canvas == null || canvas.getCanvasData() == null || canvas.getCanvasData().isBlank()) return null;
+        try {
+            return objectMapper.readValue(canvas.getCanvasData(), Canvas.class);
+        } catch (Exception exception) {
+            log.warn("Ignoring invalid saved canvas for decision {}", decisionId, exception);
+            return null;
+        }
+    }
+
+    private void saveCanvas(Long decisionId, Canvas mergedCanvas, LocalDateTime now) {
+        try {
+            String json = objectMapper.writeValueAsString(mergedCanvas);
+            DecisionCanvas existing = canvasMapper.selectOne(new LambdaQueryWrapper<DecisionCanvas>()
+                    .eq(DecisionCanvas::getDecisionId, decisionId)
+                    .last("LIMIT 1"));
+            if (existing == null) {
+                existing = new DecisionCanvas();
+                existing.setDecisionId(decisionId);
+                existing.setCanvasData(json);
+                existing.setVersion(1);
+                existing.setCreatedAt(now);
+                existing.setUpdatedAt(now);
+                canvasMapper.insert(existing);
+            } else {
+                existing.setCanvasData(json);
+                existing.setVersion(existing.getVersion() == null ? 1 : existing.getVersion() + 1);
+                existing.setUpdatedAt(now);
+                canvasMapper.updateById(existing);
+            }
+        } catch (Exception exception) {
+            throw new IllegalStateException("画布同步失败", exception);
+        }
+    }
+
+    private void sendAfterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
     }
 
     private String resolveCompletedDecisionStatus(AnalysisTask task) {

@@ -55,6 +55,16 @@ public class AnalysisTask {
      */
     private String errorMessage;
 
+    /** Stable API error code persisted for REST recovery. */
+    private Integer errorCode;
+
+    /** JSON array of invalid AI result field paths. */
+    private String missingFields;
+
+    private Boolean repairAttempted;
+
+    private Boolean retryable;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

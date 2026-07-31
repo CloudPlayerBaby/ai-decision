@@ -13,6 +13,7 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.tools.TavilySearchTool;
+import qg.po.midterm.workflow.tools.CalculatorTool;
 
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,7 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
     private final TavilySearchTool tavilySearchTool;
+    private final CalculatorTool calculatorTool;
 
     @Value("classpath:prompts/factor.st")
     private Resource promptResource;
@@ -60,12 +62,14 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
-            FactorAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepair(
+            qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<FactorAnalysisResult> execution =
+                    qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
                     chatClient,
                     prompt,
-                    new Object[]{tavilySearchTool},
+                    new Object[]{tavilySearchTool, calculatorTool},
                     FactorAnalysisResult.class
             );
+            FactorAnalysisResult result = execution.value();
 
             log.info("<<< 【AI Response】\n{}", result);
 
@@ -73,9 +77,11 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
             String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
 
-            return Map.of("factors", result.factors());
+            return Map.of(
+                    "factors", result.factors() != null ? result.factors() : List.of(),
+                    "repairAttempted", state.isRepairAttempted() || execution.repaired()
+            );
         } catch (Exception e) {
-            eventPublisher.publishEvent(new NodeExecutionEvent(this, "FactorAnalysis", state.getDecisionId(), state.getTaskId(), "FAILED", e));
             throw e;
         } finally {
             qg.po.midterm.workflow.context.TaskContextHolder.clear();

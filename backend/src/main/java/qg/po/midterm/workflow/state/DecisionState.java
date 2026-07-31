@@ -60,4 +60,8 @@ public class DecisionState extends AgentState {
     public int getRetryCount() {
         return value("retryCount").map(v -> (Integer) v).orElse(0);
     }
+
+    public boolean isRepairAttempted() {
+        return value("repairAttempted").map(v -> Boolean.parseBoolean(v.toString())).orElse(false);
+    }
 }

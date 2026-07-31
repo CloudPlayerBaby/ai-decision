@@ -52,14 +52,14 @@ public class AnalysisWorkflowDispatcher {
     public void startPartialAnalysis(
             String taskId,
             String decisionId,
-            List<String> changedNodeIds,
+            String startNode,
             DecisionState currentState) {
         try {
-            // 局部起点由 WorkflowExecutor 根据 changedNodeIds 判断。
+            // 局部起点已由服务层按画布节点业务类型计算完成。
             String workflowTaskId = workflowExecutor.startPartialAnalysis(
                     taskId,
                     decisionId,
-                    changedNodeIds,
+                    startNode,
                     currentState
             );
         } catch (Exception exception) {
@@ -75,9 +75,9 @@ public class AnalysisWorkflowDispatcher {
 
     // 异步发起失败步骤尝试
     @Async
-    public void retryStep(String taskId, String stepId) {
+    public void retryStep(String taskId, String stepId, String startNode, DecisionState currentState) {
         try {
-            workflowExecutor.retryStep(taskId);
+            workflowExecutor.retryStep(taskId, startNode, currentState);
         } catch (Exception exception) {
             log.error("发起异步推演失败, taskId={}, stepId={}", taskId, stepId, exception);
             publishWorkflowFailed(taskId, exception);
@@ -85,12 +85,8 @@ public class AnalysisWorkflowDispatcher {
     }
 
     private void publishWorkflowFailed(String taskId, Exception exception) {
-        String message = exception.getMessage();
-        if (message == null || message.isBlank()) {
-            message = exception.getClass().getSimpleName();
-        }
         eventPublisher.publishEvent(
-                new WorkflowFailedEvent(this, taskId, message)
+                new WorkflowFailedEvent(this, taskId, exception)
         );
     }
 }

@@ -3,8 +3,6 @@ package qg.po.midterm.workflow.tools;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.expression.ExpressionParser;
-import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -21,7 +19,6 @@ import qg.po.midterm.workflow.context.TaskContextHolder;
 @lombok.RequiredArgsConstructor
 public class CalculatorTool {
 
-    private final ExpressionParser parser = new SpelExpressionParser();
     private final ApplicationEventPublisher eventPublisher;
 
     private void publishToolEvent(String status, String inputSummary, String outputSummary) {
@@ -53,18 +50,15 @@ public class CalculatorTool {
         
         try {
             // 使用 Spring 内置的 SpEL 引擎计算数学表达式
-            Double result = parser.parseExpression(expression).getValue(Double.class);
-            if (result == null) {
-                result = 0.0;
-            }
+            double result = SafeMathEvaluator.evaluate(expression);
             log.info("🛠️ [Function Call] 计算结果: {}", result);
             publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "结果: " + result);
             return result + "\n[系统提示：你可以基于上述结果继续推理，或者根据需要再次调用 searchWeb/calculator 等工具。不要急于输出结论，直到你收集了充分的数据。]";
         } catch (Exception e) {
             log.error("🛠️ [Function Call] 计算出错: {}", e.getMessage());
             publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "计算出错");
-            // 如果解析失败（比如传入了奇怪的字符串），返回 0 以降级处理
-            return "0.0\n[系统提示：计算出错。请检查表达式格式是否正确，并尝试重新调用 calculator 工具。]";
+            return "计算失败：" + e.getMessage()
+                    + "\n[系统提示：请只使用数字、小数、括号和 + - * / % 运算符。]";
         }
     }
 }
