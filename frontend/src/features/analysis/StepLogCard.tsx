@@ -1,9 +1,12 @@
 import type { AnalysisStep, StepStatus } from "../../types/analysis";
-import {ClockCircleOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined} from '@ant-design/icons'
-import {Collapse} from 'antd'
+import {ClockCircleOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined} from '@ant-design/icons'
+import {Collapse, Button, Space} from 'antd'
+
 interface Props{
-  step:AnalysisStep
+  step:AnalysisStep;
+  onRetry?: (stepId: string) => void;
 }
+
 function getIcon(status: StepStatus) {
   switch (status) {
     case "WAITING":
@@ -17,12 +20,31 @@ function getIcon(status: StepStatus) {
   }
 }
 
-export function StepLogCard({step}:Props) {
+export function StepLogCard({step, onRetry}:Props) {
   return (
     <Collapse
       items={[{
         key:step.id,
-        label:<span>{getIcon(step.status)} {step.displayName} - {step.summary}</span>,
+        label:(
+          <Space>
+            {getIcon(step.status)}
+            <span>{step.displayName} - {step.summary}</span>
+            {step.status === 'FAILED' && onRetry && (
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<ReloadOutlined />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry(step.id);
+                }}
+              >
+                重试
+              </Button>
+            )}
+          </Space>
+        ),
         children:<p>{step.content}</p>
       }]}
     />
