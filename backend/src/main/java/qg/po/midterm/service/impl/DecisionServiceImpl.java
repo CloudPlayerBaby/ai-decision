@@ -120,6 +120,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (entity == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(entity);
 
         DecisionDetailVO.LatestTaskSummary latestTask = null;
         if (entity.getLatestTaskId() != null) {
@@ -178,6 +179,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (entity == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(entity);
 
         if (UNDELETABLE_STATUSES.contains(entity.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT,
@@ -196,6 +198,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
         AnalysisResult result;
         if (StringUtils.hasText(resultId)) {
@@ -236,19 +239,21 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
-        // 校验 analysisResultId 和 optionId 前缀
-        if (request.getAnalysisResultId() == null || !request.getAnalysisResultId().startsWith("ar_")) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "analysisResultId 格式错误");
+        AnalysisResult result = getAnalysisResultOrThrow(
+                id,
+                request.getAnalysisResultId()
+        );
+        if (!"PENDING_CONFIRM".equals(result.getStatus())) {
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "仅 PENDING_CONFIRM 状态的草案可以选择倾向方案"
+            );
         }
-        if (request.getOptionId() == null || !request.getOptionId().startsWith("opt_")) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "optionId 格式错误");
-        }
+        Option option = getOptionOrThrow(result, request.getOptionId());
 
-        // 解析 optionId 中的数字部分作为 preferredOptionId
-        // optionId 格式为 "opt_xxx"，与 AnalysisResultDto 中 Factor.id 等保持同风格
-        // 这里不要求 optionId 对应数据库实体，仅保存用户倾向
-        decision.setPreferredOptionId(parseFlexibleId(request.getOptionId(), "opt_"));
+        decision.setPreferredOptionId(parseFlexibleId(option.getId(), "opt_"));
         decision.setUpdatedAt(LocalDateTime.now());
         decisionMapper.updateById(decision);
     }
@@ -261,23 +266,22 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
-        // 校验 analysisResultId
-        if (request.getAnalysisResultId() == null || !request.getAnalysisResultId().startsWith("ar_")) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "analysisResultId 格式错误");
-        }
-
-        Long arId = parseId(request.getAnalysisResultId(), "ar_", "analysisResultId");
-        AnalysisResult result = analysisResultMapper.selectById(arId);
-        if (result == null || !result.getDecisionId().equals(id)) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "分析结果不存在");
-        }
+        AnalysisResult result = getAnalysisResultOrThrow(
+                id,
+                request.getAnalysisResultId()
+        );
 
         if (!"PENDING_CONFIRM".equals(result.getStatus())) {
             throw new BusinessException(ErrorCode.CONFLICT,
                     "仅 PENDING_CONFIRM 状态的草案可以确认，当前: " + result.getStatus());
         }
 
+        Option selectedOption = getOptionOrThrow(
+                result,
+                request.getSelectedOptionId()
+        );
         LocalDateTime now = LocalDateTime.now();
 
         // 1. 草案 → 已确认
@@ -286,15 +290,7 @@ public class DecisionServiceImpl implements DecisionService {
         analysisResultMapper.updateById(result);
 
         // 获取用户选择的方案名称
-        String selectedOptionName = null;
-        AnalysisResultDto dto = parseAnalysisResultDto(result.getResultData());
-        if (StringUtils.hasText(request.getSelectedOptionId()) && dto.getOptions() != null) {
-            selectedOptionName = dto.getOptions().stream()
-                    .filter(o -> o.getId() != null && o.getId().equals(request.getSelectedOptionId()))
-                    .map(Option::getName)
-                    .findFirst()
-                    .orElse(null);
-        }
+        String selectedOptionName = selectedOption.getName();
 
         // 调用大模型生成报告内容
         ReportContent content = reportAgent.generateReport(result.getResultData(), selectedOptionName);
@@ -311,9 +307,9 @@ public class DecisionServiceImpl implements DecisionService {
         decision.setReportId(report.getId());
         decision.setHasPendingResult(false);
         decision.setPendingResultId(null);
-        if (StringUtils.hasText(request.getSelectedOptionId())) {
-            decision.setPreferredOptionId(parseFlexibleId(request.getSelectedOptionId(), "opt_"));
-        }
+        decision.setPreferredOptionId(
+                parseFlexibleId(selectedOption.getId(), "opt_")
+        );
         decision.setUpdatedAt(now);
         decisionMapper.updateById(decision);
 
@@ -335,6 +331,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
         // 优先读取用户保存的画布
         LambdaQueryWrapper<DecisionCanvas> canvasWrapper = new LambdaQueryWrapper<>();
@@ -368,6 +365,7 @@ public class DecisionServiceImpl implements DecisionService {
         if (decision == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
         }
+        checkOwner(decision);
 
         // 解析请求中的画布
         Canvas newCanvas = new Canvas(request.getNodes(), request.getEdges());
@@ -592,6 +590,63 @@ public class DecisionServiceImpl implements DecisionService {
     }
 
     // ==================== 私有工具方法 ====================
+
+    private void checkOwner(Decision decision) {
+        if (!Objects.equals(decision.getUserId(), getCurrentUserId())) {
+            throw new BusinessException(
+                    ErrorCode.NOT_FOUND,
+                    "决策问题不存在"
+            );
+        }
+    }
+
+    private AnalysisResult getAnalysisResultOrThrow(
+            Long decisionId,
+            String analysisResultId) {
+        Long resultId = parseId(
+                analysisResultId,
+                "ar_",
+                "analysisResultId"
+        );
+        AnalysisResult result = analysisResultMapper.selectById(resultId);
+        if (result == null
+                || !Objects.equals(result.getDecisionId(), decisionId)) {
+            throw new BusinessException(
+                    ErrorCode.NOT_FOUND,
+                    "分析结果不存在"
+            );
+        }
+        return result;
+    }
+
+    private Option getOptionOrThrow(
+            AnalysisResult result,
+            String optionId) {
+        if (!StringUtils.hasText(optionId)
+                || !optionId.startsWith("opt_")) {
+            throw new BusinessException(
+                    ErrorCode.BAD_REQUEST,
+                    "optionId 格式错误"
+            );
+        }
+
+        AnalysisResultDto resultDto =
+                parseAnalysisResultDto(result.getResultData());
+        if (resultDto.getOptions() == null) {
+            throw new BusinessException(
+                    ErrorCode.BAD_REQUEST,
+                    "所选方案不属于该分析结果"
+            );
+        }
+
+        return resultDto.getOptions().stream()
+                .filter(option -> optionId.equals(option.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.BAD_REQUEST,
+                        "所选方案不属于该分析结果"
+                ));
+    }
 
     private Long getCurrentUserId() {
         return (Long) SecurityContextHolder.getContext()
