@@ -13,6 +13,7 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Option;
+import qg.po.midterm.workflow.utils.JsonOutputOptions;
 
 import java.util.List;
 import java.util.Map;
@@ -63,6 +64,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
 
             RiskAnalysisResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
                     chatClient.prompt()
+                            .options(JsonOutputOptions.create())
                             .user(prompt)
                             .call()
                             .entity(RiskAnalysisResult.class)

@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.RestController;
 import qg.po.midterm.common.result.Result;
 import qg.po.midterm.dto.request.ConfirmDecisionRequest;
 import qg.po.midterm.dto.request.CreateDecisionRequest;
-import qg.po.midterm.dto.request.PartialAnalysisRequest;
 import qg.po.midterm.dto.request.PreferredOptionRequest;
 import qg.po.midterm.dto.request.SaveCanvasRequest;
 import qg.po.midterm.dto.result.Canvas;
@@ -114,12 +113,4 @@ public class DecisionController {
         return Result.success(vo);
     }
 
-//    /** 10.3 发起局部重推 */
-//    @PostMapping("/{decisionId}/partial-analysis")
-//    public Result<PartialAnalysisVO> startPartialAnalysis(
-//            @PathVariable String decisionId,
-//            @RequestBody PartialAnalysisRequest request) {
-//        PartialAnalysisVO vo = decisionService.startPartialAnalysis(decisionId, request);
-//        return Result.success(vo);
-//    }
 }
