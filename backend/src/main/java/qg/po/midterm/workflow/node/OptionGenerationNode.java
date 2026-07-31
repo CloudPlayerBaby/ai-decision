@@ -4,11 +4,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Component;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.Resource;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.stereotype.Component;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
@@ -18,7 +18,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/** 工作流节点：生成候选决策方案。 */
+/**
+ * 工作流节点：生成候选决策方案。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -36,7 +38,8 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
             @com.fasterxml.jackson.annotation.JsonPropertyDescription("对本阶段生成方案的详细总结文本，适合直接展示给用户看")
             String content,
             List<Option> options
-    ) {}
+    ) {
+    }
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
@@ -48,18 +51,18 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
             String understanding = state.getUnderstanding();
             String constraints = state.getConstraints();
             List<Factor> factors = state.getFactors();
-            
+
             String factorStr = factors == null ? "无" : factors.stream()
-                .map(f -> String.format("- %s (权重: %.2f): %s", f.getName(), f.getWeight(), f.getDescription()))
-                .collect(Collectors.joining("\n"));
+                    .map(f -> String.format("- %s (权重: %.2f): %s", f.getName(), f.getWeight(), f.getDescription()))
+                    .collect(Collectors.joining("\n"));
 
             Map<String, Object> params = Map.of(
-                "understanding", understanding != null ? understanding : "无",
-                "constraints", constraints != null ? constraints : "无",
-                "factors", factorStr
+                    "understanding", understanding != null ? understanding : "无",
+                    "constraints", constraints != null ? constraints : "无",
+                    "factors", factorStr
             );
             String prompt = new PromptTemplate(promptResource).create(params).getContents();
-            
+
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
             OptionGenerationResult result = qg.po.midterm.workflow.utils.LlmRetryUtils.withJsonRetry(3, () ->
@@ -68,7 +71,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
                             .call()
                             .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(OptionGenerationResult.class))
             );
-                    
+
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染

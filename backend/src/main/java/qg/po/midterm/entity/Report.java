@@ -24,5 +24,4 @@ public class Report {
     private String content;
 
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

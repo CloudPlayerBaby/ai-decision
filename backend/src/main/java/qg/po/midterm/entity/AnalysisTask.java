@@ -28,6 +28,11 @@ public class AnalysisTask {
     private String runType;
 
     /**
+     * 局部推演开始前的 Decision 状态，用于完成或失败后恢复正确状态。
+     */
+    private String previousDecisionStatus;
+
+    /**
      * 任务状态：PENDING / RUNNING / SUCCEEDED / FAILED
      */
     private String status;

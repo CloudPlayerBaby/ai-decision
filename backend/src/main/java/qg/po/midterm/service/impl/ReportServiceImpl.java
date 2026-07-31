@@ -21,6 +21,7 @@ import qg.po.midterm.vo.ReportVO;
 import qg.po.midterm.workflow.agent.ReportAgent;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
@@ -79,7 +80,7 @@ public class ReportServiceImpl implements ReportService {
                         .analysisResultId(findAssociatedResultId(r.getDecisionId()))
                         .status("READY")
                         .generatedAt(r.getCreatedAt() != null
-                                ? r.getCreatedAt().format(ISO_FORMATTER)
+                                ? r.getCreatedAt().atZone(ZoneId.systemDefault()).format(ISO_FORMATTER)
                                 : null)
                         .build())
                 .collect(Collectors.toList());
@@ -124,7 +125,6 @@ public class ReportServiceImpl implements ReportService {
         report.setDecisionId(id);
         report.setContent(toJson(newContent));
         report.setCreatedAt(now);
-        report.setUpdatedAt(now);
         reportMapper.insert(report);
 
         // 更新决策指向新报告
@@ -171,7 +171,7 @@ public class ReportServiceImpl implements ReportService {
                 .status("READY")
                 .content(content)
                 .generatedAt(report.getCreatedAt() != null
-                        ? report.getCreatedAt().format(ISO_FORMATTER)
+                        ? report.getCreatedAt().atZone(ZoneId.systemDefault()).format(ISO_FORMATTER)
                         : null)
                 .build();
     }

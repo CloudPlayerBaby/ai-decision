@@ -85,8 +85,9 @@ public class NodeExecutionEventListener {
 
         // 3. 更新 Decision 状态
         Decision decision = decisionMapper.selectById(task.getDecisionId());
+        String decisionStatus = resolveCompletedDecisionStatus(task);
         if (decision != null) {
-            decision.setStatus(DecisionStatus.WAITING_CONFIRM.name());
+            decision.setStatus(decisionStatus);
             decision.setHasPendingResult(true);
             decision.setPendingResultId(result.getId());
             decision.setUpdatedAt(now);
@@ -98,6 +99,8 @@ public class NodeExecutionEventListener {
         sseData.put("taskId", "t_" + task.getId());
         sseData.put("decisionId", "d_" + task.getDecisionId());
         sseData.put("analysisResultId", "ar_" + result.getId());
+        sseData.put("decisionStatus", decisionStatus);
+        sseData.put("resultStatus", "PENDING_CONFIRM");
         eventService.sendResultReady("t_" + task.getId(), sseData);
     }
 
@@ -214,12 +217,37 @@ public class NodeExecutionEventListener {
         task.setUpdatedAt(now);
         taskMapper.updateById(task);
 
+        Decision decision = decisionMapper.selectById(task.getDecisionId());
+        if (decision != null) {
+            decision.setStatus(resolveFailedDecisionStatus(task));
+            decision.setUpdatedAt(now);
+            decisionMapper.updateById(decision);
+        }
+
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("errorCode", ErrorCode.INTERNAL_ERROR.getCode());
         data.put("message", message);
         data.put("failedStepId", step == null ? null : "s_" + step.getId());
         data.put("retryable", step != null);
         eventService.sendTaskFailed("t_" + task.getId(), data);
+    }
+
+    private String resolveCompletedDecisionStatus(AnalysisTask task) {
+        if ("PARTIAL".equals(task.getRunType())
+                && DecisionStatus.COMPLETED.name().equals(task.getPreviousDecisionStatus())) {
+            return DecisionStatus.COMPLETED.name();
+        }
+        return DecisionStatus.WAITING_CONFIRM.name();
+    }
+
+    private String resolveFailedDecisionStatus(AnalysisTask task) {
+        String previousStatus = task.getPreviousDecisionStatus();
+        if ("PARTIAL".equals(task.getRunType())
+                && (DecisionStatus.WAITING_CONFIRM.name().equals(previousStatus)
+                || DecisionStatus.COMPLETED.name().equals(previousStatus))) {
+            return task.getPreviousDecisionStatus();
+        }
+        return DecisionStatus.FAILED.name();
     }
 
     /**
