@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- 引入 Spring Boot 的默认配置，保证控制台原来彩色的日志格式不受影响 -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <!-- 配置 Sentry 的日志追加器 -->
+    <appender name="Sentry" class="io.sentry.logback.SentryAppender">
+        <!-- 只有级别大于等于 ERROR 的日志才会被作为 Issue 上报到 Sentry -->
+        <minimumEventLevel>ERROR</minimumEventLevel>
+        <!-- INFO 级别及以上的日志，会被记录为面包屑（Breadcrumb），也就是出 Bug 前发生的一连串动作，方便排查 -->
+        <minimumBreadcrumbLevel>INFO</minimumBreadcrumbLevel>
+    </appender>
+
+    <!-- 配置根日志记录器，同时输出到控制台和 Sentry -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="Sentry"/>
+    </root>
+</configuration>

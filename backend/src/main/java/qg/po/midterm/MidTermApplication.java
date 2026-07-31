@@ -16,5 +16,4 @@ public class MidTermApplication {
     public static void main(String[] args) {
         SpringApplication.run(MidTermApplication.class, args);
     }
-
 }

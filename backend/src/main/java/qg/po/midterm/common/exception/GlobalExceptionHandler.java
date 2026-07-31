@@ -44,12 +44,14 @@ public class GlobalExceptionHandler {
                 errors.put(e.getField(), e.getDefaultMessage()));
 
         // 返回 HTTP 400 状态码，Result.data 中附带错误明细 Map
+        io.sentry.Sentry.captureException(ex); // 主动上报给 Sentry
         return ResponseEntity.badRequest()
                 .body(Result.fail(ErrorCode.BAD_REQUEST.getCode(), ErrorCode.BAD_REQUEST.getMessage(), errors));
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Result<Void>> handleConstraintViolation(ConstraintViolationException ex) {
+        io.sentry.Sentry.captureException(ex); // 主动上报给 Sentry
         return ResponseEntity.badRequest()
                 .body(Result.fail(ErrorCode.BAD_REQUEST.getCode(), ex.getMessage()));
     }
@@ -81,6 +83,7 @@ public class GlobalExceptionHandler {
 
         // 业务异常通常是预期内的错误（非系统崩塌），因此用 WARN 警告级别记录日志即可
         log.warn("业务异常: code={}, message={}", errorCode.getCode(), ex.getMessage());
+        io.sentry.Sentry.captureException(ex); // 主动上报给 Sentry
 
         // 返回匹配的 HTTP 状态码和失败的结果体
         return ResponseEntity.status(httpStatus)
