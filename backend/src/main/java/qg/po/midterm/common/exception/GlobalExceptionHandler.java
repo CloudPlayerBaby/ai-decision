@@ -100,6 +100,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleException(Exception ex) {
         // 未知的未知错误，用 ERROR 级别打印完整堆栈日志，方便运维/开发者排查 Bug
         log.error("服务端错误", ex);
+        io.sentry.Sentry.captureException(ex); // 主动上报给 Sentry
 
         // 统一屏蔽内部实现细节，对外暴露安全的 500 错误提示
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
