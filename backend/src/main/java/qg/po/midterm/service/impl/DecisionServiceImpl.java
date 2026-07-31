@@ -304,7 +304,6 @@ public class DecisionServiceImpl implements DecisionService {
         report.setDecisionId(id);
         report.setContent(objectMapper.writeValueAsString(content));
         report.setCreatedAt(now);
-        report.setUpdatedAt(now);
         reportMapper.insert(report);
 
         // 3. 更新决策
