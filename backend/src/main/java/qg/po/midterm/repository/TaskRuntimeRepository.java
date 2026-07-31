@@ -93,6 +93,7 @@ public class TaskRuntimeRepository {
         return eventId;
     }
 
+    // 从redis里面读取
     public String getLastEventId(String taskId) {
         return stringRedisTemplate.opsForValue().get(EVENT_ID_KEY_PREFIX + taskId);
     }

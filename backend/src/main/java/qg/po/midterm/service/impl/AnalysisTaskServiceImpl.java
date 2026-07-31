@@ -14,16 +14,8 @@ import qg.po.midterm.common.exception.BusinessException;
 import qg.po.midterm.dto.request.PartialAnalysisRequest;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.Canvas;
-import qg.po.midterm.entity.AnalysisResult;
-import qg.po.midterm.entity.AnalysisStep;
-import qg.po.midterm.entity.AnalysisTask;
-import qg.po.midterm.entity.Decision;
-import qg.po.midterm.entity.DecisionCanvas;
-import qg.po.midterm.mapper.AnalysisResultMapper;
-import qg.po.midterm.mapper.AnalysisStepMapper;
-import qg.po.midterm.mapper.AnalysisTaskMapper;
-import qg.po.midterm.mapper.DecisionCanvasMapper;
-import qg.po.midterm.mapper.DecisionMapper;
+import qg.po.midterm.entity.*;
+import qg.po.midterm.mapper.*;
 import qg.po.midterm.repository.TaskRuntimeRepository;
 import qg.po.midterm.service.AnalysisTaskService;
 import qg.po.midterm.vo.*;
@@ -374,7 +366,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         task.setUpdatedAt(LocalDateTime.now());
         taskMapper.updateById(task);
 
-        // 更新决策到数据库
+        // 更新决策状态到数据库
         decision.setStatus(
                 "PARTIAL".equals(task.getRunType())
                         ? DecisionStatus.PARTIAL_ANALYZING.name()
@@ -733,12 +725,13 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
      * 只在当前数据库事务成功提交后启动异步 Workflow
      */
     private void runAfterCommit(Runnable action) {
-        if (!TransactionSynchronizationManager
-                .isSynchronizationActive()) {
+        // 如果当前线程没有开启事务，那么就直接跑 action
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             action.run();
             return;
         }
 
+        // 如果当前线程开启了事务，注册一个任务在commit之后开始跑
         TransactionSynchronizationManager.registerSynchronization(
                 new TransactionSynchronization() {
                     @Override
@@ -749,13 +742,14 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         );
     }
 
+    // TODO 看看要不要让模型生成
     private StepText readStepText(String stepName, String outputData) {
         if (outputData == null || outputData.isBlank()) {
             return new StepText(null, null);
         }
         try {
             JsonNode node = objectMapper.readTree(outputData);
-            
+
             String summary = switch (stepName) {
                 case "UNDERSTAND" -> "问题理解完成";
                 case "EXTRACT_FACTORS" -> "关键因素提取完成";
@@ -810,7 +804,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     }
 
     private String textOrNull(JsonNode node) {
-        return node == null || node.isNull() ? null : node.asText();
+        return node == null || node.isNull() ? null : node.asString();
     }
 
     /**
@@ -825,6 +819,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         return task;
     }
 
+    // 检查task的owner是不是自己
     private Decision checkTaskOwner(AnalysisTask task) {
         Decision decision = decisionMapper.selectById(task.getDecisionId());
         if (decision == null) {
@@ -837,9 +832,10 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         return decision;
     }
 
+    // 检查是不是自己的决策
     private void checkOwner(Decision decision) {
         if (!decision.getUserId().equals(getCurrentUserId())) {
-            // 越权统一返回 404，避免暴露资源是否存在。
+            // 越权统一返回 404
             throw new BusinessException(
                     ErrorCode.NOT_FOUND,
                     "资源不存在或已删除"
@@ -847,12 +843,13 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         }
     }
 
+    // 获取当前的用户 ID
     private Long getCurrentUserId() {
         Authentication authentication = SecurityContextHolder
                 .getContext()
                 .getAuthentication();
-        if (authentication == null
-                || !(authentication.getPrincipal() instanceof Long userId)) {
+        // 如果 getPrincipal() 得到的是 Long 那就赋给 userId，否则抛出异常
+        if (authentication == null || !(authentication.getPrincipal() instanceof Long userId)) {
             throw new BusinessException(
                     ErrorCode.UNAUTHORIZED,
                     "未登录或Token已失效"
@@ -875,6 +872,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         }
 
         try {
+            // 自动尝试去掉prefix
             return Long.parseLong(value.substring(prefix.length()));
         } catch (NumberFormatException exception) {
             throw new BusinessException(
@@ -885,7 +883,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     }
 
     /**
-     * 步骤英文名对应的中文展示名。
+     * 步骤英文名对应的中文展示名
      */
     private String getDisplayName(String name) {
         return switch (name) {
@@ -898,6 +896,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         };
     }
 
+    // 根据step的名称和status生成展示字符串
     private String getDefaultSummary(String stepName, String status) {
         String displayName = getDisplayName(stepName);
         return switch (status) {
@@ -909,6 +908,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         };
     }
 
+    // 把 LocalDateTime 转换成 offsetTime 格式
     private OffsetDateTime toOffsetTime(LocalDateTime time) {
         if (time == null) {
             return null;

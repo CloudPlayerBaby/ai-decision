@@ -22,10 +22,11 @@ public class AnalysisWorkflowDispatcher {
     private final WorkflowExecutor workflowExecutor;
     private final TaskRuntimeRepository runtimeRepository;
 
+    // 异步调用整体推演
     @Async
     public void startFullAnalysis(String taskId, String decisionId, Decision decision) {
         try {
-            // 只调用 Workflow 组公开的整轮推演接口
+            // 调用提供的整轮推演接口
             String workflowTaskId = workflowExecutor.startAnalysis(
                     decisionId,
                     decision.getBackground(),
@@ -37,7 +38,7 @@ public class AnalysisWorkflowDispatcher {
                     workflowTaskId
             );
         } catch (Exception exception) {
-            log.error("Failed to dispatch full analysis, taskId={}", taskId, exception);
+            log.error("整体推演调用失败, taskId={}", taskId, exception);
         }
     }
 
