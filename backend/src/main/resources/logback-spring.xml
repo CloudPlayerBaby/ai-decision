@@ -6,10 +6,9 @@
 
     <!-- 配置 Sentry 的日志追加器 -->
     <appender name="Sentry" class="io.sentry.logback.SentryAppender">
-        <!-- 只有级别大于等于 ERROR 的日志才会被作为 Issue 上报到 Sentry -->
-        <minimumEventLevel>ERROR</minimumEventLevel>
-        <!-- INFO 级别及以上的日志，会被记录为面包屑（Breadcrumb），也就是出 Bug 前发生的一连串动作，方便排查 -->
-        <minimumBreadcrumbLevel>INFO</minimumBreadcrumbLevel>
+        <!-- 注意：改成 INFO 后，所有的 log.info 都会变成一个 Sentry Issue 发送 -->
+        <minimumEventLevel>INFO</minimumEventLevel>
+        <minimumBreadcrumbLevel>DEBUG</minimumBreadcrumbLevel>
     </appender>
 
     <!-- 配置根日志记录器，同时输出到控制台和 Sentry -->
