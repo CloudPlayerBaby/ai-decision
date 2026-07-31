@@ -29,12 +29,14 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
     public String startAnalysis(
             String taskId,
             String decisionId,
+            String title,
             String background,
             String goal,
             String constraints) {
         Map<String, Object> initData = new HashMap<>();
         initData.put("decisionId", decisionId);
         initData.put("taskId", taskId);
+        initData.put("title", title);
         initData.put("background", background);
         initData.put("goal", goal);
         initData.put("constraints", constraints);

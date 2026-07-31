@@ -33,6 +33,7 @@ public class AnalysisWorkflowDispatcher {
             String workflowTaskId = workflowExecutor.startAnalysis(
                     taskId,
                     decisionId,
+                    decision.getTitle(),
                     decision.getBackground(),
                     decision.getGoal(),
                     decision.getConstraints()
