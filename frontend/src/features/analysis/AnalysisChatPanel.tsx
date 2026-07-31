@@ -17,13 +17,14 @@ interface Props {
   toolCalls: ToolCallEvent[];
   connectionStatus: ConnectionStatus;
   options: DecisionOption[];
-  recommendation: Recommendation;
+  recommendation: Recommendation | null;
   analysisResultId: string;
   /** 用户已选择的方案 ID（来自 decision.preferredOptionId） */
   selectedOptionId?: string | null;
   /** COMPLETED 或 WAITING_CONFIRM 状态时为 true，跳过动画，直接展示历史结果 */
   isHistory?: boolean;
   onAllStepsCompleted?: () => void;
+  onRetryStep?: (stepId: string) => void;
 }
 
 export function AnalysisChatPanel({
@@ -37,6 +38,7 @@ export function AnalysisChatPanel({
   selectedOptionId: externalSelectedOptionId,
   isHistory = false,
   onAllStepsCompleted,
+  onRetryStep,
 }: Props) {
   const [simSteps, setSimSteps] = useState<AnalysisStep[]>(initialSteps);
   const timerRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -99,7 +101,8 @@ export function AnalysisChatPanel({
   }, [initialSteps, isHistory]);
 
   const displaySteps = simSteps;
-  const hasHistoryData = isHistory && options.length > 0;
+  const hasResultData = options.length > 0 && recommendation !== null;
+  const hasHistoryData = isHistory && hasResultData;
 
   const footerText = () => {
     if (isHistory) return '● 历史记录';
@@ -150,7 +153,7 @@ export function AnalysisChatPanel({
               .filter((s) => s.status !== 'WAITING')
               .map((step) => (
                 <div key={step.id}>
-                  <StepLogCard step={step} />
+                  <StepLogCard step={step} onRetry={onRetryStep} />
                   {toolCalls
                     .filter((tc) => tc.stepId === step.id)
                     .map((tc) => (
@@ -159,7 +162,7 @@ export function AnalysisChatPanel({
                 </div>
               ))}
 
-            {(analysisCompleted || hasHistoryData) && (
+            {(analysisCompleted || hasHistoryData) && hasResultData && (
               <OptionComparison
                 options={options}
                 recommendation={recommendation}
