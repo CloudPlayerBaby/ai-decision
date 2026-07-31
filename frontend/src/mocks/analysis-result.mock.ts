@@ -3,7 +3,7 @@
  * 基于 docs/02-api-contract-v2.0.md API 契约 9.1 节
  */
 
-import type { CanvasViewModel } from '../types/canvas'
+import type { CanvasViewModel, FactorDetail, OptionDetail } from '../types/canvas'
 import { mockCanvas } from './canvas.mock'
 
 /**
@@ -99,12 +99,12 @@ export const mockDecisionProblem = {
  * 组装 CanvasViewModel
  */
 export function buildMockCanvasViewModel(): CanvasViewModel {
-  const factorsDetail: Record<string, { description: string }> = {}
+  const factorsDetail: Record<string, FactorDetail> = {}
   for (const f of mockAnalysisResult.factors) {
     factorsDetail[f.id] = { description: f.description }
   }
 
-  const optionsDetail: Record<string, { pros: string[]; cons: string[]; risks: string[] }> = {}
+  const optionsDetail: Record<string, OptionDetail> = {}
   for (const o of mockAnalysisResult.options) {
     optionsDetail[o.id] = { pros: o.pros, cons: o.cons, risks: o.risks }
   }

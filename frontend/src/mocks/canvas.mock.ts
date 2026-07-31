@@ -3,134 +3,91 @@
  * 基于 docs/02-api-contract-v2.0.md API 契约 10.1 节
  *
  * 契约原则：
- * - pros/cons/risks 属于 AnalysisResult，不混入 Canvas.nodes[].data
- * - 根节点 data 为空对象 {}（对齐 10.1 示例）
- * - 方案节点 data 仅含 scores
- *
- * 前端展示所需的 pros/cons/risks、goal、constraints、
- * description 由 CanvasViewModel 单独注入，不在此 Mock 中存储
+ * - label 在 CanvasNode 顶层，不在 data 里
+ * - decision 节点 data 为空对象 {}
+ * - factor 节点 data 只有 weight
+ * - option 节点 data 只有 scores
+ * - pros/cons/risks 属于 AnalysisResult，不出现在 Canvas 中
  */
 
 import type { Canvas } from '../types/canvas'
 
 export const mockCanvas: Canvas = {
   nodes: [
-    // 决策问题节点 - data: {}（对齐 10.1 示例）
+    // 决策问题节点 - data: {}
     {
       id: 'root',
       type: 'decision',
+      label: '优先学习 Redis 还是 Docker？',
       position: { x: 24, y: 180 },
-      data: {
-        nodeType: 'decision',
-        label: '优先学习 Redis 还是 Docker？',
-      },
+      data: {},
     },
 
-    // 影响因素节点 - description 由 factorsDetail 注入
+    // 影响因素节点 - data: { weight }
     {
       id: 'f_time',
       type: 'factor',
+      label: '时间成本',
       position: { x: 300, y: 40 },
-      data: {
-        nodeType: 'factor',
-        label: '时间成本',
-        weight: 0.30,
-      },
+      data: { weight: 0.30 },
     },
     {
       id: 'f_benefit',
       type: 'factor',
+      label: '求职收益',
       position: { x: 300, y: 180 },
-      data: {
-        nodeType: 'factor',
-        label: '求职收益',
-        weight: 0.35,
-      },
+      data: { weight: 0.35 },
     },
     {
       id: 'f_practice',
       type: 'factor',
+      label: '项目实践',
       position: { x: 300, y: 320 },
-      data: {
-        nodeType: 'factor',
-        label: '项目实践',
-        weight: 0.20,
-      },
+      data: { weight: 0.20 },
     },
     {
       id: 'f_difficulty',
       type: 'factor',
+      label: '学习难度',
       position: { x: 300, y: 460 },
-      data: {
-        nodeType: 'factor',
-        label: '学习难度',
-        weight: 0.15,
-      },
+      data: { weight: 0.15 },
     },
 
-    // 候选方案节点 - data 仅含 scores；pros/cons/risks 由 optionsDetail 注入
+    // 候选方案节点 - data: { scores }
     {
       id: 'opt_docker',
       type: 'option',
+      label: '优先学习 Docker',
       position: { x: 580, y: 40 },
       data: {
-        nodeType: 'option',
-        label: '优先学习 Docker',
-        scores: {
-          cost: 4,
-          time: 4,
-          benefit: 4,
-          risk: 4,
-          feasibility: 5,
-        },
+        scores: { cost: 4, time: 4, benefit: 4, risk: 4, feasibility: 5 },
       },
     },
     {
       id: 'opt_redis',
       type: 'option',
+      label: '优先学习 Redis',
       position: { x: 580, y: 200 },
       data: {
-        nodeType: 'option',
-        label: '优先学习 Redis',
-        scores: {
-          cost: 4,
-          time: 4,
-          benefit: 5,
-          risk: 3,
-          feasibility: 4,
-        },
+        scores: { cost: 4, time: 4, benefit: 5, risk: 3, feasibility: 4 },
       },
     },
     {
       id: 'opt_both',
       type: 'option',
+      label: '双轨轻量',
       position: { x: 580, y: 360 },
       data: {
-        nodeType: 'option',
-        label: '双轨轻量',
-        scores: {
-          cost: 3,
-          time: 2,
-          benefit: 4,
-          risk: 4,
-          feasibility: 3,
-        },
+        scores: { cost: 3, time: 2, benefit: 4, risk: 4, feasibility: 3 },
       },
     },
     {
       id: 'opt_focus',
       type: 'option',
+      label: '集中 Java',
       position: { x: 580, y: 520 },
       data: {
-        nodeType: 'option',
-        label: '集中 Java',
-        scores: {
-          cost: 5,
-          time: 5,
-          benefit: 3,
-          risk: 5,
-          feasibility: 5,
-        },
+        scores: { cost: 5, time: 5, benefit: 3, risk: 5, feasibility: 5 },
       },
     },
   ],

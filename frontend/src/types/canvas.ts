@@ -1,19 +1,11 @@
 /**
- * 画布模块类型定义
- * 基于 docs/02-api-contract-v2.0.md API 契约
+ * Canvas API 类型定义
+ * 基于 docs/02-api-contract-v2.0.md 契约 10.1 节
  *
- * 契约分层原则：
- * - Canvas API 类型（nodes/edges/position/score/weight）：严格对齐 10.1 节
- * - 展示类型（CanvasViewModel）：前端内部使用，含 pros/cons/risks/goal/constraints
- * - pros/cons/risks/goal/constraints 属于 AnalysisResult / DecisionProblem，
- *   不混入 Canvas nodes[].data，不通过画布保存接口回写
+ * 原则：严格对齐 API 契约，不混入展示字段。
+ * 展示字段（goal/constraints/description/pros/cons/risks）属于 Flow 层，
+ * 不出现在 CanvasNode 中，也不通过画布保存接口回写。
  */
-
-/** 节点类型枚举 */
-export type CanvasNodeType = 'decision' | 'factor' | 'option'
-
-/** 边的关系类型 */
-export type EdgeRelation = 'HAS_FACTOR' | 'AFFECTS' | string
 
 /** 位置坐标 */
 export interface Position {
@@ -21,30 +13,10 @@ export interface Position {
   y: number
 }
 
-/**
- * 决策问题节点数据
- * 仅含 title（作为 label），goal/constraints 归入 CanvasViewModel.decision
- */
-export interface DecisionNodeData {
-  nodeType: 'decision'
-  label: string
-}
+/** 边的关系类型 */
+export type EdgeRelation = 'HAS_FACTOR' | 'AFFECTS' | string
 
-/**
- * 影响因素节点数据
- * description 归入 CanvasViewModel.factorsDetail[id]
- */
-export interface FactorNodeData {
-  nodeType: 'factor'
-  label: string
-  /** 权重值 0-1，UI 展示为百分比 */
-  weight: number
-}
-
-/**
- * 候选方案五维评分
- * 所有维度 1-5，5 为最优；risk 维度 5 表示低风险
- */
+/** 候选方案五维评分（1-5，5 为最优；risk 维度 5 表示低风险） */
 export interface OptionScores {
   cost: number
   time: number
@@ -53,79 +25,78 @@ export interface OptionScores {
   feasibility: number
 }
 
-/**
- * 候选方案节点数据
- * 仅含 scores；pros/cons/risks 归入 CanvasViewModel.optionsDetail[id]
- */
-export interface OptionNodeData {
-  nodeType: 'option'
-  label: string
+/** 决策问题节点 data（契约 10.1 为空对象） */
+export interface DecisionCanvasData extends Record<string, never> {}
+
+/** 影响因素节点 data（契约 10.1 只有 weight） */
+export interface FactorCanvasData {
+  weight: number
+}
+
+/** 候选方案节点 data（契约 10.1 只有 scores） */
+export interface OptionCanvasData {
   scores: OptionScores
 }
 
-/** 节点联合数据类型 */
-export type CanvasNodeData = DecisionNodeData | FactorNodeData | OptionNodeData
-
-/**
- * 画布节点
- * 基于 API 契约 10.1 节
- */
-export interface CanvasNode {
+/** Canvas 节点 — 判别联合，以 type 为判别字段 */
+export type DecisionCanvasNode = {
   id: string
-  type: CanvasNodeType
+  type: 'decision'
+  label: string
   position: Position
-  data: CanvasNodeData
+  data: DecisionCanvasData
 }
 
-/**
- * 画布边
- * 基于 API 契约 10.1 节
- */
+export type FactorCanvasNode = {
+  id: string
+  type: 'factor'
+  label: string
+  position: Position
+  data: FactorCanvasData
+}
+
+export type OptionCanvasNode = {
+  id: string
+  type: 'option'
+  label: string
+  position: Position
+  data: OptionCanvasData
+}
+
+export type CanvasNode = DecisionCanvasNode | FactorCanvasNode | OptionCanvasNode
+
+/** Canvas 边 */
 export interface CanvasEdge {
   id: string
   source: string
   target: string
-  relation?: EdgeRelation
+  relation: EdgeRelation
 }
 
-/**
- * 完整画布数据结构
- * 基于 API 契约 10.1 节
- */
+/** Canvas 数据 */
 export interface Canvas {
   nodes: CanvasNode[]
   edges: CanvasEdge[]
 }
 
-/**
- * 画布数据（前端内部通信用，非 API 契约）
- */
 export interface CanvasData {
   nodes: CanvasNode[]
   edges: CanvasEdge[]
 }
 
-/**
- * 因素详情（来自 AnalysisResult.factors）
- * weight 已存在于 FactorNodeData，description 单独存放便于关联
- */
+/** 因素详情（来自 AnalysisResult.factors） */
 export interface FactorDetail {
   description: string
 }
 
-/**
- * 方案详情（来自 AnalysisResult.options）
- * pros/cons/risks 为推演生成的只读分析，不可通过画布保存接口回写
- */
+/** 方案详情（来自 AnalysisResult.options） */
 export interface OptionDetail {
   pros: string[]
   cons: string[]
   risks: string[]
 }
 
-/**
- * 决策信息（来自 DecisionProblem）
- */
+/** 决策信息（来自 DecisionProblem） */
 export interface DecisionInfo {
   id: string
   title: string
