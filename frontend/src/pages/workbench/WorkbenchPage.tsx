@@ -20,7 +20,6 @@ import { useState, useEffect, useRef } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
 import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
-import { mockOptions, mockResult } from '@/mocks/analysis.mock'
 import { useAnalysisStream } from '@/hooks/useAnalysisStream'
 import { ConfirmResultModal } from '@/components/workbench/ConfirmResultModal'
 import { DecisionStatusTag } from '@/components/common/DecisionStatusTag'
@@ -33,6 +32,7 @@ import {
 import {
   confirmAnalysis,
   getAnalysisResult,
+  retryFailedStep,
 } from '@/services/analysis.service'
 import { getCanvas, saveCanvas } from '@/services/canvas.service'
 import { buildCanvasViewModel } from '@/utils/canvasMapper'
@@ -132,9 +132,9 @@ export function WorkbenchPage() {
       ),
   })
 
-  const displayOptions = resultQuery.data?.options ?? mockOptions
-  const displayRecommendation = resultQuery.data?.recommendation ?? mockResult.recommendation
-  const displayAnalysisResultId = resultQuery.data?.id ?? mockResult.id
+  const displayOptions = resultQuery.data?.options ?? []
+  const displayRecommendation = resultQuery.data?.recommendation ?? null
+  const displayAnalysisResultId = resultQuery.data?.id ?? ''
 
   const startMutation = useMutation({
     mutationFn: () => startFullAnalysis(id),
@@ -213,6 +213,20 @@ export function WorkbenchPage() {
       queryKey: queryKeys.decisions.canvas(id),
     })
   }
+
+  const retryMutation = useMutation({
+    mutationFn: (stepId: string) =>
+      retryFailedStep(taskId!, stepId),
+    onSuccess: async () => {
+      message.success('步骤已重新入队，请等待推演更新')
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.analysisTasks.detail(taskId!),
+      })
+    },
+    onError: () => {
+      message.error('重试失败，请稍后重试')
+    },
+  })
 
   if (detailQuery.isError) {
     const err = detailQuery.error
@@ -402,6 +416,7 @@ export function WorkbenchPage() {
                 selectedOptionId={selectedOptionId}
                 isHistory={decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM'}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
+                onRetryStep={(stepId) => retryMutation.mutate(stepId)}
               />
             </div>
           </>

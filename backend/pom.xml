@@ -61,17 +61,10 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
-
-        <!-- 为了解决 Sentry 启动时扫描 WebClientCustomizer 导致的 NoClassDefFoundError，引入 webflux 依赖 (Spring Boot 默认依然会以 MVC 模式启动) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
-        </dependency>
-
-        <!-- Sentry SDK (自动挂载到 Spring Boot 和 Logback) -->
+        <!-- 改用原生 Spring 7 SDK，避开 Spring Boot Starter 的自动扫描崩溃 -->
         <dependency>
             <groupId>io.sentry</groupId>
-            <artifactId>sentry-spring-boot-starter-jakarta</artifactId>
+            <artifactId>sentry-spring-7</artifactId>
             <version>8.34.1</version>
         </dependency>
         <dependency>
