@@ -1,0 +1,25 @@
+.confirm-action {
+  margin-top: 4px;
+  padding: 16px;
+  border: 1px solid var(--surface-soft-border);
+  border-radius: 10px;
+  text-align: center;
+  background: var(--surface-soft);
+}
+
+.confirm-action .ant-result {
+  padding: 16px 0;
+}
+
+.confirm-result {
+  margin-top: 4px;
+  padding: 24px 16px;
+  text-align: center;
+  border: 1px solid var(--surface-soft-border);
+  border-radius: 10px;
+  background: var(--badge-bg);
+}
+
+.confirm-result .ant-result {
+  padding: 0;
+}
