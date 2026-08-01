@@ -374,6 +374,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     console.log('[CanvasPanel] effect triggered: nodes/edges changed')
     if (!didMount.current) {
       didMount.current = true
+      // 首次渲染时，初始化 lastSyncedSignature，使其与 initialSignature 一致
+      // 这样刷新后，如果没有用户编辑，保存按钮保持可点击状态
+      lastSyncedSignature.current = initialSignature.current
       return
     }
 
@@ -418,6 +421,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   // 跟踪是否有本地编辑（用于在 viewModel 变化时决定是否覆盖）
   const hasLocalEdit = useRef(false)
+  // 跟踪上一次同步的 signature，用于判断后端数据是否真正变化
+  const lastSyncedSignature = useRef<string | null>(null)
 
   // 监听 viewModel 变化，当后端 canvas 更新时同步到 ReactFlow
   useEffect(() => {
@@ -444,15 +449,26 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
     const factorsDetailKeys = Object.keys(factorsDetail).join(',')
     const optionsDetailKeys = Object.keys(optionsDetail).join(',')
+    // 计算后端数据的 signature（不含用户拖动后的位置）
     const vmSignature = JSON.stringify({ ...buildCanvasData(newNodes, newEdges), factorsDetailKeys, optionsDetailKeys })
-    const currentSignature = JSON.stringify(buildCanvasData(nodes, edges))
 
-    if (vmSignature !== currentSignature) {
-      console.log('[CanvasPanel] viewModel changed, syncing nodes/edges')
-      setNodes(newNodes)
-      setEdges(newEdges)
+    // 如果后端数据没有变化，跳过同步
+    if (vmSignature === lastSyncedSignature.current) {
+      return
     }
-  }, [canvas, canvas.nodes, canvas.edges, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo])
+
+    // 后端数据变化了，检查是否有本地编辑
+    if (hasLocalEdit.current) {
+      console.log('[CanvasPanel] viewModel changed but has local edits, skipping sync')
+      return
+    }
+
+    // 没有本地编辑，执行同步
+    console.log('[CanvasPanel] viewModel changed, syncing nodes/edges')
+    lastSyncedSignature.current = vmSignature
+    setNodes(newNodes)
+    setEdges(newEdges)
+  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo])
 
   // openOptionAnalysis：在 Context 内部实现，可访问所有内部状态
   const openOptionAnalysis = useCallback(

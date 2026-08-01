@@ -45,6 +45,25 @@ import { queryKeys } from '@/services/queryKeys'
 import { ApiError, BusinessCode } from '@/types/api'
 import { isMockEnabled } from '@/services/config'
 
+// const { Text } = Typography
+
+function buildPartialChangedNodeIds(
+  changedNodeIds: string[] | undefined,
+  canvas?: import('@/types/canvas').Canvas,
+) {
+  const businessNodeIds = new Set(
+    canvas?.nodes
+      .filter((node) => node.type === 'factor' || node.type === 'option')
+      .map((node) => node.id) ?? [],
+  )
+
+  return [...new Set(changedNodeIds ?? [])].filter((nodeId) => {
+    if (!nodeId || nodeId === 'root') return false
+    return businessNodeIds.size === 0 || businessNodeIds.has(nodeId)
+  })
+}
+
+//  d35085cecfd5fcd42b2c3cc8603d865ec8fb93fa
 /**
  * 推演工作台：中间画布(A) + 右侧推演对话(B)。
  * C 负责详情恢复、开始推演、确认方案、状态标签与三栏挂载契约。
@@ -126,6 +145,7 @@ export function WorkbenchPage() {
       setActiveResultId(event.analysisResultId)
       forceBackendData.current = true
       setPartialAnalysisInfo(null) // 局部推演结束，清除状态
+      setPendingChangedNodeIds([])
 
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
@@ -342,6 +362,8 @@ export function WorkbenchPage() {
   const [isDirty, setIsDirty] = useState(false)
   // 追踪用户是否已实际修改过画布（区分初始化和用户操作）
   const hasUserEdited = useRef(false)
+  // 保存按钮回调时引用最新 canvas 数据（需要在使用前声明）
+  const canvasRef = useRef<import('@/types/canvas').Canvas | null>(null)
   // 等 canvasQuery 数据回来后，对比缓存和服务器内容决定初始 isDirty（仅执行一次）
   const didEvaluateCache = useRef(false)
   useEffect(() => {
@@ -349,15 +371,23 @@ export function WorkbenchPage() {
     if (didEvaluateCache.current) return
     didEvaluateCache.current = true
     const cached = readCanvasCache(id)
-    if (cached) {
+    console.log('[WorkbenchPage] evaluateCache: cached=', cached ? 'exists' : 'null', 'canvasQuery.data=', canvasQuery.data ? 'exists' : 'null')
+    if (cached && canvasQuery.data) {
       const serverVersion = buildServerVersion(canvasQuery.data)
-      const isDirty = serverVersion !== cached.serverVersion
-      console.log('[WorkbenchPage] evaluateCache: serverVersion=', serverVersion, 'cachedServerVersion=', cached.serverVersion, 'isDirty=', isDirty)
+      // 同时检查 serverVersion 和 canvas 内容是否变化
+      const isVersionDirty = serverVersion !== cached.serverVersion
+      // 比较 canvas 内容（nodes/edges 的位置等）
+      const isContentDirty = JSON.stringify(canvasQuery.data) !== JSON.stringify(cached.canvas)
+      const isDirty = isVersionDirty || isContentDirty
+      console.log('[WorkbenchPage] evaluateCache: serverVersion=', serverVersion, 'cachedServerVersion=', cached.serverVersion, 'versionDirty=', isVersionDirty, 'contentDirty=', isContentDirty, 'isDirty=', isDirty)
       setIsDirty(isDirty)
+      // 初始化 canvasRef，以便刷新后立即可以保存
+      canvasRef.current = cached.canvas
+    } else if (canvasQuery.data) {
+      // 没有缓存但有后端数据，也初始化 canvasRef
+      canvasRef.current = canvasQuery.data
     }
   }, [canvasQuery.data, id])
-  // 保存按钮回调时引用最新 canvas 数据
-  const canvasRef = useRef<import('@/types/canvas').Canvas | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
@@ -370,7 +400,9 @@ export function WorkbenchPage() {
       clearCanvasCache(id) // 清除旧缓存，刷新时走后端
 
       // 保存 changedNodeIds，不自动触发局部重推
-      setPendingChangedNodeIds(data.changedNodeIds ?? [])
+      setPendingChangedNodeIds(
+        buildPartialChangedNodeIds(data.changedNodeIds, data.canvas),
+      )
 
       // 保存完成后解锁导航
       if (leaveAction === 'save') {
@@ -414,7 +446,10 @@ export function WorkbenchPage() {
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
-      const changedIds = data.changedNodeIds ?? []
+      const changedIds = buildPartialChangedNodeIds(
+        data.changedNodeIds,
+        data.canvas,
+      )
       setPendingChangedNodeIds(changedIds)
 
       if (changedIds.length > 0) {
@@ -485,11 +520,11 @@ export function WorkbenchPage() {
 
   const retryMutation = useMutation({
     mutationFn: (stepId: string) =>
-      retryFailedStep(taskId!, stepId),
+      retryFailedStep(streamTaskId!, stepId),
     onSuccess: async () => {
       message.success('步骤已重新入队，请等待推演更新')
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.analysisTasks.detail(taskId!),
+        queryKey: queryKeys.analysisTasks.detail(streamTaskId!),
       })
     },
     onError: () => {
@@ -572,6 +607,13 @@ export function WorkbenchPage() {
     decision.status === 'WAITING_CONFIRM' ||
     Boolean(decision.hasPendingResult) ||
     (animCompleted && decision.status !== 'COMPLETED')
+  const isLocalPartialAnalyzing = partialAnalysisInfo !== null
+  const panelDecisionStatus = isLocalPartialAnalyzing
+    ? 'PARTIAL_ANALYZING'
+    : decision.status
+  const panelIsHistory =
+    !isLocalPartialAnalyzing &&
+    (decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM')
 
   return (
     <div className="workbench">
@@ -644,7 +686,12 @@ export function WorkbenchPage() {
                 }
                 loading={startPartialAnalysisMutation.isPending}
                 onClick={() => {
-                  startPartialAnalysisMutation.mutate(pendingChangedNodeIds)
+                  startPartialAnalysisMutation.mutate(
+                    buildPartialChangedNodeIds(
+                      pendingChangedNodeIds,
+                      canvasRef.current ?? activeCanvas,
+                    ),
+                  )
                 }}
               >
                 {startPartialAnalysisMutation.isPending ? '局部重推中…' : '局部重推'}
@@ -734,8 +781,8 @@ export function WorkbenchPage() {
                 selectedOptionId={selectedOptionId}
                 retryable={retryable}
                 failedStepId={failedStepId}
-                decisionStatus={decision.status}
-                isHistory={decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM'}
+                decisionStatus={panelDecisionStatus}
+                isHistory={panelIsHistory}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
                 onRetryStep={(stepId) => retryMutation.mutate(stepId)}
               />
