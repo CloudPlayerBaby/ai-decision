@@ -197,23 +197,54 @@ export function WorkbenchPage() {
     },
   })
 
+  const confirmAbortRef = useRef<AbortController | null>(null)
+
   const confirmMutation = useMutation({
     mutationFn: (selectedOptionId: string) => {
+      confirmAbortRef.current?.abort()
+      const controller = new AbortController()
+      confirmAbortRef.current = controller
       const analysisResultId =
         resultQuery.data?.id ?? pendingResultId ?? ''
-      return confirmAnalysis(id, {
-        analysisResultId,
-        selectedOptionId,
-      })
+      return confirmAnalysis(
+        id,
+        {
+          analysisResultId,
+          selectedOptionId,
+        },
+        { signal: controller.signal },
+      )
     },
     onSuccess: async (data) => {
+      confirmAbortRef.current = null
       message.success('已确认方案并生成报告')
       setConfirmOpen(false)
       await queryClient.invalidateQueries({ queryKey: queryKeys.decisions.all })
       await refreshDecision()
       navigate(`/reports/${data.reportId}`)
     },
+    onError: (error) => {
+      confirmAbortRef.current = null
+      // 用户主动取消：不弹错误
+      if (
+        (typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code?: string }).code === 'ERR_CANCELED') ||
+        (error instanceof DOMException && error.name === 'AbortError') ||
+        (error instanceof Error && /cancel|abort/i.test(error.message))
+      ) {
+        return
+      }
+    },
   })
+
+  const handleConfirmCancel = () => {
+    confirmAbortRef.current?.abort()
+    confirmAbortRef.current = null
+    confirmMutation.reset()
+    setConfirmOpen(false)
+  }
 
   // ── 画布数据（GET /decisions/:id/canvas）─────────────────────
   const canvasQuery = useQuery({
@@ -735,7 +766,7 @@ export function WorkbenchPage() {
         loading={confirmMutation.isPending}
         result={resultQuery.data ?? null}
         preferredOptionId={decision.preferredOptionId}
-        onCancel={() => setConfirmOpen(false)}
+        onCancel={handleConfirmCancel}
         onConfirm={(selectedOptionId) =>
           confirmMutation.mutate(selectedOptionId)
         }
