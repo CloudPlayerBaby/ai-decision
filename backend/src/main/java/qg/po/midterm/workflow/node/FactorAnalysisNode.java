@@ -14,6 +14,7 @@ import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.tools.TavilySearchTool;
 import qg.po.midterm.workflow.tools.CalculatorTool;
+import qg.po.midterm.workflow.tools.ExchangeRateTool;
 
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
     private final ApplicationEventPublisher eventPublisher;
     private final TavilySearchTool tavilySearchTool;
     private final CalculatorTool calculatorTool;
+    private final ExchangeRateTool exchangeRateTool;
 
     @Value("classpath:prompts/factor.st")
     private Resource promptResource;
@@ -68,7 +70,7 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
                     qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
                     chatClient,
                     prompt,
-                    new Object[]{tavilySearchTool, calculatorTool},
+                    new Object[]{tavilySearchTool, calculatorTool, exchangeRateTool},
                     FactorAnalysisResult.class
             );
             FactorAnalysisResult result = execution.value();

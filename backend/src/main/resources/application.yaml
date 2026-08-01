@@ -49,6 +49,10 @@ mybatis-plus:
 tavily:
   api-key: ${TAVILY_API_KEY:}
 
+# 汇率 API 配置
+exchange-rate:
+  api-key: ${EXCHANGERATE_API_KEY:}
+
 # Sentry 错误日志监控配置
 sentry:
   # 必须配置 DSN，否则 Sentry 不会启动。这个链接是从你刚才贴出的官方文档中提取的
