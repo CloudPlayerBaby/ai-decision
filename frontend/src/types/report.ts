@@ -30,3 +30,16 @@ export interface ReportListItem {
   generatedAt: string
   status: ReportStatus
 }
+
+export interface ReportListResponse {
+  list: ReportListItem[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
+
+export interface ReportListQuery {
+  page?: number
+  pageSize?: number
+}

@@ -1,6 +1,7 @@
 package qg.po.midterm.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -19,6 +20,7 @@ import qg.po.midterm.mapper.ReportMapper;
 import qg.po.midterm.service.ReportService;
 import qg.po.midterm.vo.ReportSummaryVO;
 import qg.po.midterm.vo.ReportVO;
+import qg.po.midterm.vo.PageVO;
 import qg.po.midterm.workflow.agent.ReportAgent;
 
 import java.time.LocalDateTime;
@@ -26,6 +28,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -44,6 +47,38 @@ public class ReportServiceImpl implements ReportService {
 
     private static final DateTimeFormatter ISO_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX");
+
+    @Override
+    public PageVO<ReportSummaryVO> listReports(int page, int pageSize) {
+        Long userId = getCurrentUserId();
+        Page<Report> result = reportMapper.selectPage(
+                Page.of(page, pageSize),
+                new LambdaQueryWrapper<Report>()
+                        .inSql(Report::getDecisionId,
+                                "SELECT id FROM decision WHERE user_id = " + userId)
+                        .orderByDesc(Report::getCreatedAt));
+
+        Map<Long, String> decisionTitles = result.getRecords().isEmpty()
+                ? Collections.emptyMap()
+                : decisionMapper.selectList(new LambdaQueryWrapper<Decision>()
+                                .in(Decision::getId, result.getRecords().stream()
+                                        .map(Report::getDecisionId)
+                                        .distinct()
+                                        .toList()))
+                        .stream()
+                        .collect(Collectors.toMap(Decision::getId, Decision::getTitle));
+
+        List<ReportSummaryVO> list = result.getRecords().stream()
+                .map(report -> toSummaryVO(report, decisionTitles.get(report.getDecisionId())))
+                .toList();
+        return PageVO.<ReportSummaryVO>builder()
+                .list(list)
+                .page(page)
+                .pageSize(pageSize)
+                .total(result.getTotal())
+                .totalPages((int) result.getPages())
+                .build();
+    }
 
     @Override
     public ReportVO getReport(String reportId) {
@@ -84,14 +119,7 @@ public class ReportServiceImpl implements ReportService {
                         .orderByDesc(Report::getCreatedAt)
         );
         return reports.stream()
-                .map(r -> ReportSummaryVO.builder()
-                        .id("r_" + r.getId())
-                        .analysisResultId(toAnalysisResultId(r))
-                        .status("READY")
-                        .generatedAt(r.getCreatedAt() != null
-                                ? r.getCreatedAt().atZone(ZoneId.systemDefault()).format(ISO_FORMATTER)
-                                : null)
-                        .build())
+                .map(r -> toSummaryVO(r, decision.getTitle()))
                 .collect(Collectors.toList());
     }
 
@@ -175,6 +203,19 @@ public class ReportServiceImpl implements ReportService {
         return report.getAnalysisResultId() != null
                 ? "ar_" + report.getAnalysisResultId()
                 : null;
+    }
+
+    private ReportSummaryVO toSummaryVO(Report report, String title) {
+        return ReportSummaryVO.builder()
+                .id("r_" + report.getId())
+                .decisionId("d_" + report.getDecisionId())
+                .title(title)
+                .analysisResultId(toAnalysisResultId(report))
+                .status("READY")
+                .generatedAt(report.getCreatedAt() != null
+                        ? report.getCreatedAt().atZone(ZoneId.systemDefault()).format(ISO_FORMATTER)
+                        : null)
+                .build();
     }
 
     private ReportVO toReportVO(Report report) {
