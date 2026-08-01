@@ -16,9 +16,9 @@ import { PagePlaceholder } from '@/components/placeholders/PagePlaceholder'
 import { DecisionStatusTag } from '@/components/common/DecisionStatusTag'
 import { listDecisions, deleteDecision } from '@/services/decision.service'
 import { queryKeys } from '@/services/queryKeys'
-import { isMockEnabled } from '@/services/config'
 import type { DecisionListItem, DecisionStatus } from '@/types/decision'
 import { ApiError, BusinessCode } from '@/types/api'
+import { formatDateTime } from '@/utils/formatDate'
 
 /** 决策记录列表：GET /decisions → 打开 /workbench/:id */
 export function DecisionListPage() {
@@ -51,16 +51,7 @@ export function DecisionListPage() {
   })
 
   return (
-    <PagePlaceholder
-      title="决策记录"
-      description="查看历史推演记录，进入工作台继续分析。"
-      wide
-      hint={
-        isMockEnabled()
-          ? '当前为 Mock 数据（VITE_USE_MOCK=true）'
-          : '已接入 GET /decisions'
-      }
-    >
+    <PagePlaceholder title="决策记录" wide>
       <Space wrap style={{ marginBottom: 16 }}>
         <Button
           type="primary"
@@ -137,7 +128,12 @@ export function DecisionListPage() {
               />
             ),
           },
-          { title: '更新时间', dataIndex: 'updatedAt', width: 200 },
+          {
+            title: '更新时间',
+            dataIndex: 'updatedAt',
+            width: 180,
+            render: (value: string) => formatDateTime(value),
+          },
           {
             title: '操作',
             width: 200,

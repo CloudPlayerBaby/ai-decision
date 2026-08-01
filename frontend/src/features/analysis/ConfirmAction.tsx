@@ -11,22 +11,16 @@ interface Props {
   onCancel: () => void;
 }
 
-export function ConfirmAction({ selectedOptionId, analysisResultId, onConfirm, onCancel }: Props) {
+export function ConfirmAction({ selectedOptionId, onConfirm, onCancel }: Props) {
   return (
     <div className="confirm-action">
       <Result
         icon={<CheckCircleOutlined style={{ color: '#1677ff' }} />}
         title="确认方案"
         subTitle={
-          <>
-            <Text>
-              已选择 <Text strong>{selectedOptionId}</Text>
-            </Text>
-            <br />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              草案：{analysisResultId}
-            </Text>
-          </>
+          <Text>
+            已选择 <Text strong>{selectedOptionId}</Text>
+          </Text>
         }
         extra={[
           <Button key="cancel" onClick={onCancel}>

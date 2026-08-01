@@ -1,4 +1,4 @@
-import { Modal, Radio, Space, Typography, Alert, List, Tag } from 'antd'
+import { Modal, Radio, Space, Typography, Alert, List, Tag, Button } from 'antd'
 import { useEffect, useState } from 'react'
 import type { AnalysisResult } from '@/types/analysis'
 
@@ -42,15 +42,27 @@ export function ConfirmResultModal({
       title="确认方案并生成报告"
       open={open}
       onCancel={onCancel}
-      onOk={() => {
-        if (!selectedOptionId) return
-        onConfirm(selectedOptionId)
-      }}
-      okText="确认并生成报告"
-      confirmLoading={loading}
-      okButtonProps={{ disabled: !selectedOptionId || !result }}
+      // 不用 confirmLoading：antd 在 confirmLoading 时会吞掉取消/关闭
+      footer={
+        <Space>
+          <Button onClick={onCancel}>取消</Button>
+          <Button
+            type="primary"
+            loading={loading}
+            disabled={!selectedOptionId || !result}
+            onClick={() => {
+              if (!selectedOptionId) return
+              onConfirm(selectedOptionId)
+            }}
+          >
+            确认并生成报告
+          </Button>
+        </Space>
+      }
       destroyOnHidden
       width={640}
+      mask={{ closable: !loading }}
+      keyboard={!loading}
     >
       {!result ? (
         <Alert type="info" showIcon message="暂无待确认分析结果" />
@@ -59,9 +71,16 @@ export function ConfirmResultModal({
           <Alert
             type="warning"
             showIcon
-            message={`确认草案 ID：${result.id}`}
-            description="确认后该草案将成为正式结果并生成报告；请确认选中的是当前这份 analysisResultId。"
+            message="确认后将生成正式报告"
+            description="请核对下方方案后确认；确认后该结果将成为正式结论并生成报告。"
           />
+          {loading ? (
+            <Alert
+              type="info"
+              showIcon
+              message="正在生成报告，可点「取消」关闭并中止本次请求"
+            />
+          ) : null}
           <div>
             <Text strong>问题理解</Text>
             <Paragraph type="secondary" style={{ marginBottom: 0 }}>
@@ -78,6 +97,7 @@ export function ConfirmResultModal({
             value={selectedOptionId}
             onChange={(e) => setSelectedOptionId(e.target.value as string)}
             style={{ width: '100%' }}
+            disabled={loading}
           >
             <Space direction="vertical" style={{ width: '100%' }}>
               {result.options.map((option) => (

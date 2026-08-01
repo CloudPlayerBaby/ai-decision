@@ -388,6 +388,8 @@ a {
 
 .page-shell__intro {
   min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .page-shell__body {
@@ -633,6 +635,8 @@ body.is-resizing .resize-handle::before {
 .canvas-panel__hint {
   color: var(--text-muted);
   font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .canvas-panel__empty {
@@ -1183,6 +1187,15 @@ body.is-resizing .resize-handle::before {
   text-align: right;
 }
 
+.canvas-modal__weight-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.5;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* 五维评分 */
 .canvas-modal .ant-rate {
   font-size: 18px;
@@ -1342,6 +1355,8 @@ body.is-resizing .resize-handle::before {
   background: var(--surface-soft);
   border-radius: 6px;
   border: 1px solid var(--surface-soft-border);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .canvas-modal-analysis__section {
@@ -1395,4 +1410,92 @@ body.is-resizing .resize-handle::before {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.6;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* —— 局部推演状态面板（画布内） —— */
+.canvas-partial-status {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  width: 280px;
+  padding: 12px;
+  background: var(--partial-bg);
+  border: 1px solid var(--partial-border);
+  border-radius: 8px;
+  z-index: 10;
+  font-size: 12px;
+}
+
+.canvas-partial-status__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.canvas-partial-status__title {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.canvas-partial-status__nodes {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  text-align: right;
+}
+
+.canvas-partial-status__current {
+  color: var(--decision);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.canvas-partial-status__recent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.canvas-partial-status__step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.canvas-partial-status__step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.canvas-partial-status__step-dot--running {
+  background: #1677ff;
+}
+
+.canvas-partial-status__step-dot--succeeded {
+  background: #52c41a;
+}
+
+.canvas-partial-status__step-dot--failed {
+  background: #ff4d4f;
+}
+
+/* —— 局部推演加载中的节点样式 —— */
+.canvas-node--partial-loading {
+  box-shadow: 0 0 0 2px var(--partial-border) !important;
+}
+
+.canvas-node__partial-spinner {
+  position: absolute;
+  top: 4px;
+  right: 4px;
 }

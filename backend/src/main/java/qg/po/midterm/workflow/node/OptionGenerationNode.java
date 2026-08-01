@@ -19,6 +19,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +40,11 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
     @Value("classpath:prompts/option.st")
     private Resource promptResource;
 
+    @Value("${app.demo.fail-option-generation-once:false}")
+    private boolean failOptionGenerationOnce;
+
+    private final Set<String> demoFailedTaskIds = ConcurrentHashMap.newKeySet();
+
     public record OptionGenerationResult(
             @com.fasterxml.jackson.annotation.JsonPropertyDescription("不超过15个字的简短总结，例如：'已生成3个候选方案'")
             String summary,
@@ -53,6 +60,10 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
         try {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [OptionGeneration] executing for decision: {}", state.getDecisionId());
+
+            if (failOptionGenerationOnce && demoFailedTaskIds.add(state.getTaskId())) {
+                throw new IllegalStateException("Demo failure: option generation failed once for retry verification");
+            }
 
             String understanding = state.getUnderstanding();
             String constraints = state.getConstraints();

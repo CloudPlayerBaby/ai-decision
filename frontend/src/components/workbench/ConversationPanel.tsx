@@ -59,7 +59,6 @@ function statusTag(status: StepStatus) {
 export function ConversationPanel({
   decisionId,
   taskId,
-  pendingResultId,
   hasPendingResult,
   decisionStatus,
 }: WorkbenchSlotProps) {
@@ -161,7 +160,7 @@ export function ConversationPanel({
             type="warning"
             showIcon
             message="有新结果待确认"
-            description={`pendingResultId=${pendingResultId ?? '—'}，确认时必须携带该 analysisResultId。`}
+            description="请确认新的分析结果后再覆盖正式结论。"
             style={{ marginTop: 12 }}
           />
         ) : null}

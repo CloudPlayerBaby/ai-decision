@@ -36,6 +36,13 @@ interface Props {
   onRetryStep?: (stepId: string) => void
 }
 
+function isReusedPartialStep(step: AnalysisStep) {
+  if (step.status !== 'SUCCEEDED') return false
+
+  const text = `${step.summary ?? ''}${step.content ?? ''}`
+  return text.includes('复用') || text.includes('沿用')
+}
+
 export function AnalysisChatPanel({
   userMessage,
   steps,
@@ -43,7 +50,6 @@ export function AnalysisChatPanel({
   connectionStatus,
   options,
   recommendation,
-  analysisResultId,
   selectedOptionId,
   isHistory = false,
   retryable = false,
@@ -57,6 +63,9 @@ export function AnalysisChatPanel({
   const hasResultData = options.length > 0 && recommendation !== null
   const hasHistoryData = isHistory && hasResultData
   const isPartial = decisionStatus === 'PARTIAL_ANALYZING'
+  const visibleSteps = isPartial
+    ? steps.filter((step) => !isReusedPartialStep(step))
+    : steps
 
   const onCompletedRef = useRef(onAllStepsCompleted)
   onCompletedRef.current = onAllStepsCompleted
@@ -123,7 +132,7 @@ export function AnalysisChatPanel({
               </div>
             )}
 
-            {steps
+            {visibleSteps
               .filter((step) => step.status !== 'WAITING')
               .map((step) => (
                 <div key={step.id}>
@@ -175,11 +184,6 @@ export function AnalysisChatPanel({
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         已选择方案: <Text strong>{selectedOptionId}</Text>
                       </Text>
-                      {analysisResultId ? (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          草案: {analysisResultId}
-                        </Text>
-                      ) : null}
                     </Space>
                   }
                 />

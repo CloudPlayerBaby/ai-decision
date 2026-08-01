@@ -14,8 +14,8 @@ import {
   type Connection,
   type NodeProps,
 } from '@xyflow/react'
-import { Modal, Form, Input, Slider, Rate, Button, Space, Divider, Popconfirm, Popover } from 'antd'
-import { DeleteOutlined, CloseOutlined, PlusOutlined } from '@ant-design/icons'
+import { Modal, Form, Input, Slider, Rate, Button, Space, Divider, Popconfirm, Popover, Spin } from 'antd'
+import { DeleteOutlined, CloseOutlined, PlusOutlined, LoadingOutlined } from '@ant-design/icons'
 import '@xyflow/react/dist/style.css'
 import { useLayoutStore } from '../../stores/layoutStore'
 import type { CanvasData, CanvasViewModel } from '../../types/canvas'
@@ -28,9 +28,17 @@ import type {
   FactorFlowData,
   OptionFlowData,
 } from '../../types/flow'
-import { toFlowNodes, buildCanvasData } from '../../utils/canvasMapper'
+import type { AnalysisStep } from '../../types/analysis'
+import { toFlowNodes, buildCanvasData, rebalanceWeights } from '../../utils/canvasMapper'
 import { applyDagreLayout } from '../../utils/canvasLayout'
 import { CanvasActionsContext, useCanvasActions } from '../../contexts/CanvasActionsContext'
+import { createContext, useContext } from 'react'
+
+// ── 局部推演上下文 ─────────────────────────────────────────────
+const PartialAnalysisContext = createContext<{
+  partialAnalysisInfo: PartialAnalysisInfo | null | undefined
+  partialSteps: AnalysisStep[] | undefined
+}>({ partialAnalysisInfo: null, partialSteps: undefined })
 
 // ── 节点组件 Props 窄类型 ──────────────────────────────────────
 // NodeProps 接受 Node<NodeData>，传 FlowNode 具名类型满足约束
@@ -61,14 +69,17 @@ function DecisionNode({ data }: DecisionNodeProps) {
 }
 
 /** 影响因素节点 */
-function FactorNode({ data }: FactorNodeProps) {
+function FactorNode({ data, id }: FactorNodeProps) {
+  const { partialAnalysisInfo } = useContext(PartialAnalysisContext)
+  const isAffected = partialAnalysisInfo?.affectedNodeIds.includes(id) ?? false
   const weightPercent = Math.round(data.weight * 100)
   return (
-    <div className="canvas-node canvas-node--factor">
+    <div className={`canvas-node canvas-node--factor${isAffected ? ' canvas-node--partial-loading' : ''}`}>
       <Handle type="target" position={Position.Left} />
       <div className="canvas-node__label">
         <span className="canvas-node__factor-weight">{weightPercent}%</span>
         <span>关键因素</span>
+        {isAffected && <Spin size="small" indicator={<LoadingOutlined spin />} style={{ marginLeft: 4 }} />}
       </div>
       <div className="canvas-node__title">{data.label}</div>
       {data.description ? (
@@ -81,8 +92,11 @@ function FactorNode({ data }: FactorNodeProps) {
 
 /** 候选方案节点 */
 function OptionNode({ data, id }: OptionNodeProps) {
-  const { scores, pros, cons, risks, isRecommended } = data
+  const { partialAnalysisInfo } = useContext(PartialAnalysisContext)
+  const isAffected = partialAnalysisInfo?.affectedNodeIds.includes(id) ?? false
   const { openOptionAnalysis } = useCanvasActions()
+
+  const { scores, pros, cons, risks, isRecommended } = data
 
   const hasAnalysis = pros.length > 0 || cons.length > 0 || risks.length > 0
   const firstPros = pros[0]
@@ -116,8 +130,9 @@ function OptionNode({ data, id }: OptionNodeProps) {
   )
 
   return (
-    <div className={`canvas-node canvas-node--option${isRecommended ? ' canvas-node--option-recommended' : ''}`}>
+    <div className={`canvas-node canvas-node--option${isRecommended ? ' canvas-node--option-recommended' : ''}${isAffected ? ' canvas-node--partial-loading' : ''}`}>
       {isRecommended && <span className="canvas-node__badge canvas-node__badge--corner">推荐</span>}
+      {isAffected && <Spin size="small" indicator={<LoadingOutlined spin />} className="canvas-node__partial-spinner" />}
       <Handle type="target" position={Position.Left} />
       <div className="canvas-node__label">
         <span>候选方案</span>
@@ -181,6 +196,13 @@ function OptionNode({ data, id }: OptionNodeProps) {
 // Tab key 类型
 type OptionModalTab = 'settings' | 'analysis'
 
+// ── 局部推演状态（由 WorkbenchPage 管理）────────────────────────
+interface PartialAnalysisInfo {
+  taskId: string
+  affectedNodeIds: string[]
+  status: 'RUNNING'
+}
+
 export interface DecisionCanvasPanelProps {
   /**
    * 画布展示模型。
@@ -191,6 +213,8 @@ export interface DecisionCanvasPanelProps {
   viewModel?: CanvasViewModel
   onDirtyChange?: (dirty: boolean) => void
   onCanvasChange?: (canvas: CanvasData) => void
+  /** 保存权重：触发保存画布 + 自动局部重推 */
+  onWeightSave?: (canvas: CanvasData) => void
   /** 以下为 WorkbenchSlot 契约槽位 props（DecisionCanvasPanel 目前不直接使用，由父组件按需传递） */
   decisionId?: string
   taskId?: string | null
@@ -198,6 +222,10 @@ export interface DecisionCanvasPanelProps {
   hasPendingResult?: boolean
   decisionStatus?: string
   onRequestRefresh?: () => void
+  /** 局部推演信息（WorkbenchPage 管理） */
+  partialAnalysisInfo?: PartialAnalysisInfo | null
+  /** 当前 SSE 步骤（直接复用 useAnalysisStream 返回值） */
+  partialSteps?: AnalysisStep[]
 }
 
 // ── 辅助函数 ─────────────────────────────────────────────────
@@ -277,7 +305,14 @@ function DecisionCanvasPanelEmpty() {
 
 // ── 内层：包含所有 hooks，hooks 永远在 return 之前调用 ────────
 function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
-  const { viewModel, onDirtyChange, onCanvasChange } = props
+  const {
+    viewModel,
+    onDirtyChange,
+    onCanvasChange,
+    onWeightSave,
+    partialAnalysisInfo,
+    partialSteps,
+  } = props
 
   const vm = viewModel as import('../../types/canvas').CanvasViewModel
   const { canvas, factorsDetail = {}, optionsDetail = {}, recommendedOptionId = null } = vm
@@ -327,16 +362,21 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   const onDirtyChangeRef = useRef(onDirtyChange)
   const onCanvasChangeRef = useRef(onCanvasChange)
+  const onWeightSaveRef = useRef(onWeightSave)
   // eslint-disable-next-line react-hooks/static-lifecycle
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
     onCanvasChangeRef.current = onCanvasChange
+    onWeightSaveRef.current = onWeightSave
   })
 
   useEffect(() => {
     console.log('[CanvasPanel] effect triggered: nodes/edges changed')
     if (!didMount.current) {
       didMount.current = true
+      // 首次渲染时，初始化 lastSyncedSignature，使其与 initialSignature 一致
+      // 这样刷新后，如果没有用户编辑，保存按钮保持可点击状态
+      lastSyncedSignature.current = initialSignature.current
       return
     }
 
@@ -366,6 +406,11 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   nodesRef.current = nodes
   edgesRef.current = edges
 
+  // 跟踪 factor 节点的初始权重（用于判断用户是否真的修改了权重）
+  const initialWeightRef = useRef<number>(0.1)
+  // 跟踪当前是否正在编辑 factor（用于区分"保存权重"和"保存修改"按钮）
+  const isEditingFactorRef = useRef(false)
+
   // Modal 状态
   const [modalOpen, setModalOpen] = useState(false)
   const [editingNode, setEditingNode] = useState<FlowNode | null>(null)
@@ -376,13 +421,11 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   // 跟踪是否有本地编辑（用于在 viewModel 变化时决定是否覆盖）
   const hasLocalEdit = useRef(false)
+  // 跟踪上一次同步的 signature，用于判断后端数据是否真正变化
+  const lastSyncedSignature = useRef<string | null>(null)
 
   // 监听 viewModel 变化，当后端 canvas 更新时同步到 ReactFlow
-  // 只有在没有本地编辑时才用 viewModel 更新，否则保留用户编辑
   useEffect(() => {
-    if (hasLocalEdit.current) {
-      return
-    }
     // 构建 viewModel 对应的节点和边
     const newRawNodes = toFlowNodes(canvas.nodes, {
       factorsDetail,
@@ -397,21 +440,34 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       relation: e.relation ?? '',
     })) as FlowEdge[]
 
-    // 应用 dagre 布局
+    // 应用 dagre 水平布局（从左到右：决策 → 因素 → 方案）
     const { nodes: newNodes, edges: newEdges } = applyDagreLayout(newRawNodes, newRawEdges, {
       direction: 'LR',
       rankSeparation: 200,
       nodeSeparation: 80,
     })
 
-    const vmSignature = JSON.stringify(buildCanvasData(newNodes, newEdges))
-    const currentSignature = JSON.stringify(buildCanvasData(nodes, edges))
+    const factorsDetailKeys = Object.keys(factorsDetail).join(',')
+    const optionsDetailKeys = Object.keys(optionsDetail).join(',')
+    // 计算后端数据的 signature（不含用户拖动后的位置）
+    const vmSignature = JSON.stringify({ ...buildCanvasData(newNodes, newEdges), factorsDetailKeys, optionsDetailKeys })
 
-    if (vmSignature !== currentSignature) {
-      console.log('[CanvasPanel] viewModel changed, syncing to ReactFlow with dagre layout')
-      setNodes(newNodes)
-      setEdges(newEdges)
+    // 如果后端数据没有变化，跳过同步
+    if (vmSignature === lastSyncedSignature.current) {
+      return
     }
+
+    // 后端数据变化了，检查是否有本地编辑
+    if (hasLocalEdit.current) {
+      console.log('[CanvasPanel] viewModel changed but has local edits, skipping sync')
+      return
+    }
+
+    // 没有本地编辑，执行同步
+    console.log('[CanvasPanel] viewModel changed, syncing nodes/edges')
+    lastSyncedSignature.current = vmSignature
+    setNodes(newNodes)
+    setEdges(newEdges)
   }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo])
 
   // openOptionAnalysis：在 Context 内部实现，可访问所有内部状态
@@ -441,18 +497,22 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         if (node.type === 'factor') {
           const factorData = node.data as FactorFlowData
           setWeightValue(factorData.weight)
+          initialWeightRef.current = factorData.weight
+          isEditingFactorRef.current = !isNew
           form.setFieldsValue({
             label: factorData.label,
             weight: factorData.weight,
           })
         } else if (node.type === 'option') {
           const optionData = node.data as OptionFlowData
+          isEditingFactorRef.current = false
           form.setFieldsValue({
             label: optionData.label,
             ...optionData.scores,
           })
         }
       } else {
+        isEditingFactorRef.current = false
         form.resetFields()
         form.setFieldsValue({
           cost: 3,
@@ -469,27 +529,57 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const closeModal = useCallback(() => {
     setModalOpen(false)
     setEditingNode(null)
+    isEditingFactorRef.current = false
   }, [])
 
-  // 提交表单：只更新 label / weight / scores，description 和 pros/cons/risks 不可持久化
-  const submitForm = useCallback(() => {
-    form.validateFields().then((values) => {
+  // 处理"保存权重"：比例重分配 + 保存画布 + 自动局部重推
+  const handleSaveWithWeightRebalance = useCallback(
+    (_label: string, newWeight: number) => {
+      if (!editingNode || editingNode.type !== 'factor') return
+
+      const allFactorNodes = nodesRef.current.filter((n) => n.type === 'factor')
+      const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, newWeight)
+
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.type !== 'factor') return n
+          const updated = rebalanced.find((r) => r.id === n.id)
+          return updated ?? n
+        }),
+      )
+
+      setModalOpen(false)
+      setEditingNode(null)
+      isEditingFactorRef.current = false
+
+      // 通知父组件：已更新全部因素权重，触发保存+局部重推
+      const updatedCanvas = buildCanvasData(
+        rebalanced as FlowNode[],
+        edgesRef.current,
+      )
+      onWeightSaveRef.current?.(updatedCanvas)
+    },
+    [editingNode, setNodes],
+  )
+
+  // 处理普通保存：仅更新当前节点（label / scores）
+  const handleSaveNormal = useCallback(
+    (values: Record<string, unknown>) => {
       if (!editingNode) return
+      const label = String(values.label ?? '')
 
       if (editingNode.type === 'factor') {
         if (isNewNode) {
-          // 新建：仅在确认时才加入节点列表
           const newNode: FlowNode = {
             ...editingNode,
             data: {
               ...editingNode.data,
-              label: values.label,
+              label,
               weight: weightValue,
             },
           }
           setNodes((prev) => [...prev, newNode])
         } else {
-          // 编辑：更新现有节点
           setNodes((prev) =>
             prev.map((n) =>
               n.id === editingNode.id
@@ -497,7 +587,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                   ...n,
                   data: {
                     ...n.data,
-                    label: values.label,
+                    label,
                     weight: weightValue,
                   },
                 } as FactorFlowNode)
@@ -511,13 +601,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             ...editingNode,
             data: {
               ...editingNode.data,
-              label: values.label,
+              label,
               scores: {
-                cost: values.cost,
-                time: values.time,
-                benefit: values.benefit,
-                risk: values.risk,
-                feasibility: values.feasibility,
+                cost: Number(values.cost) || 3,
+                time: Number(values.time) || 3,
+                benefit: Number(values.benefit) || 3,
+                risk: Number(values.risk) || 3,
+                feasibility: Number(values.feasibility) || 3,
               },
             },
           }
@@ -530,13 +620,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                   ...n,
                   data: {
                     ...n.data,
-                    label: values.label,
+                    label,
                     scores: {
-                      cost: values.cost,
-                      time: values.time,
-                      benefit: values.benefit,
-                      risk: values.risk,
-                      feasibility: values.feasibility,
+                      cost: Number(values.cost) || 3,
+                      time: Number(values.time) || 3,
+                      benefit: Number(values.benefit) || 3,
+                      risk: Number(values.risk) || 3,
+                      feasibility: Number(values.feasibility) || 3,
                     },
                   },
                 } as OptionFlowNode)
@@ -548,8 +638,26 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
       setModalOpen(false)
       setEditingNode(null)
+      isEditingFactorRef.current = false
+    },
+    [editingNode, isNewNode, weightValue, setNodes],
+  )
+
+  // 提交表单：根据是否编辑 factor 权重选择不同处理逻辑
+  const submitForm = useCallback(() => {
+    form.validateFields().then((values) => {
+      if (!editingNode) return
+
+      // 正在编辑已有 factor → 使用权重重分配路径
+      if (editingNode.type === 'factor' && !isNewNode) {
+        handleSaveWithWeightRebalance(values.label as string, weightValue)
+        return
+      }
+
+      // 其他情况：普通保存（仅 label / scores）
+      handleSaveNormal(values)
     })
-  }, [editingNode, isNewNode, weightValue, form, setNodes])
+  }, [editingNode, isNewNode, weightValue, form, handleSaveWithWeightRebalance, handleSaveNormal])
 
   const deleteNode = useCallback(
     (nodeId: string) => {
@@ -641,10 +749,18 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     option: OptionNode,
   }
 
+  // 派生局部推演状态：取最近 3 个非 WAITING 步骤
+  const recentSteps = (partialSteps ?? [])
+    .filter((s) => s.status !== 'WAITING')
+    .slice(-3)
+  const currentStep = partialSteps?.find((s) => s.status === 'RUNNING')
+  const partialFailed = partialSteps?.some((s) => s.status === 'FAILED')
+
   return (
-    <CanvasActionsContext.Provider value={canvasActions}>
-      <div className="canvas-panel">
-        <div className="canvas-panel__toolbar">
+    <PartialAnalysisContext.Provider value={{ partialAnalysisInfo, partialSteps: partialSteps ?? [] }}>
+      <CanvasActionsContext.Provider value={canvasActions}>
+        <div className="canvas-panel">
+          <div className="canvas-panel__toolbar">
           <Space>
             <Button size="small" icon={<PlusOutlined />} onClick={addFactor}>
               新增因素
@@ -709,6 +825,36 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             </span>
           </div>
         </div>
+
+        {/* 局部推演状态面板 */}
+        {partialAnalysisInfo && (
+          <div className="canvas-partial-status">
+            <div className="canvas-partial-status__header">
+              <Spin size="small" indicator={<LoadingOutlined spin />} />
+              <span className="canvas-partial-status__title">
+                {partialFailed ? '局部推演失败' : '局部推演中'}
+              </span>
+              <span className="canvas-partial-status__nodes">
+                影响节点：{partialAnalysisInfo.affectedNodeIds.join(', ')}
+              </span>
+            </div>
+            {currentStep && (
+              <div className="canvas-partial-status__current">
+                当前步骤：{currentStep.displayName}
+              </div>
+            )}
+            {recentSteps.length > 0 && (
+              <div className="canvas-partial-status__recent">
+                {recentSteps.map((step) => (
+                  <div key={step.id} className="canvas-partial-status__step">
+                    <span className={`canvas-partial-status__step-dot canvas-partial-status__step-dot--${step.status.toLowerCase()}`} />
+                    <span>{step.displayName}: {step.summary ?? step.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 节点上下文栏 */}
         {editingNode && modalOpen && (
@@ -779,6 +925,15 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                         <span className="canvas-modal__weight-value">
                           {Math.round(weightValue * 100)}%
                         </span>
+                      </div>
+                      <div className="canvas-modal__weight-hint">
+                        当前总权重：100%
+                        {!isNewNode && (
+                          <span> · 修改后其余因素将按比例自动调整</span>
+                        )}
+                        {isNewNode && (
+                          <span> · 新增因素将参与权重比例分配</span>
+                        )}
                       </div>
                     </Form.Item>
                     {/* description 为只读展示，不进 Form，不在 submitForm 中更新 */}
@@ -902,9 +1057,20 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                   </Popconfirm>
                   <Space>
                     <Button onClick={closeModal}>取消</Button>
-                    <Button type="primary" onClick={submitForm}>
-                      保存修改
-                    </Button>
+                    {editingNode.type === 'factor' && !isNewNode ? (
+                      <>
+                        <Button onClick={() => { form.validateFields().then(handleSaveNormal) }}>
+                          仅保存名称
+                        </Button>
+                        <Button type="primary" onClick={submitForm}>
+                          保存权重
+                        </Button>
+                      </>
+                    ) : (
+                      <Button type="primary" onClick={submitForm}>
+                        保存修改
+                      </Button>
+                    )}
                   </Space>
                 </div>
               </Form>
@@ -913,6 +1079,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         </Modal>
       </div>
     </CanvasActionsContext.Provider>
+    </PartialAnalysisContext.Provider>
   )
 }
 

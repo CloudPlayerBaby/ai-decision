@@ -5,7 +5,7 @@ const { Title, Paragraph, Text } = Typography
 
 interface PagePlaceholderProps {
   title: string
-  description: string
+  description?: string
   hint?: string
   children?: ReactNode
   /** 更宽内容区（表格页） */
@@ -23,12 +23,14 @@ export function PagePlaceholder({
   return (
     <div className={`page-shell${wide ? ' page-shell--wide' : ''}`}>
       <div className="page-shell__intro">
-        <Title level={3} style={{ marginBottom: 8 }}>
+        <Title level={3} style={{ marginBottom: description || hint ? 8 : 0 }}>
           {title}
         </Title>
-        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          {description}
-        </Paragraph>
+        {description ? (
+          <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+            {description}
+          </Paragraph>
+        ) : null}
         {hint ? (
           <Text type="secondary" style={{ fontSize: 12 }}>
             {hint}
