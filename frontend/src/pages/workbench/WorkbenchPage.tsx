@@ -48,6 +48,22 @@ import { isMockEnabled } from '@/services/config'
 
 const { Text } = Typography
 
+function buildPartialChangedNodeIds(
+  changedNodeIds: string[] | undefined,
+  canvas?: import('@/types/canvas').Canvas,
+) {
+  const businessNodeIds = new Set(
+    canvas?.nodes
+      .filter((node) => node.type === 'factor' || node.type === 'option')
+      .map((node) => node.id) ?? [],
+  )
+
+  return [...new Set(changedNodeIds ?? [])].filter((nodeId) => {
+    if (!nodeId || nodeId === 'root') return false
+    return businessNodeIds.size === 0 || businessNodeIds.has(nodeId)
+  })
+}
+
 /**
  * 推演工作台：中间画布(A) + 右侧推演对话(B)。
  * C 负责详情恢复、开始推演、确认方案、状态标签与三栏挂载契约。
@@ -129,6 +145,7 @@ export function WorkbenchPage() {
       setActiveResultId(event.analysisResultId)
       forceBackendData.current = true
       setPartialAnalysisInfo(null) // 局部推演结束，清除状态
+      setPendingChangedNodeIds([])
 
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
@@ -197,23 +214,54 @@ export function WorkbenchPage() {
     },
   })
 
+  const confirmAbortRef = useRef<AbortController | null>(null)
+
   const confirmMutation = useMutation({
     mutationFn: (selectedOptionId: string) => {
+      confirmAbortRef.current?.abort()
+      const controller = new AbortController()
+      confirmAbortRef.current = controller
       const analysisResultId =
         resultQuery.data?.id ?? pendingResultId ?? ''
-      return confirmAnalysis(id, {
-        analysisResultId,
-        selectedOptionId,
-      })
+      return confirmAnalysis(
+        id,
+        {
+          analysisResultId,
+          selectedOptionId,
+        },
+        { signal: controller.signal },
+      )
     },
     onSuccess: async (data) => {
+      confirmAbortRef.current = null
       message.success('已确认方案并生成报告')
       setConfirmOpen(false)
       await queryClient.invalidateQueries({ queryKey: queryKeys.decisions.all })
       await refreshDecision()
       navigate(`/reports/${data.reportId}`)
     },
+    onError: (error) => {
+      confirmAbortRef.current = null
+      // 用户主动取消：不弹错误
+      if (
+        (typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code?: string }).code === 'ERR_CANCELED') ||
+        (error instanceof DOMException && error.name === 'AbortError') ||
+        (error instanceof Error && /cancel|abort/i.test(error.message))
+      ) {
+        return
+      }
+    },
   })
+
+  const handleConfirmCancel = () => {
+    confirmAbortRef.current?.abort()
+    confirmAbortRef.current = null
+    confirmMutation.reset()
+    setConfirmOpen(false)
+  }
 
   // ── 画布数据（GET /decisions/:id/canvas）─────────────────────
   const canvasQuery = useQuery({
@@ -352,7 +400,9 @@ export function WorkbenchPage() {
       clearCanvasCache(id) // 清除旧缓存，刷新时走后端
 
       // 保存 changedNodeIds，不自动触发局部重推
-      setPendingChangedNodeIds(data.changedNodeIds ?? [])
+      setPendingChangedNodeIds(
+        buildPartialChangedNodeIds(data.changedNodeIds, data.canvas),
+      )
 
       // 保存完成后解锁导航
       if (leaveAction === 'save') {
@@ -396,7 +446,10 @@ export function WorkbenchPage() {
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
-      const changedIds = data.changedNodeIds ?? []
+      const changedIds = buildPartialChangedNodeIds(
+        data.changedNodeIds,
+        data.canvas,
+      )
       setPendingChangedNodeIds(changedIds)
 
       if (changedIds.length > 0) {
@@ -467,11 +520,11 @@ export function WorkbenchPage() {
 
   const retryMutation = useMutation({
     mutationFn: (stepId: string) =>
-      retryFailedStep(taskId!, stepId),
+      retryFailedStep(streamTaskId!, stepId),
     onSuccess: async () => {
       message.success('步骤已重新入队，请等待推演更新')
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.analysisTasks.detail(taskId!),
+        queryKey: queryKeys.analysisTasks.detail(streamTaskId!),
       })
     },
     onError: () => {
@@ -554,6 +607,13 @@ export function WorkbenchPage() {
     decision.status === 'WAITING_CONFIRM' ||
     Boolean(decision.hasPendingResult) ||
     (animCompleted && decision.status !== 'COMPLETED')
+  const isLocalPartialAnalyzing = partialAnalysisInfo !== null
+  const panelDecisionStatus = isLocalPartialAnalyzing
+    ? 'PARTIAL_ANALYZING'
+    : decision.status
+  const panelIsHistory =
+    !isLocalPartialAnalyzing &&
+    (decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM')
 
   return (
     <div className="workbench">
@@ -640,7 +700,12 @@ export function WorkbenchPage() {
                 }
                 loading={startPartialAnalysisMutation.isPending}
                 onClick={() => {
-                  startPartialAnalysisMutation.mutate(pendingChangedNodeIds)
+                  startPartialAnalysisMutation.mutate(
+                    buildPartialChangedNodeIds(
+                      pendingChangedNodeIds,
+                      canvasRef.current ?? activeCanvas,
+                    ),
+                  )
                 }}
               >
                 {startPartialAnalysisMutation.isPending ? '局部重推中…' : '局部重推'}
@@ -730,8 +795,8 @@ export function WorkbenchPage() {
                 selectedOptionId={selectedOptionId}
                 retryable={retryable}
                 failedStepId={failedStepId}
-                decisionStatus={decision.status}
-                isHistory={decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM'}
+                decisionStatus={panelDecisionStatus}
+                isHistory={panelIsHistory}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
                 onRetryStep={(stepId) => retryMutation.mutate(stepId)}
               />
@@ -745,7 +810,7 @@ export function WorkbenchPage() {
         loading={confirmMutation.isPending}
         result={resultQuery.data ?? null}
         preferredOptionId={decision.preferredOptionId}
-        onCancel={() => setConfirmOpen(false)}
+        onCancel={handleConfirmCancel}
         onConfirm={(selectedOptionId) =>
           confirmMutation.mutate(selectedOptionId)
         }

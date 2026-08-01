@@ -85,6 +85,7 @@ export async function setPreferredOption(
 export async function confirmAnalysis(
   decisionId: string,
   body: ConfirmAnalysisRequest,
+  options?: { signal?: AbortSignal },
 ): Promise<ConfirmAnalysisResponse> {
   if (isMockEnabled()) {
     return delay({
@@ -98,6 +99,7 @@ export async function confirmAnalysis(
   return postData<ConfirmAnalysisResponse>(
     `/decisions/${decisionId}/confirm`,
     body,
+    { signal: options?.signal },
   )
 }
 
