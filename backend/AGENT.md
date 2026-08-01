@@ -19,7 +19,7 @@
 | AI 编排 | LangGraph4j 1.8.20（图状态机） |
 | AI 调用 | Spring AI 2.0 + DeepSeek API（OpenAI 兼容） |
 | 数据库 | MySQL 8.0 + Flyway 迁移 |
-| 缓存/状态 | Redis（LangGraph4j Checkpoint 持久化 + SSE Ticket + 通用缓存） |
+| 缓存/状态 | Redis（SSE Ticket + 事件序号 + 通用缓存） |
 | 认证 | JWT（java-jwt 4.4.0）+ BCrypt |
 | API 文档 | SpringDoc OpenAPI 2.7.0 |
 
@@ -206,11 +206,10 @@ export JWT_SECRET=your-secret
 
 ## 11. Redis 集成
 
-### 三大用途
+### 两大用途
 
 | 用途 | 组件 | 说明 |
 |------|------|------|
-| **Checkpoint 持久化** | `RedisSaver` (LangGraph4j) | AI 图工作流节点执行完立即落盘，重启可恢复（`retryStep` 依赖此能力） |
 | **SSE Ticket** | `TaskRuntimeRepository` + `StringRedisTemplate` | 一次性 Ticket 带 TTL 存 Redis，支持多实例共享（SseEmitter 本身在内存，不可序列化） |
 | **通用缓存** | `RedisTemplate<String, Object>` (JSON) | 预留 Spring Data Redis 模板，目前未使用 `@Cacheable` |
 
@@ -218,8 +217,6 @@ export JWT_SECRET=your-secret
 
 | 文件 | 职责 |
 |------|------|
-| `config/RedisConfig.java` | 注册 4 个 Bean：RedissonClient、RedisSaver、RedisTemplate、StringRedisTemplate |
-| `config/WorkflowConfig.java` | 后备 MemorySaver（Redis 不可用时的降级） |
 | `repository/TaskRuntimeRepository.java` | Redis-backed SSE Ticket 创建/消费 + 内存 SseEmitter 连接管理 |
 | `resources/application.yaml` | `spring.data.redis.*` 连接参数 + Lettuce 连接池 |
 | `docker-compose.yml` | Redis 7-alpine 服务，AOF 持久化 |
@@ -236,7 +233,6 @@ sse_event_id:<taskId>   # 最近一次 SSE 事件 ID（覆盖写入）
 
 - Redis 连接参数全部支持环境变量覆盖（`REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`）
 - Lettuce 连接池：max-active=8, max-idle=8, min-idle=2, timeout=3s
-- Redisson 使用单机模式，若将来迁移集群改 `useClusterServers()` 即可
 
 ---
 

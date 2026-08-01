@@ -14,6 +14,7 @@ import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 import qg.po.midterm.workflow.tools.CalculatorTool;
+import qg.po.midterm.workflow.tools.ExchangeRateTool;
 
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
     private final CalculatorTool calculatorTool;
+    private final ExchangeRateTool exchangeRateTool;
 
     @Value("classpath:prompts/option.st")
     private Resource promptResource;
@@ -74,7 +76,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
                     qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
                     chatClient,
                     prompt,
-                    new Object[]{calculatorTool},
+                    new Object[]{calculatorTool, exchangeRateTool},
                     OptionGenerationResult.class
             );
             OptionGenerationResult result = execution.value();

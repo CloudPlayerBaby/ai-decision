@@ -24,6 +24,10 @@ export interface UseAnalysisStreamReturn {
   taskFailed: TaskFailedEvent | null;
   connectionStatus: ConnectionStatus;
   progress: number;
+  /** 当前任务失败是否可重试（来自 REST 恢复或 SSE task_failed 事件） */
+  retryable: boolean;
+  /** 当前任务失败的步骤 ID，仅当 retryable 为 true 时有意义 */
+  failedStepId: string | null;
 }
 
 export function useAnalysisStream({
@@ -37,6 +41,9 @@ export function useAnalysisStream({
   const [taskFailed, setTaskFailed] = useState<TaskFailedEvent | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
   const [progress, setProgress] = useState(0);
+  const [retryable, setRetryable] = useState(false);
+  const [failedStepId, setFailedStepId] = useState<string | null>(null);
+  const retryCountRef=useRef(0);
 
   const mountedRef = useRef(true);
   const esRef = useRef<EventSource | null>(null);
@@ -66,12 +73,25 @@ export function useAnalysisStream({
 
     if (!taskId) {
       setSteps([]);
+      setToolCalls([]);
+      setResultReady(null);
+      setTaskFailed(null);
       setProgress(0);
       setConnectionStatus('idle');
       closeEventSource();
       clearTimer();
       return;
     }
+
+    // taskId 变化：重置步骤和结果，等待新连接
+    setSteps([]);
+    setToolCalls([]);
+    setResultReady(null);
+    setTaskFailed(null);
+    setProgress(0);
+    setRetryable(false);
+    setFailedStepId(null);
+    retryCountRef.current=0;
 
     let cancelled = false;
 
@@ -95,6 +115,11 @@ export function useAnalysisStream({
       setSteps(task.steps);
       setProgress(task.progress);
 
+      if (task.error) {
+        setRetryable(task.error.retryable);
+        setFailedStepId(task.error.failedStepId ?? null);
+      }
+
       let sseUrl: string;
       try {
         const ticket = await createSseTicket(taskId!);
@@ -115,6 +140,7 @@ export function useAnalysisStream({
       es.onopen = () => {
         if (!mountedRef.current) return;
         setConnectionStatus('connected');
+        retryCountRef.current = 0;
       };
 
       es.addEventListener('step_update', (event: MessageEvent) => {
@@ -203,6 +229,8 @@ export function useAnalysisStream({
 
         setTaskFailed(data);
         onTaskFailedRef.current?.(data);
+        setRetryable(data.retryable);
+        setFailedStepId(data.failedStepId ?? null);
         closeEventSource();
       });
 
@@ -214,10 +242,14 @@ export function useAnalysisStream({
 
         setConnectionStatus('reconnecting');
         clearTimer();
+
+        retryCountRef.current+=1;
+        const base=Math.min(1000 * Math.pow(2,retryCountRef.current), 30000);
+        const delay=base/2+Math.random()*base/2;
         timerRef.current = setTimeout(() => {
           if (!mountedRef.current || cancelled) return;
           connect();
-        }, 3000);
+        }, delay);
       };
     }
 
@@ -238,5 +270,7 @@ export function useAnalysisStream({
     taskFailed,
     connectionStatus,
     progress,
+    retryable,
+    failedStepId,
   };
 }

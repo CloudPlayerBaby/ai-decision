@@ -17,7 +17,7 @@ import qg.po.midterm.service.DecisionService;
 import qg.po.midterm.vo.*;
 
 /**
- * 决策问题接口（API v2.0 第 6、9、10 节）
+ * 决策问题接口：CRUD、结果与确认、画布与局部重推（PRD 第 6、9、10 节）
  */
 @RestController
 @RequestMapping("/api/v1/decisions")
@@ -30,7 +30,8 @@ public class DecisionController {
     // ==================== 第 6 节：决策问题 CRUD ====================
 
     /**
-     * 6.1 创建决策问题，成功返回 HTTP 201
+     * 6.1 创建决策问题
+     * <p>成功返回 HTTP 201；title 1-100 字，goal 1-1000 字。
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -40,7 +41,8 @@ public class DecisionController {
     }
 
     /**
-     * 6.2 分页列表，支持按状态和关键词筛选
+     * 6.2 分页查询决策列表
+     * <p>支持按状态和关键词筛选；page 从 1 开始，pageSize 默认 10 最大 100。
      */
     @GetMapping
     public Result<PageVO<DecisionVO>> list(
@@ -54,6 +56,7 @@ public class DecisionController {
 
     /**
      * 6.3 决策问题详情
+     * <p>返回决策、最新任务摘要、已确认/待确认结果摘要和报告 ID，前端刷新时以此恢复页面。
      */
     @GetMapping("/{decisionId}")
     public Result<DecisionDetailVO> getDetail(@PathVariable String decisionId) {
@@ -63,6 +66,7 @@ public class DecisionController {
 
     /**
      * 6.4 删除决策问题
+     * <p>仅 PENDING、WAITING_CONFIRM、COMPLETED、FAILED 状态可删除；推演中返回 409。
      */
     @DeleteMapping("/{decisionId}")
     public Result<Void> delete(@PathVariable String decisionId) {
@@ -74,6 +78,7 @@ public class DecisionController {
 
     /**
      * 9.1 获取待确认分析结果
+     * <p>仅返回已通过校验的结果；resultId 不传时优先返回待确认结果。
      */
     @GetMapping("/{decisionId}/analysis-result")
     public Result<AnalysisResultVO> getAnalysisResult(
@@ -84,7 +89,8 @@ public class DecisionController {
     }
 
     /**
-     * 9.2 选择倾向方案（不生成报告）
+     * 9.2 选择倾向方案
+     * <p>仅保存用户倾向，不生成正式报告。
      */
     @PutMapping("/{decisionId}/preferred-option")
     public Result<Void> setPreferredOption(
@@ -96,6 +102,7 @@ public class DecisionController {
 
     /**
      * 9.3 确认分析并生成报告
+     * <p>仅允许确认 status=PENDING_CONFIRM 的草案，成功后该草案成为正式结果并生成报告。
      */
     @PostMapping("/{decisionId}/confirm")
     public Result<ConfirmResultVO> confirm(
@@ -109,6 +116,7 @@ public class DecisionController {
 
     /**
      * 10.1 获取决策画布
+     * <p>返回画布节点与边，数据独立于前端图形库。
      */
     @GetMapping("/{decisionId}/canvas")
     public Result<Canvas> getCanvas(@PathVariable String decisionId) {
@@ -117,7 +125,8 @@ public class DecisionController {
     }
 
     /**
-     * 10.2 保存画布编辑，返回变更节点ID
+     * 10.2 保存画布编辑
+     * <p>前端传入完整 nodes+edges 覆盖保存，返回 changedNodeIds 作为局部重推入参。
      */
     @PutMapping("/{decisionId}/canvas")
     public Result<SaveCanvasVO> saveCanvas(

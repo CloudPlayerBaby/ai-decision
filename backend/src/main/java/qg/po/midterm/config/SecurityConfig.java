@@ -23,7 +23,7 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(withDefaults())
@@ -34,6 +34,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/v1/analysis-tasks/*/events"
                         ).permitAll()
+                        // TODO 生产环境建议关闭
                         // Swagger 页面和 OpenAPI 文档不需要登录即可访问
                         .requestMatchers(
                                 "/swagger-ui/**",

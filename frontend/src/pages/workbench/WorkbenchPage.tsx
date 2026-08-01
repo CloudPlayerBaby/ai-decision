@@ -20,7 +20,6 @@ import { useState, useEffect } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
 import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
-import { mockOptions, mockResult } from '@/mocks/analysis.mock'
 import { useAnalysisStream } from '@/hooks/useAnalysisStream'
 import { ConfirmResultModal } from '@/components/workbench/ConfirmResultModal'
 import { DecisionStatusTag } from '@/components/common/DecisionStatusTag'
@@ -33,6 +32,7 @@ import {
 import {
   confirmAnalysis,
   getAnalysisResult,
+  retryFailedStep,
 } from '@/services/analysis.service'
 import { queryKeys } from '@/services/queryKeys'
 import { ApiError, BusinessCode } from '@/types/api'
@@ -50,6 +50,7 @@ export function WorkbenchPage() {
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [animCompleted, setAnimCompleted] = useState(false)
+  const [activeResultId, setActiveResultId] = useState<string | null>(null)
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
@@ -93,10 +94,12 @@ export function WorkbenchPage() {
   const selectedOptionId = decision?.preferredOptionId ?? null
 
   const historyResultId = pendingResultId ?? confirmedResultId ?? null
+  const effectiveResultId = activeResultId ?? historyResultId
 
-  const { steps, connectionStatus, toolCalls } = useAnalysisStream({
+  const { steps, connectionStatus, toolCalls, retryable, failedStepId } = useAnalysisStream({
     taskId,
     onResultReady: async (event) => {
+      setActiveResultId(event.analysisResultId)
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
       });
@@ -115,24 +118,25 @@ export function WorkbenchPage() {
 
   useEffect(() => {
     setAnimCompleted(false);
+    setActiveResultId(null);
   }, [taskId]);
 
   const resultQuery = useQuery({
-    queryKey: queryKeys.decisions.analysisResult(id, historyResultId),
-    queryFn: () => getAnalysisResult(id, historyResultId),
+    queryKey: queryKeys.decisions.analysisResult(id, effectiveResultId),
+    queryFn: () => getAnalysisResult(id, effectiveResultId),
     enabled:
       Boolean(id) &&
       Boolean(
         decision?.status === 'WAITING_CONFIRM' ||
           decision?.status === 'COMPLETED' ||
           decision?.hasPendingResult ||
-          historyResultId,
+          effectiveResultId,
       ),
   })
 
-  const displayOptions = resultQuery.data?.options ?? mockOptions
-  const displayRecommendation = resultQuery.data?.recommendation ?? mockResult.recommendation
-  const displayAnalysisResultId = resultQuery.data?.id ?? mockResult.id
+  const displayOptions = resultQuery.data?.options ?? []
+  const displayRecommendation = resultQuery.data?.recommendation ?? null
+  const displayAnalysisResultId = resultQuery.data?.id ?? ''
 
   const refreshDecision = async () => {
     await queryClient.invalidateQueries({
@@ -179,6 +183,20 @@ export function WorkbenchPage() {
     },
   })
 
+  const retryMutation = useMutation({
+    mutationFn: (stepId: string) =>
+      retryFailedStep(taskId!, stepId),
+    onSuccess: async () => {
+      message.success('步骤已重新入队，请等待推演更新')
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.analysisTasks.detail(taskId!),
+      })
+    },
+    onError: () => {
+      message.error('重试失败，请稍后重试')
+    },
+  })
+
   if (detailQuery.isError) {
     const err = detailQuery.error
     const is404 =
@@ -207,17 +225,16 @@ export function WorkbenchPage() {
   if (detailQuery.isLoading || !decision) {
     return (
       <div className="workbench" style={{ padding: 48, textAlign: 'center' }}>
-        <Spin size="large" tip="加载决策详情…" />
+        <Spin size="large" description="加载决策详情…" />
       </div>
     )
   }
 
   const canStartAnalysis =
-    decision.status === 'PENDING' ||
+    (decision.status === 'PENDING' && !animCompleted) ||
     decision.status === 'WAITING_CONFIRM' ||
     decision.status === 'COMPLETED' ||
-    decision.status === 'FAILED' ||
-    animCompleted
+    decision.status === 'FAILED'
 
   const analyzing =
     (decision.status === 'ANALYZING' ||
@@ -227,7 +244,7 @@ export function WorkbenchPage() {
   const canConfirm =
     decision.status === 'WAITING_CONFIRM' ||
     Boolean(decision.hasPendingResult) ||
-    animCompleted
+    (animCompleted && decision.status !== 'COMPLETED')
 
   return (
     <div className="workbench">
@@ -281,7 +298,7 @@ export function WorkbenchPage() {
               }
               onClick={() => startMutation.mutate()}
             >
-              {analyzing ? '推演中…' : '开始推演'}
+              {analyzing ? '推演中…' : decision.status === 'WAITING_CONFIRM' || decision.status === 'COMPLETED' ? '重新推演' : '开始推演'}
             </Button>
             <Tooltip title="由 A 组接入保存画布">
               <Button disabled>保存画布</Button>
@@ -354,8 +371,12 @@ export function WorkbenchPage() {
                 recommendation={displayRecommendation}
                 analysisResultId={displayAnalysisResultId}
                 selectedOptionId={selectedOptionId}
+                retryable={retryable}
+                failedStepId={failedStepId}
+                decisionStatus={decision.status}
                 isHistory={decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM'}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
+                onRetryStep={(stepId) => retryMutation.mutate(stepId)}
               />
             </div>
           </>

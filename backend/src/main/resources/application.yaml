@@ -35,7 +35,7 @@ spring:
           min-idle: 2
 
 jwt:
-  secret: ${JWT_SECRET:ai-decision-default-secret-change-me-in-production}
+  secret: ${JWT_SECRET}
   expiration: 7200
 
 mybatis-plus:
@@ -49,10 +49,15 @@ mybatis-plus:
 tavily:
   api-key: ${TAVILY_API_KEY:}
 
+# 汇率 API 配置
+exchange-rate:
+  api-key: ${EXCHANGERATE_API_KEY:}
+
 # Sentry 错误日志监控配置
 sentry:
   # 必须配置 DSN，否则 Sentry 不会启动。这个链接是从你刚才贴出的官方文档中提取的
-  dsn: https://e115dc39838b469f19cd549dca28fbe4@o4511829869199360.ingest.us.sentry.io/4511829873983488
+  dsn: https://e46378eb75244b37876c1adcfe6990fd@o4511829869199360.ingest.us.sentry.io/4511830110306304
+  send-default-pii: true
   # 区分环境
   environment: ${SPRING_PROFILES_ACTIVE:development}
   # 发送 100% 的错误（生产环境可以调低）
@@ -61,3 +66,5 @@ sentry:
   logging:
     minimum-event-level: error
     minimum-breadcrumb-level: info
+  logs:
+    enabled: true
