@@ -193,6 +193,7 @@ function buildCanvasViewModel(
       risks?: string[]
     }>
     recommendation?: { optionId?: string | null }
+    canvas?: { nodes: import('../types/canvas').CanvasNode[]; edges: import('../types/canvas').CanvasEdge[] }
   },
 ): import('../types/canvas').CanvasViewModel {
   const factorsDetail: Record<string, FactorDetail> = {}
@@ -213,6 +214,8 @@ function buildCanvasViewModel(
     }
   }
 
+  // 使用 canvasQuery 的 canvas（来自 GET /decisions/:id/canvas）
+  // 注：analysisResult.canvas 可能包含后端生成的边，但前端只信任 canvasQuery 的数据
   return {
     decision: {
       id: decision.id,

@@ -29,6 +29,7 @@ import type {
   OptionFlowData,
 } from '../../types/flow'
 import { toFlowNodes, buildCanvasData } from '../../utils/canvasMapper'
+import { applyDagreLayout } from '../../utils/canvasLayout'
 import { CanvasActionsContext, useCanvasActions } from '../../contexts/CanvasActionsContext'
 
 // ── 节点组件 Props 窄类型 ──────────────────────────────────────
@@ -284,26 +285,32 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const { canvas, factorsDetail = {}, optionsDetail = {}, recommendedOptionId = null } = vm
   const decisionInfo = vm.decision
 
-  // 通过 mapper 将后端 CanvasData → FlowNode/FlowEdge
+  // 通过 mapper 将后端 CanvasData → FlowNode/FlowEdge，然后应用 dagre 水平布局
   // 注意：initialNodesRef / initialEdgesRef 只在首次渲染时初始化一次，
   // 后续 viewModel 变化（如 canvasQuery refetch）不会重新初始化 nodes/edges，
   // 从而保护用户本地编辑不被覆盖。
-  const initialNodesRef = useRef<FlowNode[]>(
-    toFlowNodes(canvas.nodes, {
-      factorsDetail,
-      optionsDetail,
-      recommendedOptionId,
-      decisionInfo,
-    }),
-  )
-  const initialEdgesRef = useRef<FlowEdge[]>(
-    canvas.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      relation: e.relation ?? '',
-    })),
-  )
+  const rawNodes = toFlowNodes(canvas.nodes, {
+    factorsDetail,
+    optionsDetail,
+    recommendedOptionId,
+    decisionInfo,
+  })
+  const rawEdges: FlowEdge[] = canvas.edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    relation: e.relation ?? '',
+  }))
+
+  // 应用 dagre 水平布局（从左到右：决策 → 因素 → 方案）
+  const { nodes: layoutedNodes, edges: layoutedEdges } = applyDagreLayout(rawNodes, rawEdges, {
+    direction: 'LR',
+    rankSeparation: 200,
+    nodeSeparation: 80,
+  })
+
+  const initialNodesRef = useRef<FlowNode[]>(layoutedNodes)
+  const initialEdgesRef = useRef<FlowEdge[]>(layoutedEdges)
 
   const [nodes, setNodes] = useNodesState(initialNodesRef.current)
   const [edges, setEdges] = useEdgesState(initialEdgesRef.current)
@@ -339,6 +346,11 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     const isDirty = currentSignature !== initialSignature.current
     console.log('[CanvasPanel] effect: isDirty=', isDirty)
 
+    // 如果有本地编辑（与初始 viewModel 不同），标记 hasLocalEdit
+    if (isDirty) {
+      hasLocalEdit.current = true
+    }
+
     if (currentSignature !== lastNotifiedSignature.current) {
       lastNotifiedSignature.current = currentSignature
       onCanvasChangeRef.current?.(buildCanvasData(nodes, edges))
@@ -363,6 +375,46 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const [form] = Form.useForm()
   const [weightValue, setWeightValue] = useState(0.1)
   const [activeTabKey, setActiveTabKey] = useState<OptionModalTab>('settings')
+
+  // 跟踪是否有本地编辑（用于在 viewModel 变化时决定是否覆盖）
+  const hasLocalEdit = useRef(false)
+
+  // 监听 viewModel 变化，当后端 canvas 更新时同步到 ReactFlow
+  // 只有在没有本地编辑时才用 viewModel 更新，否则保留用户编辑
+  useEffect(() => {
+    if (hasLocalEdit.current) {
+      return
+    }
+    // 构建 viewModel 对应的节点和边
+    const newRawNodes = toFlowNodes(canvas.nodes, {
+      factorsDetail,
+      optionsDetail,
+      recommendedOptionId,
+      decisionInfo,
+    })
+    const newRawEdges = canvas.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      relation: e.relation ?? '',
+    })) as FlowEdge[]
+
+    // 应用 dagre 布局
+    const { nodes: newNodes, edges: newEdges } = applyDagreLayout(newRawNodes, newRawEdges, {
+      direction: 'LR',
+      rankSeparation: 200,
+      nodeSeparation: 80,
+    })
+
+    const vmSignature = JSON.stringify(buildCanvasData(newNodes, newEdges))
+    const currentSignature = JSON.stringify(buildCanvasData(nodes, edges))
+
+    if (vmSignature !== currentSignature) {
+      console.log('[CanvasPanel] viewModel changed, syncing to ReactFlow with dagre layout')
+      setNodes(newNodes)
+      setEdges(newEdges)
+    }
+  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo])
 
   // openOptionAnalysis：在 Context 内部实现，可访问所有内部状态
   const openOptionAnalysis = useCallback(

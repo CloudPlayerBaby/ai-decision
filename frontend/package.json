@@ -16,6 +16,7 @@
     "antd": "^6.5.2",
     "axios": "^1.19.0",
     "clsx": "^2.1.1",
+    "dagre": "^0.8.5",
     "dayjs": "^1.11.21",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -23,6 +24,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@types/dagre": "^0.7.54",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
