@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
@@ -22,6 +23,7 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/report.st")
     private Resource promptResource;
@@ -50,7 +52,7 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", reportSummary);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("reportSummary", reportSummary));
+            String outputData = objectMapper.writeValueAsString(Map.of("reportSummary", reportSummary));
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             // 实际生成报告可能需要保存到特定实体中，这里先作为结果之一存入 State
             return Map.of("reportSummary", reportSummary);

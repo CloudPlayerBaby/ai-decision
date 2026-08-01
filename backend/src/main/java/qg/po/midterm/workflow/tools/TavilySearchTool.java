@@ -20,6 +20,7 @@ import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.context.TaskContextHolder;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Tavily Search API 工具
@@ -34,6 +35,7 @@ public class TavilySearchTool {
 
     private final RestTemplate restTemplate = createRestTemplate();
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     private static RestTemplate createRestTemplate() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -46,7 +48,7 @@ public class TavilySearchTool {
         TaskContextHolder.TaskContext ctx = TaskContextHolder.getContext();
         if (ctx != null && eventPublisher != null) {
             try {
-                String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+                String outputData = objectMapper.writeValueAsString(
                         Map.of("toolName", "TavilySearch", "inputSummary", inputSummary, "outputSummary", outputSummary != null ? outputSummary : "")
                 );
                 eventPublisher.publishEvent(new NodeExecutionEvent(

@@ -9,6 +9,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.HttpClientErrorException;
 import qg.po.midterm.workflow.context.TaskContextHolder;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
@@ -22,6 +23,7 @@ public class ExchangeRateTool {
 
     private final ApplicationEventPublisher eventPublisher;
     private final RestTemplate restTemplate = createRestTemplate();
+    private final ObjectMapper objectMapper;
     
     private static RestTemplate createRestTemplate() {
         org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
@@ -41,7 +43,7 @@ public class ExchangeRateTool {
         TaskContextHolder.TaskContext ctx = TaskContextHolder.getContext();
         if (ctx != null && eventPublisher != null) {
             try {
-                String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+                String outputData = objectMapper.writeValueAsString(
                         Map.of("toolName", "exchangeRate", "inputSummary", inputSummary, "outputSummary", outputSummary != null ? outputSummary : "")
                 );
                 eventPublisher.publishEvent(new NodeExecutionEvent(
