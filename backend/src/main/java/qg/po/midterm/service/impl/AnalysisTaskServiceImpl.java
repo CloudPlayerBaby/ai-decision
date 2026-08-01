@@ -55,6 +55,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     private final PartialAnalysisPlanner partialAnalysisPlanner;
     private final TaskRuntimeRepository runtimeRepository;
     private final ObjectMapper objectMapper;
+    private final StepDisplayUtils stepDisplayUtils;
 
     /**
      * 发起完整分析
@@ -244,7 +245,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         // 将数据库实体转换为接口 VO
         List<NodeProgressVO> stepVOList = new ArrayList<>();
         for (AnalysisStep step : steps) {
-            StepDisplayUtils.StepDisplay display = StepDisplayUtils.parseDisplay(
+            StepDisplayUtils.StepDisplay display = stepDisplayUtils.parseDisplay(
                     step.getStepName(), step.getStatus(), step.getOutputData(), step.getErrorMessage());
 
             stepVOList.add(new NodeProgressVO(

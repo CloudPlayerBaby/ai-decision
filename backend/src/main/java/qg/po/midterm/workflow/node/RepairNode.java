@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.common.exception.AiValidationException;
 import qg.po.midterm.workflow.state.DecisionState;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;

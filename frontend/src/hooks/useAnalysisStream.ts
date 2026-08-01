@@ -30,6 +30,27 @@ export interface UseAnalysisStreamReturn {
   failedStepId: string | null;
 }
 
+function mergeStepContent(
+  previousContent: string | undefined,
+  nextContent: string | undefined,
+  nextStatus: StepStatus,
+): string | undefined {
+  if (nextContent === undefined) return previousContent;
+  if (!previousContent) return nextContent;
+
+  const placeholders = new Set(['思考中...', '即将开始...']);
+  if (
+    nextStatus === 'SUCCEEDED' ||
+    nextStatus === 'FAILED' ||
+    placeholders.has(previousContent)
+  ) {
+    return nextContent;
+  }
+
+  if (nextContent.startsWith(previousContent)) return nextContent;
+  return `${previousContent}${nextContent}`;
+}
+
 export function useAnalysisStream({
   taskId,
   onResultReady,
@@ -159,7 +180,11 @@ export function useAnalysisStream({
                 ...prev[idx],
                 status: data.status as StepStatus,
                 summary: data.summary ?? prev[idx].summary,
-                content: data.content ?? prev[idx].content,
+                content: mergeStepContent(
+                  prev[idx].content,
+                  data.content,
+                  data.status as StepStatus,
+                ),
               }
             : {
                 id: data.stepId,

@@ -9,6 +9,7 @@ import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.context.TaskContextHolder;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 外部工具调用示例：计算器
@@ -20,12 +21,13 @@ import qg.po.midterm.workflow.context.TaskContextHolder;
 public class CalculatorTool {
 
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     private void publishToolEvent(String status, String inputSummary, String outputSummary) {
         TaskContextHolder.TaskContext ctx = TaskContextHolder.getContext();
         if (ctx != null && eventPublisher != null) {
             try {
-                String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+                String outputData = objectMapper.writeValueAsString(
                         Map.of("toolName", "calculator", "inputSummary", inputSummary, "outputSummary", outputSummary != null ? outputSummary : "")
                 );
                 eventPublisher.publishEvent(new NodeExecutionEvent(

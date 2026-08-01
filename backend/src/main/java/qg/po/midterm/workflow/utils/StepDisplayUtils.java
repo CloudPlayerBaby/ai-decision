@@ -1,15 +1,19 @@
 package qg.po.midterm.workflow.utils;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
+@Component
+@RequiredArgsConstructor
 public class StepDisplayUtils {
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     public record StepDisplay(String summary, String content) {}
 
-    public static StepDisplay parseDisplay(String stepName, String status, String outputData, String errorMessage) {
+    public StepDisplay parseDisplay(String stepName, String status, String outputData, String errorMessage) {
         String summary = null;
         String content = null;
 

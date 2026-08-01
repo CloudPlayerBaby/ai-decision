@@ -13,6 +13,7 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Option;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/risk.st")
     private Resource promptResource;
@@ -76,7 +78,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
+            String outputData = objectMapper.writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             
             return Map.of(
