@@ -174,8 +174,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         DecisionState currentState = buildCurrentState(
                 decision,
                 oldResult,
-                latestCanvas,
-                previousDecisionStatus
+                latestCanvas
         );
 
         // 保留完整业务链路；未重新执行的前置步骤会标记为复用历史结果。
@@ -413,8 +412,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             DecisionState base = buildCurrentState(
                     decision,
                     getCurrentResult(decision),
-                    getLatestCanvas(decision.getId()),
-                    task.getPreviousDecisionStatus()
+                    getLatestCanvas(decision.getId())
             );
             data.putAll(base.data());
         }
@@ -655,8 +653,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
     private DecisionState buildCurrentState(
             Decision decision, // 决策
             AnalysisResultDto result, // 之前的结果
-            Canvas latestCanvas, // 用户最新保存的画布
-            String previousDecisionStatus) {
+            Canvas latestCanvas) { // 用户最新保存的画布
         // 自己组装 data
         Map<String, Object> data = new HashMap<>();
         data.put("background", decision.getBackground());
@@ -670,8 +667,6 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
         data.put("recommendation", result.getRecommendation());
         data.put("nextActions", result.getNextActions());
-        data.put("canvas", latestCanvas);
-        data.put("previousDecisionStatus", previousDecisionStatus);
         return new DecisionState(data);
     }
 

@@ -16,17 +16,14 @@ import qg.po.midterm.workflow.state.DecisionState;
 public interface WorkflowExecutor {
 
     /**
-     * 【给 B 同学使用】：死机读档复活（原点重试失败步骤）
+     * 【给 B 同学使用】：从指定业务节点重试失败任务。
      * <p>
-     * 对应 PRD 7.3 节。当引擎执行某个节点由于网络闪断、AI 校验彻底挂掉（状态变成 FAILED）后，
-     * 前端用户点击红色的“重试”按钮时调用。
-     * 
-     * 🎯 核心原理：
-     * 这里不需要传任何业务参数！引擎底层依赖了 LangGraph4j 的 `BaseCheckpointSaver`。
-     * 引擎通过传入的 `taskId`，自动去快照库中捞出上一次挂掉之前的进度状态，原地重启中断的节点。
+     * 重试状态由业务层根据数据库中已完成步骤的输出重建，不依赖工作流快照。
      *
-     * @param taskId 之前挂掉的那个推演任务 ID（对应底层的 threadId）
-     * @return 返回 "RETRY_TRIGGERED" 代表成功丢入队列；如果该 taskId 的快照不存在，可能会抛出异常。
+     * @param taskId 当前推演任务 ID
+     * @param startNode 重试起始业务节点
+     * @param currentState 从持久化业务数据重建的当前状态
+     * @return 返回 "RETRY_TRIGGERED" 代表成功触发重试
      */
     String retryStep(String taskId, String startNode, DecisionState currentState);
 
@@ -69,8 +66,8 @@ public interface WorkflowExecutor {
      * 除非在写单元测试，或者未来需要自己重写任务队列包裹机制。
      * 业务中请统一使用 `startAnalysis` 和 `startPartialAnalysis` 两个上层安全封装。
      *
-     * @param taskId 唯一任务ID，对应图的 thread_id，用于 Checkpoint 保存/恢复
-     * @param initialState 初始状态，全自动时传入数据。为 null 则内部触发读取快照机制。
+     * @param taskId 唯一任务 ID，用于业务事件关联
+     * @param initialState 本次执行所需的完整初始状态
      */
     void runGraph(String taskId, DecisionState initialState);
 

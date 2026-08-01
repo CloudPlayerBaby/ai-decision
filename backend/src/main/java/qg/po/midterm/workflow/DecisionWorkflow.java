@@ -1,23 +1,23 @@
 package qg.po.midterm.workflow;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
-import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.StateGraph;
-import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.workflow.node.*;
 import qg.po.midterm.workflow.state.DecisionState;
 
-import jakarta.annotation.PostConstruct;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
-/** 定义决策分析工作流的节点和执行顺序。 */
+/**
+ * 定义决策分析工作流的节点和执行顺序。
+ */
 @Component
 @RequiredArgsConstructor
 public class DecisionWorkflow {
@@ -28,9 +28,6 @@ public class DecisionWorkflow {
     private final RiskAnalysisNode riskAnalysisNode;
     private final RepairNode repairNode;
     private final ValidateNode validateNode;
-
-    @Autowired(required = false)
-    private BaseCheckpointSaver checkpointSaver;
 
     private CompiledGraph<DecisionState> compiledGraph;
 
@@ -57,15 +54,15 @@ public class DecisionWorkflow {
          * - 如果传入 COMPARE_OPTIONS：跳过生成，只基于用户自己修改的方案，重新打分。
          */
         graph.addConditionalEdges(START,
-            state -> {
-                String startNode = state.value("startNode").map(Object::toString).orElse("UNDERSTAND");
-                return java.util.concurrent.CompletableFuture.completedFuture(startNode);
-            },
-            Map.of(
-                "UNDERSTAND", "UNDERSTAND",
-                "GENERATE_OPTIONS", "GENERATE_OPTIONS",
-                "COMPARE_OPTIONS", "COMPARE_OPTIONS"
-            )
+                state -> {
+                    String startNode = state.value("startNode").map(Object::toString).orElse("UNDERSTAND");
+                    return CompletableFuture.completedFuture(startNode);
+                },
+                Map.of(
+                        "UNDERSTAND", "UNDERSTAND",
+                        "GENERATE_OPTIONS", "GENERATE_OPTIONS",
+                        "COMPARE_OPTIONS", "COMPARE_OPTIONS"
+                )
         );
 
         /*
@@ -95,21 +92,17 @@ public class DecisionWorkflow {
          * - 如果 errorMsg 为空，说明完美符合 PRD 12.1 规范，放行结束！
          */
         graph.addConditionalEdges("VALIDATE",
-            state -> {
-                String errorMsg = state.getErrorMsg();
-                return java.util.concurrent.CompletableFuture.completedFuture((errorMsg != null && !errorMsg.isEmpty()) ? "REPAIR" : END);
-            },
-            Map.of(
-                "REPAIR", "REPAIR",
-                END, END
-            )
+                state -> {
+                    String errorMsg = state.getErrorMsg();
+                    return java.util.concurrent.CompletableFuture.completedFuture((errorMsg != null && !errorMsg.isEmpty()) ? "REPAIR" : END);
+                },
+                Map.of(
+                        "REPAIR", "REPAIR",
+                        END, END
+                )
         );
 
-        if (checkpointSaver != null) {
-            this.compiledGraph = graph.compile(CompileConfig.builder().checkpointSaver(checkpointSaver).build());
-        } else {
-            this.compiledGraph = graph.compile();
-        }
+        this.compiledGraph = graph.compile();
     }
 
     public CompiledGraph<DecisionState> getGraph() {

@@ -3,7 +3,6 @@ package qg.po.midterm.workflow.impl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.CompiledGraph;
-import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
 import qg.po.midterm.dto.result.ValidationResult;
@@ -16,7 +15,6 @@ import qg.po.midterm.workflow.state.DecisionState;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 @Slf4j
 @Service
@@ -53,7 +51,7 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
         Map<String, Object> initData = new HashMap<>(currentState.data());
         initData.put("taskId", taskId);
         initData.put("startNode", startNode);
-        runGraph(taskId, new DecisionState(initData), taskId + ":retry:" + UUID.randomUUID());
+        runGraph(taskId, new DecisionState(initData));
         return "RETRY_TRIGGERED";
     }
 
@@ -84,14 +82,9 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
 
     @Override
     public void runGraph(String taskId, DecisionState initialState) {
-        runGraph(taskId, initialState, taskId);
-    }
-
-    private void runGraph(String taskId, DecisionState initialState, String checkpointThreadId) {
-        RunnableConfig config = RunnableConfig.builder().threadId(checkpointThreadId).build();
         try {
             Map<String, Object> stateData = (initialState != null) ? initialState.data() : null;
-            Optional<DecisionState> resultOpt = getCompiledGraph().invoke(stateData, config);
+            Optional<DecisionState> resultOpt = getCompiledGraph().invoke(stateData);
             if (resultOpt.isPresent()) {
                 DecisionState finalState = resultOpt.get();
                 eventPublisher.publishEvent(new WorkflowCompletedEvent(this, taskId, finalState.getDecisionId(), finalState.data()));

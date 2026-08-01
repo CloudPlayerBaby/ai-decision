@@ -13,7 +13,7 @@ import qg.po.midterm.vo.CreateTaskVO;
 import qg.po.midterm.vo.PartialTaskVO;
 
 /**
- * 发起分析和建立 SSE 连接。
+ * 推演与 SSE 接口：发起完整推演、局部重推与 SSE 连接（PRD 第 7、8、10 节）
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -24,7 +24,8 @@ public class AnalysisEventController {
     private final AnalysisEventService eventService;
 
     /**
-     * 发起一次完整分析
+     * 7.1 发起完整推演
+     * <p>若当前已有运行任务，返回 40901。
      */
     @PostMapping("/decisions/{decisionId}/analysis")
     public Result<CreateTaskVO> startAnalysis(@PathVariable String decisionId) {
@@ -32,7 +33,8 @@ public class AnalysisEventController {
     }
 
     /**
-     * 根据画布中发生变化的节点发起局部推演（按接口文档，这里是前端直接传入 IDs）
+     * 10.3 发起局部重推
+     * <p>根据 changedNodeIds 确定受影响子树，生成新的待确认草案。
      */
     @PostMapping("/decisions/{decisionId}/partial-analysis")
     public Result<PartialTaskVO> startPartialAnalysis(
@@ -44,9 +46,8 @@ public class AnalysisEventController {
     }
 
     /**
-     * 使用一次性 ticket 建立 SSE 连接
-     * <p>
-     * 前端必须先调用 POST /analysis-tasks/{taskId}/sse-ticket 获取 ticket
+     * 8.2 建立 SSE 连接
+     * <p>使用一次性 Ticket 建立 EventSource 连接；前端须先调用 POST /analysis-tasks/{taskId}/sse-ticket 获取 Ticket。
      */
     @GetMapping(
             value = "/analysis-tasks/{taskId}/events",
