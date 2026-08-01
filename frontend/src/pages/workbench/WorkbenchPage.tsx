@@ -199,6 +199,7 @@ export function WorkbenchPage() {
   // - 画布编辑时：写入 sessionStorage（未保存的本地编辑）
   // - 保存成功：清除 sessionStorage（数据已在后端，刷新时走后端）
   const idRef = useRef(id)
+  const idSwitchTimeRef = useRef(0)
   const [activeCanvas, setActiveCanvas] = useState<import('@/types/canvas').Canvas | undefined>(
     () => readCanvasCache(id)?.canvas ?? undefined,
   )
@@ -207,6 +208,7 @@ export function WorkbenchPage() {
   useEffect(() => {
     if (id === idRef.current) return
     idRef.current = id
+    idSwitchTimeRef.current = Date.now()
     // 切换页面时清空前端状态，切换回来时 canvasQuery 会重新请求后端数据
     setActiveCanvas(undefined)
   }, [id])
@@ -218,13 +220,15 @@ export function WorkbenchPage() {
   useEffect(() => {
     if (!canvasQuery.data) return
     if (idRef.current !== id) return
+    // 数据更新时间早于 id 切换时间 → 旧决策的缓存数据，丢弃
+    if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) return
     // 追踪后端 version，供 handleCanvasChange 写入 sessionStorage 使用
     serverVersionRef.current = buildServerVersion(canvasQuery.data)
     setActiveCanvas((prev) => {
       // 如果已有本地数据（刷新恢复的），保留；否则用后端数据
       return prev ?? canvasQuery.data
     })
-  }, [canvasQuery.data, id])
+  }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id])
 
   const viewModel =
     activeCanvas && decision
