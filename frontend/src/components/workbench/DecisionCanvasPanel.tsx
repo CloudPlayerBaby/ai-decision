@@ -378,11 +378,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const hasLocalEdit = useRef(false)
 
   // 监听 viewModel 变化，当后端 canvas 更新时同步到 ReactFlow
-  // 只有在没有本地编辑时才用 viewModel 更新，否则保留用户编辑
   useEffect(() => {
-    if (hasLocalEdit.current) {
-      return
-    }
     // 构建 viewModel 对应的节点和边
     const newRawNodes = toFlowNodes(canvas.nodes, {
       factorsDetail,

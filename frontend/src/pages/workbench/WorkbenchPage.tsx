@@ -74,9 +74,9 @@ export function WorkbenchPage() {
     Math.min(
       LAYOUT_LIMITS.rightMax,
       (typeof window !== 'undefined' ? window.innerWidth : 1440) -
-        leftOccupied -
-        LAYOUT_LIMITS.minCenterWidth -
-        12,
+      leftOccupied -
+      LAYOUT_LIMITS.minCenterWidth -
+      12,
     ),
   )
 
@@ -139,9 +139,9 @@ export function WorkbenchPage() {
       Boolean(id) &&
       Boolean(
         decision?.status === 'WAITING_CONFIRM' ||
-          decision?.status === 'COMPLETED' ||
-          decision?.hasPendingResult ||
-          effectiveResultId,
+        decision?.status === 'COMPLETED' ||
+        decision?.hasPendingResult ||
+        effectiveResultId,
       ),
   })
 
