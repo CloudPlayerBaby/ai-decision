@@ -116,13 +116,11 @@ function OptionNode({ data, id }: OptionNodeProps) {
   )
 
   return (
-    <div className="canvas-node canvas-node--option">
+    <div className={`canvas-node canvas-node--option${isRecommended ? ' canvas-node--option-recommended' : ''}`}>
+      {isRecommended && <span className="canvas-node__badge canvas-node__badge--corner">推荐</span>}
       <Handle type="target" position={Position.Left} />
       <div className="canvas-node__label">
         <span>候选方案</span>
-        {isRecommended ? (
-          <span className="canvas-node__badge">推荐</span>
-        ) : null}
       </div>
       <div className="canvas-node__title">{data.label}</div>
 
