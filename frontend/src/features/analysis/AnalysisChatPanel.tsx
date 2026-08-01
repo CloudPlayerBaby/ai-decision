@@ -26,6 +26,12 @@ interface Props {
   analysisResultId: string
   selectedOptionId?: string | null
   isHistory?: boolean
+  /** 当前任务失败是否可重试 */
+  retryable?: boolean
+  /** 失败的步骤 ID */
+  failedStepId?: string | null
+  /** 决策状态，用于区分整轮推演 / 局部推演 */
+  decisionStatus?: string
   onAllStepsCompleted?: () => void
   onRetryStep?: (stepId: string) => void
 }
@@ -40,6 +46,9 @@ export function AnalysisChatPanel({
   analysisResultId,
   selectedOptionId,
   isHistory = false,
+  retryable = false,
+  failedStepId = null,
+  decisionStatus,
   onAllStepsCompleted,
   onRetryStep,
 }: Props) {
@@ -47,6 +56,7 @@ export function AnalysisChatPanel({
     steps.length > 0 && steps.every((step) => step.status === 'SUCCEEDED')
   const hasResultData = options.length > 0 && recommendation !== null
   const hasHistoryData = isHistory && hasResultData
+  const isPartial = decisionStatus === 'PARTIAL_ANALYZING'
 
   const onCompletedRef = useRef(onAllStepsCompleted)
   onCompletedRef.current = onAllStepsCompleted
@@ -104,7 +114,12 @@ export function AnalysisChatPanel({
             {!analysisCompleted && !isHistory && (
               <div className="analysis-panel__loading">
                 <Spin size="small" />
-                <span>正在推演...</span>
+                <span>{isPartial ? '正在局部推演...' : '正在推演...'}</span>
+                {isPartial && (
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                    仅重新推演受影响的部分，其余结果保持不变
+                  </Text>
+                )}
               </div>
             )}
 
@@ -112,7 +127,14 @@ export function AnalysisChatPanel({
               .filter((step) => step.status !== 'WAITING')
               .map((step) => (
                 <div key={step.id}>
-                  <StepLogCard step={step} onRetry={onRetryStep} />
+                  <StepLogCard
+                    step={step}
+                    onRetry={
+                      retryable && step.id === failedStepId
+                        ? onRetryStep
+                        : undefined
+                    }
+                  />
                   {toolCalls
                     .filter((toolCall) => toolCall.stepId === step.id)
                     .map((toolCall) => (

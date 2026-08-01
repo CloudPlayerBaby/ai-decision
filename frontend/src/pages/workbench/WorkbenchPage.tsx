@@ -96,7 +96,7 @@ export function WorkbenchPage() {
   const historyResultId = pendingResultId ?? confirmedResultId ?? null
   const effectiveResultId = activeResultId ?? historyResultId
 
-  const { steps, connectionStatus, toolCalls } = useAnalysisStream({
+  const { steps, connectionStatus, toolCalls, retryable, failedStepId } = useAnalysisStream({
     taskId,
     onResultReady: async (event) => {
       setActiveResultId(event.analysisResultId)
@@ -371,6 +371,9 @@ export function WorkbenchPage() {
                 recommendation={displayRecommendation}
                 analysisResultId={displayAnalysisResultId}
                 selectedOptionId={selectedOptionId}
+                retryable={retryable}
+                failedStepId={failedStepId}
+                decisionStatus={decision.status}
                 isHistory={decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM'}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
                 onRetryStep={(stepId) => retryMutation.mutate(stepId)}
