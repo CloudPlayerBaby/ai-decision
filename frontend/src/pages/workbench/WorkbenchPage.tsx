@@ -36,6 +36,7 @@ import {
   confirmAnalysis,
   getAnalysisResult,
   retryFailedStep,
+  startPartialAnalysis,
 } from '@/services/analysis.service'
 import { getCanvas, saveCanvas } from '@/services/canvas.service'
 import { buildCanvasViewModel } from '@/utils/canvasMapper'
@@ -58,6 +59,16 @@ export function WorkbenchPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [animCompleted, setAnimCompleted] = useState(false)
   const [activeResultId, setActiveResultId] = useState<string | null>(null)
+
+  // ── 局部推演状态 ──────────────────────────────────────────
+  /** 保存成功后，后端返回的 changedNodeIds；局部重推成功后保留，失败后允许重试 */
+  const [pendingChangedNodeIds, setPendingChangedNodeIds] = useState<string[]>([])
+  /** 当前局部推演任务；结束时清空 */
+  const [partialAnalysisInfo, setPartialAnalysisInfo] = useState<{
+    taskId: string
+    affectedNodeIds: string[]
+    status: 'RUNNING'
+  } | null>(null)
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
@@ -103,29 +114,49 @@ export function WorkbenchPage() {
   const historyResultId = pendingResultId ?? confirmedResultId ?? null
   const effectiveResultId = activeResultId ?? historyResultId
 
+  // ── SSE taskId 逻辑 ────────────────────────────────────────
+  /** 局部推演期间的 taskId；无局部推演时用 decision.latestTaskId */
+  const streamTaskId = partialAnalysisInfo?.taskId ?? taskId
+  // 追踪当前 SSE 连接的 taskId，防止旧事件误清除当前状态
+  const streamTaskIdRef = useRef<string | null>(null)
+
   const { steps, connectionStatus, toolCalls, retryable, failedStepId } = useAnalysisStream({
-    taskId,
+    taskId: streamTaskId,
     onResultReady: async (event) => {
+      // 仅处理当前局部任务的结果；忽略旧任务事件
+      if (streamTaskIdRef.current !== event.taskId) return
+
       setActiveResultId(event.analysisResultId)
+      forceBackendData.current = true
+      setPartialAnalysisInfo(null) // 局部推演结束，清除状态
+
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
       });
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.analysisResult(id, event.analysisResultId),
       });
-      // 失效 canvas 查询，使画布能显示后端返回的新节点和边
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.canvas(id),
       });
     },
     onTaskFailed: (event) => {
+      // 仅处理当前局部任务失败；忽略旧任务事件
+      if (streamTaskIdRef.current !== event.taskId) return
+
       if (event.retryable) {
-        message.warning(`推演失败: ${event.message}`);
+        message.warning(`局部推演失败: ${event.message}`);
       } else {
-        message.error(`推演失败: ${event.message}`);
+        message.error(`局部推演失败: ${event.message}`);
       }
+      setPartialAnalysisInfo(null) // 失败也清除局部状态，但 pendingChangedNodeIds 保留
     },
   });
+
+  // 同步 streamTaskId 到 ref，供 SSE 回调判断
+  useEffect(() => {
+    streamTaskIdRef.current = streamTaskId
+  }, [streamTaskId])
 
   useEffect(() => {
     setAnimCompleted(false);
@@ -135,15 +166,14 @@ export function WorkbenchPage() {
   const resultQuery = useQuery({
     queryKey: queryKeys.decisions.analysisResult(id, effectiveResultId),
     queryFn: () => getAnalysisResult(id, effectiveResultId),
-    enabled:
-      Boolean(id) &&
-      Boolean(
-        decision?.status === 'WAITING_CONFIRM' ||
-        decision?.status === 'COMPLETED' ||
-        decision?.hasPendingResult ||
-        effectiveResultId,
-      ),
+    // 简化的 enabled 条件：只需要 id 和 effectiveResultId 非空
+    enabled: Boolean(id) && Boolean(effectiveResultId),
+    staleTime: 0,
   })
+
+  console.log('[WorkbenchPage] resultQuery.data:', resultQuery.data)
+  console.log('[WorkbenchPage] resultQuery.error:', resultQuery.error)
+  console.log('[WorkbenchPage] resultQuery.isFetching:', resultQuery.isFetching)
 
   const displayOptions = resultQuery.data?.options ?? []
   const displayRecommendation = resultQuery.data?.recommendation ?? null
@@ -217,16 +247,61 @@ export function WorkbenchPage() {
   // 注意：页面切换后 canvasQuery 会重新请求（staleTime: 0），
   // 此时 activeCanvas 为 undefined，直接用后端数据填充
   const serverVersionRef = useRef(0)
+  // 追踪上一次后端版本
+  const lastBackendVersion = useRef(0)
+  // 追踪上一次数据更新时间，用于检测数据变化
+  const lastDataUpdatedAt = useRef(0)
+
+  // 追踪是否有未保存的本地编辑
+  const hasLocalEdit = useRef(false)
+
+  // 追踪是否应该强制使用后端数据（比如推演完成时）
+  const forceBackendData = useRef(false)
+
   useEffect(() => {
     if (!canvasQuery.data) return
     if (idRef.current !== id) return
     // 数据更新时间早于 id 切换时间 → 旧决策的缓存数据，丢弃
-    if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) return
-    // 追踪后端 version，供 handleCanvasChange 写入 sessionStorage 使用
-    serverVersionRef.current = buildServerVersion(canvasQuery.data)
+    if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) {
+      console.log('[WorkbenchPage] canvas effect: data is stale, skipping')
+      return
+    }
+
+    const newVersion = buildServerVersion(canvasQuery.data)
+    const isDataUpdated = canvasQuery.dataUpdatedAt !== lastDataUpdatedAt.current
+    console.log('[WorkbenchPage] canvas effect: newVersion=', newVersion, 'lastVersion=', lastBackendVersion.current, 'dataUpdated=', isDataUpdated, 'hasLocalEdit=', hasLocalEdit.current, 'forceBackendData=', forceBackendData.current)
+
+    // 追踪后端 version
+    serverVersionRef.current = newVersion
+
     setActiveCanvas((prev) => {
-      // 如果已有本地数据（刷新恢复的），保留；否则用后端数据
-      return prev ?? canvasQuery.data
+      // 如果没有本地数据（页面切换后首次加载），直接用后端数据
+      if (!prev) {
+        console.log('[WorkbenchPage] no local data, using backend data')
+        lastBackendVersion.current = newVersion
+        lastDataUpdatedAt.current = canvasQuery.dataUpdatedAt
+        forceBackendData.current = false
+        return canvasQuery.data
+      }
+
+      // 有本地数据时，比较版本
+      // 推演完成后版本会增加，如果版本更新且没有本地编辑，用后端数据
+      if (isDataUpdated && newVersion !== lastBackendVersion.current) {
+        // 后端数据更新了
+        if (!hasLocalEdit.current || forceBackendData.current) {
+          console.log('[WorkbenchPage] backend updated, syncing (forceBackendData:', forceBackendData.current, ')')
+          lastBackendVersion.current = newVersion
+          lastDataUpdatedAt.current = canvasQuery.dataUpdatedAt
+          forceBackendData.current = false
+          return canvasQuery.data
+        } else {
+          console.log('[WorkbenchPage] backend updated but has local edits, keeping local')
+          lastBackendVersion.current = newVersion
+          lastDataUpdatedAt.current = canvasQuery.dataUpdatedAt
+        }
+      }
+
+      return prev
     })
   }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id])
 
@@ -259,12 +334,16 @@ export function WorkbenchPage() {
   const saveMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
-    onSuccess: () => {
+    onSuccess: (data) => {
       message.success('画布已保存')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
       setActiveCanvas(undefined) // 触发重新从后端加载
       clearCanvasCache(id) // 清除旧缓存，刷新时走后端
+
+      // 保存 changedNodeIds，不自动触发局部重推
+      setPendingChangedNodeIds(data.changedNodeIds ?? [])
+
       // 保存完成后解锁导航
       if (leaveAction === 'save') {
         setLeaveAction(null)
@@ -275,6 +354,7 @@ export function WorkbenchPage() {
       message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
       setIsDirty(true)
       setLeaveAction(null)
+      // 失败时不清空 pendingChangedNodeIds，允许重试
     },
   })
 
@@ -286,6 +366,47 @@ export function WorkbenchPage() {
     setIsDirty(true)
     writeCanvasCache(id, canvas, serverVersionRef.current)
   }
+
+  // 保存权重：先保存画布，成功后自动发起局部重推
+  const handleWeightSave = (canvas: import('@/types/canvas').Canvas) => {
+    canvasRef.current = canvas
+    hasUserEdited.current = true
+    // 立即用新 canvas 保存，触发局部重推
+    saveForPartialMutation.mutate(canvas)
+  }
+
+  // 专用 mutation：保存画布并自动触发局部重推（仅用于权重保存）
+  const saveForPartialMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: (data) => {
+      message.success('权重已保存')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      setActiveCanvas(undefined)
+      clearCanvasCache(id)
+
+      const changedIds = data.changedNodeIds ?? []
+      setPendingChangedNodeIds(changedIds)
+
+      if (changedIds.length > 0) {
+        // 自动发起局部重推
+        startPartialAnalysisMutation.mutate(changedIds)
+      } else {
+        message.info('权重已保存，无需重新推演')
+      }
+
+      if (leaveAction === 'save') {
+        setLeaveAction(null)
+        blocker.proceed?.()
+      }
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      setIsDirty(true)
+      setLeaveAction(null)
+    },
+  })
 
   // ── 路由拦截：未保存时弹出确认框 ─────────────────────────────
   // 用 useBlocker 真正拦截导航（在页面跳转之前拦截）
@@ -345,6 +466,33 @@ export function WorkbenchPage() {
     },
     onError: () => {
       message.error('重试失败，请稍后重试')
+    },
+  })
+
+  /** 局部重推 mutation */
+  const startPartialAnalysisMutation = useMutation({
+    mutationFn: (changedNodeIds: string[]) =>
+      startPartialAnalysis(id, { changedNodeIds }),
+    onSuccess: (data) => {
+      console.log('[WorkbenchPage] partial analysis started:', data)
+      message.info('已发起局部重推，请等待推演完成')
+      // 设置局部推演状态：taskId + affectedNodeIds
+      setPartialAnalysisInfo({
+        taskId: data.taskId,
+        affectedNodeIds: data.affectedNodeIds,
+        status: 'RUNNING',
+      })
+      // pendingChangedNodeIds 保留（失败时可重试）
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.analysisTasks.detail(data.taskId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.canvas(id),
+      })
+    },
+    onError: () => {
+      message.error('局部重推发起失败，请稍后重试')
+      // pendingChangedNodeIds 保留，允许重试
     },
   })
 
@@ -460,10 +608,34 @@ export function WorkbenchPage() {
                 saveMutation.mutate(canvasRef.current)
               }}
               loading={saveMutation.isPending}
-              disabled={!isDirty}
+              disabled={!isDirty || partialAnalysisInfo !== null || saveForPartialMutation.isPending}
             >
               {saveMutation.isPending ? '保存中…' : '保存画布'}
             </Button>
+            <Tooltip
+              title={
+                pendingChangedNodeIds.length === 0
+                  ? '当前修改仅影响布局，无需局部重推'
+                  : partialAnalysisInfo !== null
+                    ? '已有局部推演进行中'
+                    : undefined
+              }
+            >
+              <Button
+                disabled={
+                  pendingChangedNodeIds.length === 0 ||
+                  partialAnalysisInfo !== null ||
+                  saveForPartialMutation.isPending ||
+                  startPartialAnalysisMutation.isPending
+                }
+                loading={startPartialAnalysisMutation.isPending}
+                onClick={() => {
+                  startPartialAnalysisMutation.mutate(pendingChangedNodeIds)
+                }}
+              >
+                {startPartialAnalysisMutation.isPending ? '局部重推中…' : '局部重推'}
+              </Button>
+            </Tooltip>
             <Button
               type="primary"
               disabled={!canConfirm || confirmMutation.isPending}
@@ -504,18 +676,22 @@ export function WorkbenchPage() {
           viewModel={viewModel}
           onDirtyChange={(dirty) => {
             console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
-            // 只有用户实际修改过画布后，才接受子组件的 dirty 通知
             if (hasUserEdited.current) setIsDirty(dirty)
           }}
           onCanvasChange={(canvasData) => {
             handleCanvasChange(canvasData)
           }}
+          onWeightSave={(canvasData) => {
+            handleWeightSave(canvasData)
+          }}
           decisionId={decision.id}
-          taskId={taskId}
+          taskId={streamTaskId}
           pendingResultId={pendingResultId}
           hasPendingResult={decision.hasPendingResult}
           decisionStatus={decision.status}
           onRequestRefresh={refreshDecision}
+          partialAnalysisInfo={partialAnalysisInfo}
+          partialSteps={steps}
         />
 
         {!rightCollapsed ? (
