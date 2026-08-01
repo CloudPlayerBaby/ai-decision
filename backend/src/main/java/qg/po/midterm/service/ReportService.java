@@ -2,6 +2,7 @@ package qg.po.midterm.service;
 
 import qg.po.midterm.vo.ReportSummaryVO;
 import qg.po.midterm.vo.ReportVO;
+import qg.po.midterm.vo.PageVO;
 
 import java.util.List;
 
@@ -9,6 +10,9 @@ import java.util.List;
  * 报告服务接口（API v2.0 第 11 节）
  */
 public interface ReportService {
+
+    /** 11.3 分页查询当前用户的全部报告 */
+    PageVO<ReportSummaryVO> listReports(int page, int pageSize);
 
     /** 11.1 根据报告ID获取报告 */
     ReportVO getReport(String reportId);

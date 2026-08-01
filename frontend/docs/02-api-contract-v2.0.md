@@ -459,6 +459,31 @@ Response data
       "generatedAt":"2026-07-30T21:40:00+08:00"
     }
 
+11.3 分页查询当前用户全部报告
+
+GET /reports?page=1&pageSize=10。仅返回当前登录用户所属决策的报告，按生成时间倒序排列。
+
+**Response data**
+
+```json
+{
+  "list": [
+    {
+      "id": "r_70001",
+      "decisionId": "d_20001",
+      "title": "毕业旅行预算规划",
+      "analysisResultId": "ar_40001",
+      "status": "READY",
+      "generatedAt": "2026-07-30T21:40:00+08:00"
+    }
+  ],
+  "page": 1,
+  "pageSize": 10,
+  "total": 1,
+  "totalPages": 1
+}
+```
+
 11.2 重新生成报告
 
 POST /decisions/{decisionId}/regenerate-report。基于当前已确认的结果重新生成报告展示内容，不重新调用分析 Agent。若要重新分析，应使用 7.1 重新发起推演。

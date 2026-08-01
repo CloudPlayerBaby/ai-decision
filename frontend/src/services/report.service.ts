@@ -5,7 +5,11 @@ import {
   mockGetDecisionReport,
   mockGetReport,
 } from '@/mocks/reports.mock'
-import type { DecisionReport, ReportListItem } from '@/types/report'
+import type {
+  DecisionReport,
+  ReportListQuery,
+  ReportListResponse,
+} from '@/types/report'
 
 function delay<T>(value: T, ms = 200): Promise<T> {
   return new Promise((resolve) => {
@@ -14,15 +18,23 @@ function delay<T>(value: T, ms = 200): Promise<T> {
 }
 
 /**
- * 报告中心列表：契约未单独定义列表接口时，Mock 提供本地列表；
- * 真接口可改为从 COMPLETED 决策聚合，联调时再切换。
+ * 报告中心列表：分页获取当前用户拥有的报告。
  */
-export async function listReports(): Promise<ReportListItem[]> {
+export async function listReports(
+  query: ReportListQuery = {},
+): Promise<ReportListResponse> {
   if (isMockEnabled()) {
-    return delay([...MOCK_REPORT_LIST])
+    const page = query.page ?? 1
+    const pageSize = query.pageSize ?? 10
+    return delay({
+      list: MOCK_REPORT_LIST.slice((page - 1) * pageSize, page * pageSize),
+      page,
+      pageSize,
+      total: MOCK_REPORT_LIST.length,
+      totalPages: Math.ceil(MOCK_REPORT_LIST.length / pageSize),
+    })
   }
-  // 真后端暂无独立列表：用已完成决策详情的 reportId 由页面自行聚合
-  return getData<ReportListItem[]>('/reports').catch(() => [])
+  return getData<ReportListResponse>('/reports', { params: query })
 }
 
 export async function getReport(reportId: string): Promise<DecisionReport> {

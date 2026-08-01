@@ -1,9 +1,13 @@
 package qg.po.midterm.controller;
 
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import qg.po.midterm.common.result.Result;
 import qg.po.midterm.service.ReportService;
+import qg.po.midterm.vo.PageVO;
 import qg.po.midterm.vo.ReportSummaryVO;
 import qg.po.midterm.vo.ReportVO;
 
@@ -15,9 +19,18 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
+@Validated
 public class ReportController {
 
     private final ReportService reportService;
+
+    /** 11.3 分页查询当前用户的所有报告。 */
+    @GetMapping("/reports")
+    public Result<PageVO<ReportSummaryVO>> listReports(
+            @RequestParam(defaultValue = "1") @Min(1) int page,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(100) int pageSize) {
+        return Result.success(reportService.listReports(page, pageSize));
+    }
 
     /**
      * 11.1 获取报告
