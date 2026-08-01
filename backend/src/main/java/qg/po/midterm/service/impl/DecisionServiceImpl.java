@@ -477,7 +477,6 @@ public class DecisionServiceImpl implements DecisionService {
             factorData.put("weight", f.getWeight());
             nodes.add(createNode(f.getId(), "factor", f.getName(),
                     new Canvas.Position(x, 180), factorData));
-            edges.add(createEdge("e_f_" + i, "root", f.getId(), "HAS_FACTOR"));
         }
 
         // Option 节点
@@ -494,14 +493,9 @@ public class DecisionServiceImpl implements DecisionService {
             nodes.add(createNode(o.getId(), "option", o.getName(),
                     new Canvas.Position(x, 340), optionData));
 
-            // option 连到所有 factor，而不是 root
-            int edgeIdx = 0;
-            for (int j = 0; j < factorCount; j++) {
-                Factor f = factors.get(j);
-                edges.add(createEdge("e_o_" + i + "_" + j, f.getId(), o.getId(), "INFLUENCES"));
-                edgeIdx++;
-            }
         }
+
+        edges.addAll(CanvasTopologyBuilder.buildEdges(factors, options));
 
         return new Canvas(nodes, edges);
     }

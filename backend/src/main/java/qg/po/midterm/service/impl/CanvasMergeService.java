@@ -35,7 +35,6 @@ public class CanvasMergeService {
             data.put("weight", factor.getWeight());
             nodes.add(node(factor.getId(), "factor", factor.getName(),
                     position(oldNodes, factor.getId(), spread(index, factors.size()), 180), data));
-            edges.add(edge("e_factor_" + factor.getId(), "root", factor.getId(), "HAS_FACTOR"));
         }
 
         List<Option> options = result != null && result.getOptions() != null
@@ -51,8 +50,8 @@ public class CanvasMergeService {
             data.put("scores", option.getScores());
             nodes.add(node(option.getId(), "option", option.getName(),
                     position(oldNodes, option.getId(), spread(index, options.size()), 340), data));
-            edges.add(edge("e_option_" + option.getId(), "root", option.getId(), "HAS_OPTION"));
         }
+        edges.addAll(CanvasTopologyBuilder.buildEdges(factors, options));
         return new Canvas(nodes, edges);
     }
 
@@ -83,7 +82,4 @@ public class CanvasMergeService {
         return new Canvas.CanvasNode(id, type, label, position, data);
     }
 
-    private Canvas.CanvasEdge edge(String id, String source, String target, String relation) {
-        return new Canvas.CanvasEdge(id, source, target, relation);
-    }
 }
