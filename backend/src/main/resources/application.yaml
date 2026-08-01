@@ -35,7 +35,7 @@ spring:
           min-idle: 2
 
 jwt:
-  secret: ${JWT_SECRET:ai-decision-default-secret-change-me-in-production}
+  secret: ${JWT_SECRET}
   expiration: 7200
 
 mybatis-plus:

@@ -1,8 +1,10 @@
 package qg.po.midterm.common.exception;
 
+import lombok.Getter;
 import qg.po.midterm.common.enums.ErrorCode;
 import java.util.List;
 
+@Getter
 public class AiValidationException extends BusinessException {
 
     private final List<String> missingFields;
@@ -12,13 +14,5 @@ public class AiValidationException extends BusinessException {
         super(ErrorCode.AI_VALIDATION_FAILED, message);
         this.missingFields = missingFields;
         this.repairAttempted = repairAttempted;
-    }
-
-    public List<String> getMissingFields() {
-        return missingFields;
-    }
-
-    public boolean isRepairAttempted() {
-        return repairAttempted;
     }
 }

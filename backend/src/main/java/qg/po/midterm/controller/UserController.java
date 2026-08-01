@@ -16,6 +16,10 @@ public class UserController {
 
     private final AuthService authService;
 
+    /**
+     * 获取当前登录用户信息
+     * @return 返回一个 UserVO
+     */
     @GetMapping("/me")
     public Result<UserVO> getCurrentUser() {
         Long userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

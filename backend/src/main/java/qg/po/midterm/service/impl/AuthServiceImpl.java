@@ -68,6 +68,7 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
+    // 根据 userId 获取当前登录的用户信息
     @Override
     public UserVO getCurrentUser(Long userId) {
         SysUser user = sysUserMapper.selectById(userId);
@@ -77,6 +78,7 @@ public class AuthServiceImpl implements AuthService {
         return toUserVO(user);
     }
 
+    // 转成 userVO
     private UserVO toUserVO(SysUser user) {
         return UserVO.builder()
                 .id("u_" + user.getId())
