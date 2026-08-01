@@ -480,7 +480,7 @@ public class DecisionServiceImpl implements DecisionService {
             edges.add(createEdge("e_f_" + i, "root", f.getId(), "HAS_FACTOR"));
         }
 
-        // Option 节点 + edge
+        // Option 节点
         List<Option> options = dto.getOptions() != null
                 ? dto.getOptions() : Collections.emptyList();
         int optionCount = options.size();
@@ -493,7 +493,14 @@ public class DecisionServiceImpl implements DecisionService {
                     ? o.getScores() : Collections.emptyMap());
             nodes.add(createNode(o.getId(), "option", o.getName(),
                     new Canvas.Position(x, 340), optionData));
-            edges.add(createEdge("e_o_" + i, "root", o.getId(), "HAS_OPTION"));
+
+            // option 连到所有 factor，而不是 root
+            int edgeIdx = 0;
+            for (int j = 0; j < factorCount; j++) {
+                Factor f = factors.get(j);
+                edges.add(createEdge("e_o_" + i + "_" + j, f.getId(), o.getId(), "INFLUENCES"));
+                edgeIdx++;
+            }
         }
 
         return new Canvas(nodes, edges);
