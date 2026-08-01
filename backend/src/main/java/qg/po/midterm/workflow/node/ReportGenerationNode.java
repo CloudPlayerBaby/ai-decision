@@ -10,9 +10,11 @@ import org.springframework.core.io.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.List;
 import java.util.Map;
 
 /** 工作流节点：综合所有信息，生成最终总结报告。 */
@@ -35,10 +37,17 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [ReportGeneration] executing for decision: {}", state.getDecisionId());
 
-            String understanding = state.getUnderstanding();
-            
+            String analysisResult = objectMapper.writeValueAsString(Map.of(
+                    "understanding", state.getUnderstanding() != null ? state.getUnderstanding() : "",
+                    "factors", state.getFactors() != null ? state.getFactors() : List.of(),
+                    "options", state.getOptions() != null ? state.getOptions() : List.of(),
+                    "recommendation", state.getRecommendation() != null
+                            ? state.getRecommendation() : new AnalysisResultDto.Recommendation(),
+                    "nextActions", state.getNextActions() != null ? state.getNextActions() : List.of()
+            ));
+
             Map<String, Object> params = Map.of(
-                "understanding", understanding != null ? understanding : "无"
+                "analysisResult", analysisResult
             );
             String prompt = new PromptTemplate(promptResource).create(params).getContents();
             

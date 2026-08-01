@@ -62,13 +62,7 @@ public class LlmRetryUtils {
             List<String> missingFields = extractMissingFields(e.getMessage());
 
             // 2. 发起修复请求
-            String repairPrompt = String.format(
-                    "你需要返回一个严格符合 JSON Schema 的结果。\n" +
-                    "上次你返回的结果在解析时报错了，错误信息如下：\n%s\n\n" +
-                    "你上次返回的原始内容如下：\n%s\n\n" +
-                    "请根据错误信息修复 JSON，并再次返回（注意仅返回合法的 JSON，不要包裹多余文本）。\n%s",
-                    e.getMessage(), rawResponse, formatInstruction
-            );
+            String repairPrompt = buildRepairPrompt(e.getMessage(), rawResponse, formatInstruction);
 
             String repairedRawResponse;
             if (tools != null && tools.length > 0) {
@@ -87,6 +81,33 @@ public class LlmRetryUtils {
     }
 
     public record ExecutionResult<T>(T value, boolean repaired) {}
+
+    /**
+     * 为节点级解析失败和工作流级语义校验失败构造统一的修复提示。
+     */
+    public static String buildRepairPrompt(String errorMessage, String originalJson, String formatInstruction) {
+        return """
+                下面的 JSON 未通过校验。请只修复错误涉及的字段，保留其余正确内容，不得删除、改名或新增 Schema 之外的字段。
+
+                <validation_errors>
+                %s
+                </validation_errors>
+
+                <original_json>
+                %s
+                </original_json>
+
+                <required_format>
+                %s
+                </required_format>
+
+                修复前请检查所有必填字段、ID 引用、列表数量、数值范围和权重总和。只返回一个符合 required_format 的 JSON 对象。
+                """.formatted(
+                errorMessage != null ? errorMessage : "未知校验错误",
+                originalJson != null ? originalJson : "{}",
+                formatInstruction != null ? formatInstruction : ""
+        );
+    }
 
     private static List<String> extractMissingFields(String errorMessage) {
         List<String> missingFields = new ArrayList<>();

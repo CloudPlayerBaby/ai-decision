@@ -55,12 +55,11 @@ public class CalculatorTool {
             double result = SafeMathEvaluator.evaluate(expression);
             log.info("🛠️ [Function Call] 计算结果: {}", result);
             publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "结果: " + result);
-            return result + "\n[系统提示：你可以基于上述结果继续推理，或者根据需要再次调用 searchWeb/calculator 等工具。不要急于输出结论，直到你收集了充分的数据。]";
+            return Double.toString(result);
         } catch (Exception e) {
             log.error("🛠️ [Function Call] 计算出错: {}", e.getMessage());
             publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "计算出错");
-            return "计算失败：" + e.getMessage()
-                    + "\n[系统提示：请只使用数字、小数、括号和 + - * / % 运算符。]";
+            return "计算失败：" + e.getMessage() + "。表达式仅支持数字、小数、括号和 + - * / % 运算符。";
         }
     }
 }

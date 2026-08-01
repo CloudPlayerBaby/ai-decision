@@ -17,7 +17,6 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /** 工作流节点：对比方案风险，生成最终推荐。 */
 @Slf4j
@@ -51,9 +50,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             String understanding = state.getUnderstanding();
             List<Option> options = state.getOptions();
             
-            String optionStr = options == null ? "无" : options.stream()
-                .map(o -> String.format("- 方案ID: %s, 名称: %s, 描述: %s", o.getId(), o.getName(), o.getDescription()))
-                .collect(Collectors.joining("\n"));
+            String optionStr = objectMapper.writeValueAsString(options != null ? options : List.of());
 
             String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
 

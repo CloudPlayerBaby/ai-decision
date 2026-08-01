@@ -21,8 +21,8 @@ public class ReportAgent {
     @Value("classpath:prompts/report_generation.st")
     private Resource promptResource;
 
-    public ReportAgent(ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder.build();
+    public ReportAgent(ChatClient chatClient) {
+        this.chatClient = chatClient;
     }
 
     /**
@@ -31,8 +31,7 @@ public class ReportAgent {
     public ReportContent generateReport(String analysisResultJson, String selectedOptionName) {
         Map<String, Object> params = Map.of(
                 "analysisResult", analysisResultJson != null ? analysisResultJson : "{}",
-                "selectedOptionName", selectedOptionName != null ? selectedOptionName : "无",
-                "format", ""
+                "selectedOptionName", selectedOptionName != null ? selectedOptionName : "无"
         );
 
         String promptText = new PromptTemplate(promptResource).create(params).getContents();
