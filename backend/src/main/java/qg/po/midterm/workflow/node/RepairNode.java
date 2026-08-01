@@ -4,14 +4,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.common.exception.AiValidationException;
 import qg.po.midterm.workflow.state.DecisionState;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import qg.po.midterm.workflow.utils.LlmRetryUtils;
+import qg.po.midterm.workflow.utils.MarkdownStrippingConverter;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -26,9 +25,6 @@ public class RepairNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
-
-    @Value("classpath:prompts/repair.st")
-    private Resource promptResource;
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
@@ -47,11 +43,9 @@ public class RepairNode implements NodeAction<DecisionState> {
         originalResult.setRecommendation(state.getRecommendation());
         originalResult.setNextActions(state.getNextActions());
         String originalJson = objectMapper.writeValueAsString(originalResult);
-        Map<String, Object> params = Map.of(
-                "errorMsg", errorMsg != null ? errorMsg : "未知错误",
-                "originalJson", originalJson
-        );
-        String prompt = new PromptTemplate(promptResource).create(params).getContents();
+        MarkdownStrippingConverter<AnalysisResultDto> converter =
+                new MarkdownStrippingConverter<>(AnalysisResultDto.class);
+        String prompt = LlmRetryUtils.buildRepairPrompt(errorMsg, originalJson, converter.getFormat());
 
         log.info(">>> 【AI Prompt】\n{}", prompt);
 
@@ -60,7 +54,7 @@ public class RepairNode implements NodeAction<DecisionState> {
             repairedResult = chatClient.prompt()
                     .user(prompt)
                     .call()
-                    .entity(new qg.po.midterm.workflow.utils.MarkdownStrippingConverter<>(AnalysisResultDto.class));
+                    .entity(converter);
         } catch (Exception exception) {
             throw new AiValidationException(
                     "AI 结果修复后仍无法解析：" + exception.getMessage(),

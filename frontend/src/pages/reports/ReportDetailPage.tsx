@@ -71,7 +71,7 @@ export function ReportDetailPage() {
   if (reportQuery.isLoading) {
     return (
       <div style={{ padding: 48, textAlign: 'center' }}>
-        <Spin size="large" tip="加载报告…" />
+        <Spin size="large" description="加载报告…" />
       </div>
     )
   }

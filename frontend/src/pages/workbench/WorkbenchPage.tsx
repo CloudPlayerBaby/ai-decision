@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Modal,
   Result,
   Space,
   Spin,
@@ -15,8 +16,10 @@ import {
   PlayCircleOutlined,
 } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useBlocker } from 'react-router'
+import type { BlockerFunction } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
 import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
@@ -34,6 +37,10 @@ import {
   getAnalysisResult,
   retryFailedStep,
 } from '@/services/analysis.service'
+import { getCanvas, saveCanvas } from '@/services/canvas.service'
+import { buildCanvasViewModel } from '@/utils/canvasMapper'
+import { readCanvasCache, writeCanvasCache, clearCanvasCache } from '@/utils/canvasCache'
+import { buildServerVersion } from '@/utils/canvasCache'
 import { queryKeys } from '@/services/queryKeys'
 import { ApiError, BusinessCode } from '@/types/api'
 import { isMockEnabled } from '@/services/config'
@@ -106,6 +113,10 @@ export function WorkbenchPage() {
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.analysisResult(id, event.analysisResultId),
       });
+      // 失效 canvas 查询，使画布能显示后端返回的新节点和边
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.canvas(id),
+      });
     },
     onTaskFailed: (event) => {
       if (event.retryable) {
@@ -137,15 +148,6 @@ export function WorkbenchPage() {
   const displayOptions = resultQuery.data?.options ?? []
   const displayRecommendation = resultQuery.data?.recommendation ?? null
   const displayAnalysisResultId = resultQuery.data?.id ?? ''
-
-  const refreshDecision = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.decisions.detail(id),
-    })
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.decisions.analysisResult(id, pendingResultId),
-    })
-  }
 
   const startMutation = useMutation({
     mutationFn: () => startFullAnalysis(id),
@@ -182,6 +184,155 @@ export function WorkbenchPage() {
       navigate(`/reports/${data.reportId}`)
     },
   })
+
+  // ── 画布数据（GET /decisions/:id/canvas）─────────────────────
+  const canvasQuery = useQuery({
+    queryKey: queryKeys.decisions.canvas(id),
+    queryFn: () => getCanvas(id),
+    enabled: Boolean(id),
+    staleTime: 0,
+  })
+
+  // sessionStorage 缓存逻辑（核心原则）：
+  // - 页面初次加载（刷新）：从 sessionStorage 恢复未保存的本地编辑
+  // - 页面切换（导航）：丢弃前端缓存，从后端重新拉取
+  // - 画布编辑时：写入 sessionStorage（未保存的本地编辑）
+  // - 保存成功：清除 sessionStorage（数据已在后端，刷新时走后端）
+  const idRef = useRef(id)
+  const idSwitchTimeRef = useRef(0)
+  const [activeCanvas, setActiveCanvas] = useState<import('@/types/canvas').Canvas | undefined>(
+    () => readCanvasCache(id)?.canvas ?? undefined,
+  )
+
+  // id 变化 = 页面切换（非刷新）：丢弃前端缓存，从后端重新拉取
+  useEffect(() => {
+    if (id === idRef.current) return
+    idRef.current = id
+    idSwitchTimeRef.current = Date.now()
+    // 切换页面时清空前端状态，切换回来时 canvasQuery 会重新请求后端数据
+    setActiveCanvas(undefined)
+  }, [id])
+
+  // canvasQuery 数据回来后，更新 activeCanvas
+  // 注意：页面切换后 canvasQuery 会重新请求（staleTime: 0），
+  // 此时 activeCanvas 为 undefined，直接用后端数据填充
+  const serverVersionRef = useRef(0)
+  useEffect(() => {
+    if (!canvasQuery.data) return
+    if (idRef.current !== id) return
+    // 数据更新时间早于 id 切换时间 → 旧决策的缓存数据，丢弃
+    if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) return
+    // 追踪后端 version，供 handleCanvasChange 写入 sessionStorage 使用
+    serverVersionRef.current = buildServerVersion(canvasQuery.data)
+    setActiveCanvas((prev) => {
+      // 如果已有本地数据（刷新恢复的），保留；否则用后端数据
+      return prev ?? canvasQuery.data
+    })
+  }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id])
+
+  const viewModel =
+    activeCanvas && decision
+      ? buildCanvasViewModel(decision, activeCanvas, resultQuery.data ?? undefined)
+      : undefined
+
+  // isDirty 初始为 false，等 canvasQuery 数据回来后对比缓存和服务器内容再决定
+  const [isDirty, setIsDirty] = useState(false)
+  // 追踪用户是否已实际修改过画布（区分初始化和用户操作）
+  const hasUserEdited = useRef(false)
+  // 等 canvasQuery 数据回来后，对比缓存和服务器内容决定初始 isDirty（仅执行一次）
+  const didEvaluateCache = useRef(false)
+  useEffect(() => {
+    if (!canvasQuery.data) return
+    if (didEvaluateCache.current) return
+    didEvaluateCache.current = true
+    const cached = readCanvasCache(id)
+    if (cached) {
+      const serverVersion = buildServerVersion(canvasQuery.data)
+      const isDirty = serverVersion !== cached.serverVersion
+      console.log('[WorkbenchPage] evaluateCache: serverVersion=', serverVersion, 'cachedServerVersion=', cached.serverVersion, 'isDirty=', isDirty)
+      setIsDirty(isDirty)
+    }
+  }, [canvasQuery.data, id])
+  // 保存按钮回调时引用最新 canvas 数据
+  const canvasRef = useRef<import('@/types/canvas').Canvas | null>(null)
+
+  const saveMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: () => {
+      message.success('画布已保存')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      setActiveCanvas(undefined) // 触发重新从后端加载
+      clearCanvasCache(id) // 清除旧缓存，刷新时走后端
+      // 保存完成后解锁导航
+      if (leaveAction === 'save') {
+        setLeaveAction(null)
+        blocker.proceed?.()
+      }
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      setIsDirty(true)
+      setLeaveAction(null)
+    },
+  })
+
+  // 画布变化时：更新 canvasRef + 写入 sessionStorage + 标记 dirty
+  const handleCanvasChange = (canvas: import('@/types/canvas').Canvas) => {
+    console.log('[WorkbenchPage] handleCanvasChange called')
+    canvasRef.current = canvas
+    hasUserEdited.current = true
+    setIsDirty(true)
+    writeCanvasCache(id, canvas, serverVersionRef.current)
+  }
+
+  // ── 路由拦截：未保存时弹出确认框 ─────────────────────────────
+  // 用 useBlocker 真正拦截导航（在页面跳转之前拦截）
+  const [leaveAction, setLeaveAction] = useState<'save' | 'discard' | null>(null)
+  const blocker = useBlocker(
+    (({ currentLocation, nextLocation }) => {
+      const blocked = isDirty && currentLocation.pathname !== nextLocation.pathname
+      console.log('[blocker] check: isDirty=', isDirty, 'blocked=', blocked)
+      return blocked
+    }) as BlockerFunction,
+  )
+
+  const handleLeaveSave = () => {
+    if (!canvasRef.current) {
+      message.error('画布数据异常，请重试')
+      return
+    }
+    setLeaveAction('save')
+    setActiveCanvas(undefined)
+    saveMutation.mutate(canvasRef.current)
+  }
+
+  const handleLeaveDiscard = () => {
+    setLeaveAction('discard')
+    setIsDirty(false)
+    setActiveCanvas(undefined)
+    clearCanvasCache(id)
+    setLeaveAction(null)
+    blocker.proceed?.()
+  }
+
+  const handleLeaveCancel = () => {
+    setLeaveAction(null)
+    blocker.reset?.()
+  }
+
+  const refreshDecision = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.decisions.detail(id),
+    })
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.decisions.analysisResult(id, pendingResultId),
+    })
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.decisions.canvas(id),
+    })
+  }
 
   const retryMutation = useMutation({
     mutationFn: (stepId: string) =>
@@ -300,9 +451,19 @@ export function WorkbenchPage() {
             >
               {analyzing ? '推演中…' : decision.status === 'WAITING_CONFIRM' || decision.status === 'COMPLETED' ? '重新推演' : '开始推演'}
             </Button>
-            <Tooltip title="由 A 组接入保存画布">
-              <Button disabled>保存画布</Button>
-            </Tooltip>
+            <Button
+              onClick={() => {
+                if (!canvasRef.current) {
+                  message.error('画布数据尚未准备好，请稍后重试')
+                  return
+                }
+                saveMutation.mutate(canvasRef.current)
+              }}
+              loading={saveMutation.isPending}
+              disabled={!isDirty}
+            >
+              {saveMutation.isPending ? '保存中…' : '保存画布'}
+            </Button>
             <Button
               type="primary"
               disabled={!canConfirm || confirmMutation.isPending}
@@ -339,6 +500,16 @@ export function WorkbenchPage() {
 
       <div className="workbench__body">
         <DecisionCanvasPanel
+          key={id}
+          viewModel={viewModel}
+          onDirtyChange={(dirty) => {
+            console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
+            // 只有用户实际修改过画布后，才接受子组件的 dirty 通知
+            if (hasUserEdited.current) setIsDirty(dirty)
+          }}
+          onCanvasChange={(canvasData) => {
+            handleCanvasChange(canvasData)
+          }}
           decisionId={decision.id}
           taskId={taskId}
           pendingResultId={pendingResultId}
@@ -393,6 +564,30 @@ export function WorkbenchPage() {
           confirmMutation.mutate(selectedOptionId)
         }
       />
+
+      <Modal
+        title="画布有未保存的修改"
+        open={blocker.state === 'blocked'}
+        onCancel={handleLeaveCancel}
+        footer={[
+          <Button key="cancel" onClick={handleLeaveCancel}>
+            取消
+          </Button>,
+          <Button key="discard" onClick={handleLeaveDiscard}>
+            不保存
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            loading={saveMutation.isPending}
+            onClick={handleLeaveSave}
+          >
+            保存
+          </Button>,
+        ]}
+      >
+        <p>您对画布的修改尚未保存，是否现在保存？</p>
+      </Modal>
     </div>
   )
 }

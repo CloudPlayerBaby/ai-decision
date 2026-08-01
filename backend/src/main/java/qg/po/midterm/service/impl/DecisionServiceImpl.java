@@ -345,13 +345,21 @@ public class DecisionServiceImpl implements DecisionService {
         }
         checkOwner(decision);
 
-        // 优先读取用户保存的画布
+        // 查最新分析结果
+        AnalysisResult result = findLatestResultForCanvas(id);
+
+        // 优先读取用户保存的画布，但如果有更新的分析结果则放弃旧画布
         LambdaQueryWrapper<DecisionCanvas> canvasWrapper = new LambdaQueryWrapper<>();
         canvasWrapper.eq(DecisionCanvas::getDecisionId, id)
                 .orderByDesc(DecisionCanvas::getUpdatedAt)
                 .last("LIMIT 1");
         DecisionCanvas savedCanvas = decisionCanvasMapper.selectOne(canvasWrapper);
-        if (savedCanvas != null && savedCanvas.getCanvasData() != null) {
+        boolean canvasStale = result != null && savedCanvas != null
+                && result.getUpdatedAt() != null
+                && savedCanvas.getUpdatedAt() != null
+                && result.getUpdatedAt().isAfter(savedCanvas.getUpdatedAt());
+
+        if (savedCanvas != null && savedCanvas.getCanvasData() != null && !canvasStale) {
             try {
                 return objectMapper.readValue(savedCanvas.getCanvasData(), Canvas.class);
             } catch (Exception e) {
@@ -359,8 +367,7 @@ public class DecisionServiceImpl implements DecisionService {
             }
         }
 
-        // 无可保存画布，从分析结果自动生成
-        AnalysisResult result = findLatestResultForCanvas(id);
+        // 无有效保存画布，从分析结果自动生成
         if (result == null || result.getResultData() == null) {
             return new Canvas(Collections.emptyList(), Collections.emptyList());
         }
@@ -446,12 +453,9 @@ public class DecisionServiceImpl implements DecisionService {
     private AnalysisResult findLatestResultForCanvas(Long decisionId) {
         LambdaQueryWrapper<AnalysisResult> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AnalysisResult::getDecisionId, decisionId)
-                .orderByDesc(AnalysisResult::getCreatedAt);
-        List<AnalysisResult> list = analysisResultMapper.selectList(wrapper);
-        return list.stream()
-                .filter(r -> "CONFIRMED".equals(r.getStatus()))
-                .findFirst()
-                .orElse(list.isEmpty() ? null : list.get(0));
+                .orderByDesc(AnalysisResult::getCreatedAt)
+                .last("LIMIT 1");
+        return analysisResultMapper.selectOne(wrapper);
     }
 
     /**
@@ -477,10 +481,9 @@ public class DecisionServiceImpl implements DecisionService {
             factorData.put("weight", f.getWeight());
             nodes.add(createNode(f.getId(), "factor", f.getName(),
                     new Canvas.Position(x, 180), factorData));
-            edges.add(createEdge("e_f_" + i, "root", f.getId(), "HAS_FACTOR"));
         }
 
-        // Option 节点 + edge
+        // Option 节点
         List<Option> options = dto.getOptions() != null
                 ? dto.getOptions() : Collections.emptyList();
         int optionCount = options.size();
@@ -493,8 +496,10 @@ public class DecisionServiceImpl implements DecisionService {
                     ? o.getScores() : Collections.emptyMap());
             nodes.add(createNode(o.getId(), "option", o.getName(),
                     new Canvas.Position(x, 340), optionData));
-            edges.add(createEdge("e_o_" + i, "root", o.getId(), "HAS_OPTION"));
+
         }
+
+        edges.addAll(CanvasTopologyBuilder.buildEdges(factors, options));
 
         return new Canvas(nodes, edges);
     }

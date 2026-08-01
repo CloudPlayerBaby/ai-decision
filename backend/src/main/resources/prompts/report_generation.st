@@ -8,7 +8,8 @@
 {selectedOptionName}
 
 【要求】
-请输出一个标准的 JSON 对象，包含以下字段：
+基于推演数据忠实整理报告，不得补造其中没有的事实或数值。结论应尊重用户最终选择；如果该选择与模型推荐不同，应客观说明权衡，不得擅自替换用户选择。
+报告包含以下字段：
 1. background (String): 决策的背景描述。
 2. objective (String): 用户的核心目标。
 3. factorAnalysis (List<Object>): 对关键影响因素的综合分析，对象包含 name, weight, description。
@@ -16,5 +17,3 @@
 5. conclusion (String): 推荐的最终结论，必须明确推荐用户选择的方案并说明理由。
 6. riskAnalysis (List<String>): 实施该最终方案可能面临的核心风险。
 7. nextActions (List<String>): 给用户的具体的下一步行动建议。
-
-{format}

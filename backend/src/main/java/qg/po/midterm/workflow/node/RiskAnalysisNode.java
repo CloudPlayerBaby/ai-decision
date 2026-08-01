@@ -13,10 +13,10 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Option;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /** 工作流节点：对比方案风险，生成最终推荐。 */
 @Slf4j
@@ -26,6 +26,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/risk.st")
     private Resource promptResource;
@@ -49,9 +50,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             String understanding = state.getUnderstanding();
             List<Option> options = state.getOptions();
             
-            String optionStr = options == null ? "无" : options.stream()
-                .map(o -> String.format("- 方案ID: %s, 名称: %s, 描述: %s", o.getId(), o.getName(), o.getDescription()))
-                .collect(Collectors.joining("\n"));
+            String optionStr = objectMapper.writeValueAsString(options != null ? options : List.of());
 
             String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
 
@@ -76,7 +75,7 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
+            String outputData = objectMapper.writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             
             return Map.of(

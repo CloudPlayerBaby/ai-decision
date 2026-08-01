@@ -13,7 +13,7 @@ function delay<T>(value: T, ms = 280): Promise<T> {
   return new Promise((resolve) => {
     window.setTimeout(() => resolve(value), ms)
   })
-}
+} 
 
 export async function register(body: RegisterRequest): Promise<AuthUser> {
   if (isMockEnabled()) {

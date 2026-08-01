@@ -8,6 +8,7 @@ spring:
       chat:
         options:
           model: deepseek-v4-flash
+          temperature: 0.2
         response-format:
           type: JSON_OBJECT
   application:

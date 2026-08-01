@@ -481,6 +481,15 @@ body.is-resizing .resize-handle::before {
   font-size: 12px;
 }
 
+.canvas-panel__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .canvas-panel__toolbar .ant-btn {
   font-size: 12px;
 }
@@ -579,6 +588,7 @@ body.is-resizing .resize-handle::before {
 }
 
 .canvas-node {
+  position: relative;
   min-width: 180px;
   max-width: 220px;
   padding: 10px 12px;
@@ -602,6 +612,10 @@ body.is-resizing .resize-handle::before {
 .canvas-node--option {
   border-color: var(--node-option-border);
   background: var(--node-option-bg);
+}
+
+.canvas-node--option-recommended {
+  border: 2px solid var(--decision);
 }
 
 .canvas-node__label {
@@ -633,6 +647,15 @@ body.is-resizing .resize-handle::before {
   color: var(--badge-text);
   font-size: 10px;
   font-weight: 600;
+}
+
+.canvas-node__badge--corner {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 10;
+  background: var(--decision);
+  color: #fff;
 }
 
 /* —— 右侧推演对话 —— */

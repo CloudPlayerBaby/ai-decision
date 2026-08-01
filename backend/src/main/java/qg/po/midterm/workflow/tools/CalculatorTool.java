@@ -9,6 +9,7 @@ import java.util.Map;
 import org.springframework.context.ApplicationEventPublisher;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.context.TaskContextHolder;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 外部工具调用示例：计算器
@@ -20,12 +21,13 @@ import qg.po.midterm.workflow.context.TaskContextHolder;
 public class CalculatorTool {
 
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     private void publishToolEvent(String status, String inputSummary, String outputSummary) {
         TaskContextHolder.TaskContext ctx = TaskContextHolder.getContext();
         if (ctx != null && eventPublisher != null) {
             try {
-                String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+                String outputData = objectMapper.writeValueAsString(
                         Map.of("toolName", "calculator", "inputSummary", inputSummary, "outputSummary", outputSummary != null ? outputSummary : "")
                 );
                 eventPublisher.publishEvent(new NodeExecutionEvent(
@@ -46,19 +48,18 @@ public class CalculatorTool {
             @ToolParam(description = "调用此计算器的目的") String purpose) {
         
         log.info("🛠️ [Function Call] 大模型触发了计算器工具! 目的: {}, 表达式: {}", purpose, expression);
-        publishToolEvent("RUNNING", "计算: " + purpose + " (" + expression + ")", null);
+        publishToolEvent("RUNNING", purpose + " (" + expression + ")", null);
         
         try {
             // 使用 Spring 内置的 SpEL 引擎计算数学表达式
             double result = SafeMathEvaluator.evaluate(expression);
             log.info("🛠️ [Function Call] 计算结果: {}", result);
-            publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "结果: " + result);
-            return result + "\n[系统提示：你可以基于上述结果继续推理，或者根据需要再次调用 searchWeb/calculator 等工具。不要急于输出结论，直到你收集了充分的数据。]";
+            publishToolEvent("SUCCEEDED", purpose + " (" + expression + ")", Double.toString(result));
+            return Double.toString(result);
         } catch (Exception e) {
             log.error("🛠️ [Function Call] 计算出错: {}", e.getMessage());
-            publishToolEvent("SUCCEEDED", "计算: " + purpose + " (" + expression + ")", "计算出错");
-            return "计算失败：" + e.getMessage()
-                    + "\n[系统提示：请只使用数字、小数、括号和 + - * / % 运算符。]";
+            publishToolEvent("SUCCEEDED", purpose + " (" + expression + ")", "计算出错");
+            return "计算失败：" + e.getMessage() + "。表达式仅支持数字、小数、括号和 + - * / % 运算符。";
         }
     }
 }

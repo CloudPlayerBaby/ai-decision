@@ -10,8 +10,11 @@ import org.springframework.core.io.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.DecisionState;
+import tools.jackson.databind.ObjectMapper;
 
+import java.util.List;
 import java.util.Map;
 
 /** 工作流节点：综合所有信息，生成最终总结报告。 */
@@ -22,6 +25,7 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
 
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/report.st")
     private Resource promptResource;
@@ -33,10 +37,17 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "RUNNING"));
             log.info("Node [ReportGeneration] executing for decision: {}", state.getDecisionId());
 
-            String understanding = state.getUnderstanding();
-            
+            String analysisResult = objectMapper.writeValueAsString(Map.of(
+                    "understanding", state.getUnderstanding() != null ? state.getUnderstanding() : "",
+                    "factors", state.getFactors() != null ? state.getFactors() : List.of(),
+                    "options", state.getOptions() != null ? state.getOptions() : List.of(),
+                    "recommendation", state.getRecommendation() != null
+                            ? state.getRecommendation() : new AnalysisResultDto.Recommendation(),
+                    "nextActions", state.getNextActions() != null ? state.getNextActions() : List.of()
+            ));
+
             Map<String, Object> params = Map.of(
-                "understanding", understanding != null ? understanding : "无"
+                "analysisResult", analysisResult
             );
             String prompt = new PromptTemplate(promptResource).create(params).getContents();
             
@@ -50,7 +61,7 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", reportSummary);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("reportSummary", reportSummary));
+            String outputData = objectMapper.writeValueAsString(Map.of("reportSummary", reportSummary));
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "ReportGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             // 实际生成报告可能需要保存到特定实体中，这里先作为结果之一存入 State
             return Map.of("reportSummary", reportSummary);

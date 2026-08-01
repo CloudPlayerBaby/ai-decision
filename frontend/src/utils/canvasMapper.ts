@@ -180,4 +180,57 @@ function toFlowNodes(
   return nodes.map((n) => toFlowNode(n, opts))
 }
 
-export { toCanvasNode, toCanvasEdge, buildCanvasData, toFlowNode, toFlowNodes }
+/** 聚合页：决策 + 画布 + 分析结果 → CanvasViewModel */
+function buildCanvasViewModel(
+  decision: { id: string; title: string; goal?: string; constraints?: string },
+  canvas: { nodes: import('../types/canvas').CanvasNode[]; edges: import('../types/canvas').CanvasEdge[] },
+  analysisResult?: {
+    factors?: Array<{ id: string; name: string; description?: string }>
+    options?: Array<{
+      id: string
+      pros?: string[]
+      cons?: string[]
+      risks?: string[]
+    }>
+    recommendation?: { optionId?: string | null }
+    canvas?: { nodes: import('../types/canvas').CanvasNode[]; edges: import('../types/canvas').CanvasEdge[] }
+  },
+): import('../types/canvas').CanvasViewModel {
+  const factorsDetail: Record<string, FactorDetail> = {}
+  if (analysisResult?.factors) {
+    for (const f of analysisResult.factors) {
+      factorsDetail[f.id] = { description: f.description ?? '' }
+    }
+  }
+
+  const optionsDetail: Record<string, OptionDetail> = {}
+  if (analysisResult?.options) {
+    for (const o of analysisResult.options) {
+      optionsDetail[o.id] = {
+        pros: o.pros ?? [],
+        cons: o.cons ?? [],
+        risks: o.risks ?? [],
+      }
+    }
+  }
+
+  // 使用 canvasQuery 的 canvas（来自 GET /decisions/:id/canvas）
+  // 注：analysisResult.canvas 可能包含后端生成的边，但前端只信任 canvasQuery 的数据
+  return {
+    decision: {
+      id: decision.id,
+      title: decision.title,
+      goal: decision.goal ?? '',
+      constraints: decision.constraints ?? '',
+    },
+    canvas: {
+      nodes: canvas.nodes,
+      edges: canvas.edges,
+    },
+    factorsDetail,
+    optionsDetail,
+    recommendedOptionId: analysisResult?.recommendation?.optionId ?? null,
+  }
+}
+
+export { toCanvasNode, toCanvasEdge, buildCanvasData, toFlowNode, toFlowNodes, buildCanvasViewModel }

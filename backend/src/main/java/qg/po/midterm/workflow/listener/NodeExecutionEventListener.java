@@ -1,7 +1,7 @@
 package qg.po.midterm.workflow.listener;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -43,6 +43,7 @@ public class NodeExecutionEventListener {
     private final AnalysisEventService eventService;
     private final ObjectMapper objectMapper;
     private final CanvasMergeService canvasMergeService;
+    private final StepDisplayUtils stepDisplayUtils;
 
     @EventListener
     @Transactional
@@ -441,7 +442,7 @@ public class NodeExecutionEventListener {
         data.put("stepId", "s_" + step.getId());
         data.put("status", step.getStatus());
 
-        StepDisplayUtils.StepDisplay display = StepDisplayUtils.parseDisplay(
+        StepDisplayUtils.StepDisplay display = stepDisplayUtils.parseDisplay(
                 step.getStepName(), step.getStatus(), step.getOutputData(), step.getErrorMessage());
 
         data.put("summary", display.summary());

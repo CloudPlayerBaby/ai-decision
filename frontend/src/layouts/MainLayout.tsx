@@ -218,7 +218,7 @@ export function MainLayout() {
 
             <div className="app-sider__footer">
               {leftCollapsed ? (
-                <Space direction="vertical" size={4} align="center">
+                <Space orientation="vertical" size={4} align="center">
                   {themeToggleButton}
                   <Tooltip title="退出登录" placement="right">
                     <Button
@@ -229,7 +229,7 @@ export function MainLayout() {
                   </Tooltip>
                 </Space>
               ) : (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   <Space
                     style={{ width: '100%', justifyContent: 'space-between' }}
                   >

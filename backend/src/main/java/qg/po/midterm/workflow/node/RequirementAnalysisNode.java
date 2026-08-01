@@ -12,6 +12,7 @@ import org.springframework.ai.chat.prompt.PromptTemplate;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.tools.CalculatorTool;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
@@ -24,6 +25,7 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
     private final ChatClient chatClient;
     private final ApplicationEventPublisher eventPublisher;
     private final CalculatorTool calculatorTool;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/requirement.st")
     private Resource promptResource;
@@ -58,7 +60,7 @@ public class RequirementAnalysisNode implements NodeAction<DecisionState> {
         log.info("<<< 【AI Response】\n{}", result);
 
         // 使用 ObjectMapper 将结果序列化为 JSON 字符串
-        String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
+        String outputData = objectMapper.writeValueAsString(result);
 
         eventPublisher.publishEvent(new NodeExecutionEvent(this, "RequirementAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
         return Map.of(

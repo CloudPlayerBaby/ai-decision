@@ -9,6 +9,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.HttpClientErrorException;
 import qg.po.midterm.workflow.context.TaskContextHolder;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
 
@@ -22,6 +23,7 @@ public class ExchangeRateTool {
 
     private final ApplicationEventPublisher eventPublisher;
     private final RestTemplate restTemplate = createRestTemplate();
+    private final ObjectMapper objectMapper;
     
     private static RestTemplate createRestTemplate() {
         org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
@@ -41,7 +43,7 @@ public class ExchangeRateTool {
         TaskContextHolder.TaskContext ctx = TaskContextHolder.getContext();
         if (ctx != null && eventPublisher != null) {
             try {
-                String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+                String outputData = objectMapper.writeValueAsString(
                         Map.of("toolName", "exchangeRate", "inputSummary", inputSummary, "outputSummary", outputSummary != null ? outputSummary : "")
                 );
                 eventPublisher.publishEvent(new NodeExecutionEvent(
@@ -66,7 +68,7 @@ public class ExchangeRateTool {
 
         if (baseCode == null || baseCode.trim().isEmpty() || baseCode.length() != 3) {
              publishToolEvent("SUCCEEDED", "查询汇率: " + baseCode, "参数错误");
-             return "查询失败：基准货币代码不合法。\n[系统提示：必须是标准的 ISO 4217 三位全大写字母货币代码，例如：USD, CNY。请检查后重新调用本工具。]";
+             return "查询失败：基准货币代码不合法，必须使用 ISO 4217 三位货币代码，例如 USD、CNY。";
         }
 
         try {
@@ -78,14 +80,12 @@ public class ExchangeRateTool {
                 Object rates = response.get("conversion_rates");
                 log.info("🛠️ [Function Call] 汇率查询成功");
                 publishToolEvent("SUCCEEDED", "查询汇率: " + baseCode, "查询成功，已获取多国汇率");
-                return "当前基准货币 " + baseCode + " 的实时汇率如下：\n" + rates.toString() 
-                        + "\n[系统提示：你可以基于上述汇率结果，调用 calculator 工具进行准确的成本折算计算。]";
+                return "当前基准货币 " + baseCode + " 的实时汇率如下：\n" + rates;
             } else if (response != null && "error".equals(response.get("result"))) {
                 String errorType = (String) response.get("error-type");
                 log.error("🛠️ [Function Call] 汇率查询业务错误: {}", errorType);
                 publishToolEvent("SUCCEEDED", "查询汇率: " + baseCode, "API报错: " + errorType);
-                return "查询失败，API 返回错误类型: " + errorType 
-                        + "\n[系统提示：如果错误是 unsupported-code，说明你传入的 baseCode 不是有效的 ISO 4217 代码。请修正后重新调用本工具。]";
+                return "查询失败，API 返回错误类型: " + errorType;
             }
             
             return "查询失败：未知错误。";
@@ -93,7 +93,7 @@ public class ExchangeRateTool {
         } catch (HttpClientErrorException e) {
             log.error("🛠️ [Function Call] 汇率 HTTP 请求错误: {}", e.getMessage());
             publishToolEvent("SUCCEEDED", "查询汇率: " + baseCode, "网络请求错误");
-            return "请求失败：" + e.getMessage() + "\n[系统提示：网络请求错误，可以尝试使用其他替代方案评估。]";
+            return "请求失败：" + e.getMessage();
         } catch (Exception e) {
             log.error("🛠️ [Function Call] 汇率查询系统异常: {}", e.getMessage());
             publishToolEvent("SUCCEEDED", "查询汇率: " + baseCode, "系统异常");

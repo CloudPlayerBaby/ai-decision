@@ -15,6 +15,7 @@ import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 import qg.po.midterm.workflow.tools.CalculatorTool;
 import qg.po.midterm.workflow.tools.ExchangeRateTool;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
     private final ApplicationEventPublisher eventPublisher;
     private final CalculatorTool calculatorTool;
     private final ExchangeRateTool exchangeRateTool;
+    private final ObjectMapper objectMapper;
 
     @Value("classpath:prompts/option.st")
     private Resource promptResource;
@@ -84,7 +86,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
-            String outputData = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result);
+            String outputData = objectMapper.writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
             return Map.of(
                     "options", result.options() != null ? result.options() : List.of(),
