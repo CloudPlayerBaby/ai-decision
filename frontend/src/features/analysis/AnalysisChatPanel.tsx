@@ -1,118 +1,85 @@
-import { useState, useEffect, useRef } from 'react';
-import { Spin, Result, Typography, Empty, Space } from 'antd';
-import { ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import type { AnalysisStep, ToolCallEvent, DecisionOption, Recommendation } from '../../types/analysis';
-import type { ConnectionStatus } from '../../hooks/useAnalysisStream';
-import { ChatMessage } from './ChatMessage';
-import { StepLogCard } from './StepLogCard';
-import { ToolCallCard } from './ToolCallCard';
-import { OptionComparison } from './OptionComparison';
-import '../../styles/AnalysisChatPanel.css';
+import { useEffect, useRef } from 'react'
+import { Empty, Result, Space, Spin, Typography } from 'antd'
+import { CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import type {
+  AnalysisStep,
+  DecisionOption,
+  Recommendation,
+  ToolCallEvent,
+} from '../../types/analysis'
+import type { ConnectionStatus } from '../../hooks/useAnalysisStream'
+import { ChatMessage } from './ChatMessage'
+import { StepLogCard } from './StepLogCard'
+import { ToolCallCard } from './ToolCallCard'
+import { OptionComparison } from './OptionComparison'
+import '../../styles/AnalysisChatPanel.css'
 
-const { Text } = Typography;
+const { Text } = Typography
 
 interface Props {
-  userMessage: string;
-  steps: AnalysisStep[];
-  toolCalls: ToolCallEvent[];
-  connectionStatus: ConnectionStatus;
-  options: DecisionOption[];
-  recommendation: Recommendation | null;
-  analysisResultId: string;
-  /** 用户已选择的方案 ID（来自 decision.preferredOptionId） */
-  selectedOptionId?: string | null;
-  /** COMPLETED 或 WAITING_CONFIRM 状态时为 true，跳过动画，直接展示历史结果 */
-  isHistory?: boolean;
-  onAllStepsCompleted?: () => void;
-  onRetryStep?: (stepId: string) => void;
+  userMessage: string
+  steps: AnalysisStep[]
+  toolCalls: ToolCallEvent[]
+  connectionStatus: ConnectionStatus
+  options: DecisionOption[]
+  recommendation: Recommendation | null
+  analysisResultId: string
+  selectedOptionId?: string | null
+  isHistory?: boolean
+  /** 当前任务失败是否可重试 */
+  retryable?: boolean
+  /** 失败的步骤 ID */
+  failedStepId?: string | null
+  /** 决策状态，用于区分整轮推演 / 局部推演 */
+  decisionStatus?: string
+  onAllStepsCompleted?: () => void
+  onRetryStep?: (stepId: string) => void
 }
 
 export function AnalysisChatPanel({
   userMessage,
-  steps: initialSteps,
+  steps,
   toolCalls,
   connectionStatus,
   options,
   recommendation,
   analysisResultId,
-  selectedOptionId: externalSelectedOptionId,
+  selectedOptionId,
   isHistory = false,
+  retryable = false,
+  failedStepId = null,
+  decisionStatus,
   onAllStepsCompleted,
   onRetryStep,
 }: Props) {
-  const [simSteps, setSimSteps] = useState<AnalysisStep[]>(initialSteps);
-  const timerRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const analysisCompleted =
+    steps.length > 0 && steps.every((step) => step.status === 'SUCCEEDED')
+  const hasResultData = options.length > 0 && recommendation !== null
+  const hasHistoryData = isHistory && hasResultData
+  const isPartial = decisionStatus === 'PARTIAL_ANALYZING'
 
-  const analysisCompleted = simSteps.length > 0 && simSteps.every((s) => s.status === 'SUCCEEDED');
-
-  const onCompletedRef = useRef(onAllStepsCompleted);
-  onCompletedRef.current = onAllStepsCompleted;
+  const onCompletedRef = useRef(onAllStepsCompleted)
+  onCompletedRef.current = onAllStepsCompleted
 
   useEffect(() => {
     if (analysisCompleted) {
-      onCompletedRef.current?.();
+      onCompletedRef.current?.()
     }
-  }, [analysisCompleted]);
-
-  useEffect(() => {
-    setSimSteps(initialSteps);
-  }, [initialSteps]);
-
-  useEffect(() => {
-    if (isHistory) return;
-
-    timerRef.current = [];
-
-    const pending = initialSteps.filter((s) => s.status === 'RUNNING' || s.status === 'WAITING');
-
-    pending.forEach((step, idx) => {
-      const i = initialSteps.indexOf(step);
-
-      if (step.status === 'WAITING') {
-        const runningTimer = setTimeout(() => {
-          setSimSteps((prev) =>
-            prev.map((s, j) => (j === i ? { ...s, status: 'RUNNING' as const, summary: '正在分析中...' } : s)),
-          );
-        }, idx * 2000 + 500);
-        timerRef.current.push(runningTimer);
-      }
-
-      const delay = step.status === 'WAITING' ? idx * 2000 + 1500 : idx * 2000 + 500;
-
-      const doneTimer = setTimeout(() => {
-        setSimSteps((prev) =>
-          prev.map((s, j) =>
-            j === i
-              ? {
-                  ...s,
-                  status: 'SUCCEEDED' as const,
-                  summary: s.content ? s.content.slice(0, 30) + '...' : '分析完成',
-                }
-              : s,
-          ),
-        );
-      }, delay);
-      timerRef.current.push(doneTimer);
-    });
-
-    return () => {
-      timerRef.current.forEach(clearTimeout);
-    };
-  }, [initialSteps, isHistory]);
-
-  const displaySteps = simSteps;
-  const hasResultData = options.length > 0 && recommendation !== null;
-  const hasHistoryData = isHistory && hasResultData;
+  }, [analysisCompleted])
 
   const footerText = () => {
-    if (isHistory) return '● 历史记录';
+    if (isHistory) return '历史记录'
     switch (connectionStatus) {
-      case 'idle': return '等待推演';
-      case 'connecting': return '连接中...';
-      case 'connected': return '● 已连接';
-      case 'reconnecting': return '● 连接恢复中...';
+      case 'idle':
+        return '等待推演'
+      case 'connecting':
+        return '连接中...'
+      case 'connected':
+        return '已连接'
+      case 'reconnecting':
+        return '连接恢复中...'
     }
-  };
+  }
 
   return (
     <div className="analysis-panel">
@@ -121,17 +88,19 @@ export function AnalysisChatPanel({
       <div className="analysis-panel__body">
         {connectionStatus === 'idle' && !hasHistoryData && (
           <Empty
-            image={<ThunderboltOutlined style={{ fontSize: 48, color: '#1677ff' }} />}
+            image={
+              <ThunderboltOutlined style={{ fontSize: 48, color: '#1677ff' }} />
+            }
             description={
               <Text type="secondary">
-                点击上方「开始推演」按钮，启动 AI 决策分析
+                点击上方“开始推演”按钮，启动 AI 决策分析
               </Text>
             }
             style={{ marginTop: 32 }}
           />
         )}
 
-        {(connectionStatus === 'connecting') && (
+        {connectionStatus === 'connecting' && (
           <div className="analysis-panel__loading">
             <Spin size="small" />
             <span>正在连接...</span>
@@ -145,44 +114,71 @@ export function AnalysisChatPanel({
             {!analysisCompleted && !isHistory && (
               <div className="analysis-panel__loading">
                 <Spin size="small" />
-                <span>正在推演...</span>
+                <span>{isPartial ? '正在局部推演...' : '正在推演...'}</span>
+                {isPartial && (
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                    仅重新推演受影响的部分，其余结果保持不变
+                  </Text>
+                )}
               </div>
             )}
 
-            {displaySteps
-              .filter((s) => s.status !== 'WAITING')
+            {steps
+              .filter((step) => step.status !== 'WAITING')
               .map((step) => (
                 <div key={step.id}>
-                  <StepLogCard step={step} onRetry={onRetryStep} />
+                  <StepLogCard
+                    step={step}
+                    onRetry={
+                      retryable && step.id === failedStepId
+                        ? onRetryStep
+                        : undefined
+                    }
+                  />
                   {toolCalls
-                    .filter((tc) => tc.stepId === step.id)
-                    .map((tc) => (
-                      <ToolCallCard key={`${tc.stepId}-${tc.toolName}`} toolCall={tc} />
+                    .filter((toolCall) => toolCall.stepId === step.id)
+                    .map((toolCall) => (
+                      <ToolCallCard
+                        key={`${step.id}-${toolCall.toolName}`}
+                        toolCall={toolCall}
+                      />
                     ))}
                 </div>
+              ))}
+
+            {/* 没有 stepId 的工具调用：单独渲染 */}
+            {toolCalls
+              .filter((tc) => !tc.stepId)
+              .map((tc) => (
+                <ToolCallCard
+                  key={`orphan-${tc.toolName}`}
+                  toolCall={tc}
+                />
               ))}
 
             {(analysisCompleted || hasHistoryData) && hasResultData && (
               <OptionComparison
                 options={options}
                 recommendation={recommendation}
-                selectedOptionId={externalSelectedOptionId}
+                selectedOptionId={selectedOptionId}
               />
             )}
 
-            {isHistory && externalSelectedOptionId && (
+            {isHistory && selectedOptionId && (
               <div className="confirm-result">
                 <Result
                   icon={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
                   title="方案已确认"
                   subTitle={
-                    <Space direction="vertical" size={4}>
+                    <Space orientation="vertical" size={4}>
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        已选择方案: <Text strong>{externalSelectedOptionId}</Text>
+                        已选择方案: <Text strong>{selectedOptionId}</Text>
                       </Text>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        草案: {analysisResultId}
-                      </Text>
+                      {analysisResultId ? (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          草案: {analysisResultId}
+                        </Text>
+                      ) : null}
                     </Space>
                   }
                 />
@@ -194,5 +190,5 @@ export function AnalysisChatPanel({
 
       <div className="analysis-panel__footer">{footerText()}</div>
     </div>
-  );
+  )
 }
