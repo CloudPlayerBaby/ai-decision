@@ -55,6 +55,10 @@ exchange-rate:
   api-key: ${EXCHANGERATE_API_KEY:}
 
 # Sentry 错误日志监控配置
+app:
+  demo:
+    fail-option-generation-once: ${DEMO_FAIL_OPTION_GENERATION_ONCE:false}
+
 sentry:
   # 必须配置 DSN，否则 Sentry 不会启动。这个链接是从你刚才贴出的官方文档中提取的
   dsn: https://e46378eb75244b37876c1adcfe6990fd@o4511829869199360.ingest.us.sentry.io/4511830110306304
