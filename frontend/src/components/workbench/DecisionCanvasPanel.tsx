@@ -794,6 +794,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                   themeMode === 'eyeCare' ? '#b6c4d8' : '#94a3b8',
                 strokeWidth: themeMode === 'eyeCare' ? 2.5 : 1.75,
               },
+              selectable: true,
             }}
             proOptions={{ hideAttribution: true }}
           >

@@ -79,6 +79,7 @@ export function WorkbenchPage() {
   // ── 局部推演状态 ──────────────────────────────────────────
   /** 保存成功后，后端返回的 changedNodeIds；局部重推成功后保留，失败后允许重试 */
   const [pendingChangedNodeIds, setPendingChangedNodeIds] = useState<string[]>([])
+  void pendingChangedNodeIds // 保留 setter 供其他功能使用
   /** 当前局部推演任务；结束时清空 */
   const [partialAnalysisInfo, setPartialAnalysisInfo] = useState<{
     taskId: string
@@ -682,35 +683,6 @@ export function WorkbenchPage() {
             >
               {saveMutation.isPending ? '保存中…' : '保存画布'}
             </Button>
-            <Tooltip
-              title={
-                pendingChangedNodeIds.length === 0
-                  ? '当前修改仅影响布局，无需局部重推'
-                  : partialAnalysisInfo !== null
-                    ? '已有局部推演进行中'
-                    : undefined
-              }
-            >
-              <Button
-                disabled={
-                  pendingChangedNodeIds.length === 0 ||
-                  partialAnalysisInfo !== null ||
-                  saveForPartialMutation.isPending ||
-                  startPartialAnalysisMutation.isPending
-                }
-                loading={startPartialAnalysisMutation.isPending}
-                onClick={() => {
-                  startPartialAnalysisMutation.mutate(
-                    buildPartialChangedNodeIds(
-                      pendingChangedNodeIds,
-                      canvasRef.current ?? activeCanvas,
-                    ),
-                  )
-                }}
-              >
-                {startPartialAnalysisMutation.isPending ? '局部重推中…' : '局部重推'}
-              </Button>
-            </Tooltip>
             <Button
               type="primary"
               disabled={!canConfirm || confirmMutation.isPending}
