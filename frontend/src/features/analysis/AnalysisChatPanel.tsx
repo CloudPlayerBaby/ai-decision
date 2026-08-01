@@ -129,7 +129,7 @@ export function AnalysisChatPanel({
                 <div key={step.id}>
                   <StepLogCard
                     step={step}
-                    animate={!isHistory && step.status !== 'FAILED'}
+                    animate={!isHistory && step.status === 'RUNNING'}
                     onRetry={
                       retryable && step.id === failedStepId
                         ? onRetryStep

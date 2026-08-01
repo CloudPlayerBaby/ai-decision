@@ -34,6 +34,8 @@ export function StepLogCard({ step, onRetry, animate = true }: Props) {
     animate ? '' : targetContent,
   )
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 一旦打字机启动就锁住，后续 animate 变 false 也不掐断（防止 SSE 推 SUCCEEDED 后全量覆盖）
+  const startedRef = useRef(false)
 
   useEffect(() => {
     if (timerRef.current) {
@@ -41,7 +43,7 @@ export function StepLogCard({ step, onRetry, animate = true }: Props) {
       timerRef.current = null
     }
 
-    if (!animate) {
+    if (!animate && !startedRef.current) {
       setDisplayedContent(targetContent)
       return
     }
@@ -50,6 +52,8 @@ export function StepLogCard({ step, onRetry, animate = true }: Props) {
       if (!targetContent.startsWith(current)) return ''
       return current
     })
+
+    startedRef.current = true
 
     timerRef.current = setInterval(() => {
       setDisplayedContent((current) => {
@@ -72,7 +76,7 @@ export function StepLogCard({ step, onRetry, animate = true }: Props) {
     }
   }, [targetContent, animate])
 
-  const isTyping = animate && displayedContent.length < targetContent.length
+  const isTyping = (animate || startedRef.current) && displayedContent.length < targetContent.length
   const cursorStyle: CSSProperties = {
     display: 'inline-block',
     width: 2,
