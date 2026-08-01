@@ -57,6 +57,11 @@ function getNodeRank(node: FlowNode): number {
  * @param edges 原始边数组
  * @param options 布局选项
  * @returns 应用布局后的节点和边
+ *
+ * 布局规则：
+ * - 已定位的节点：保留原有位置
+ * - 未定位的节点：用 dagre 计算位置
+ * - 所有节点都会设置 sourcePosition / targetPosition（用于连接线）
  */
 export function applyDagreLayout<T extends FlowNode>(
   nodes: T[],
@@ -65,6 +70,42 @@ export function applyDagreLayout<T extends FlowNode>(
 ): { nodes: T[]; edges: FlowEdge[] } {
   const opts = { ...DEFAULT_OPTIONS, ...options }
   const isHorizontal = opts.direction === 'LR'
+
+  // 分离已定位和未定位的节点
+  const positionedNodes: T[] = []
+  const unpositionedNodes: T[] = []
+
+  nodes.forEach((node) => {
+    const hasPosition =
+      node.position &&
+      typeof node.position.x === 'number' &&
+      typeof node.position.y === 'number' &&
+      !isNaN(node.position.x) &&
+      !isNaN(node.position.y)
+
+    if (hasPosition) {
+      positionedNodes.push(node)
+    } else {
+      unpositionedNodes.push(node)
+    }
+  })
+
+  // source/target position（用于连接线）
+  const targetPosition: Position = isHorizontal ? Position.Left : Position.Top
+  const sourcePosition: Position = isHorizontal ? Position.Right : Position.Bottom
+
+  // 如果所有节点都已定位，直接返回（保留位置）
+  if (unpositionedNodes.length === 0) {
+    console.log('[canvasLayout] 所有节点已定位，保留原有位置')
+    return {
+      nodes: nodes.map((node) => ({
+        ...node,
+        targetPosition,
+        sourcePosition,
+      })) as T[],
+      edges,
+    }
+  }
 
   console.log('[canvasLayout] === 原始边数据 ===')
   edges.forEach(e => console.log(`  ${e.source} → ${e.target} (relation: ${e.relation})`))
@@ -81,8 +122,22 @@ export function applyDagreLayout<T extends FlowNode>(
     ranker: 'tight-tree',
   })
 
-  // 添加节点到 dagre 图，明确指定每种节点的层级
-  nodes.forEach((node) => {
+  // 添加已定位节点到 dagre 图（固定位置）
+  positionedNodes.forEach((node) => {
+    const rank = getNodeRank(node)
+    console.log(`[canvasLayout] 节点 ${node.id} (type: ${node.type}) 已定位，保留位置`)
+    dagreGraph.setNode(node.id, {
+      width: opts.nodeWidth,
+      height: opts.nodeHeight,
+      minRank: rank,
+      maxRank: rank,
+      [isHorizontal ? 'x' : 'y']: node.position.x,
+      [isHorizontal ? 'y' : 'x']: node.position.y,
+    })
+  })
+
+  // 添加未定位节点到 dagre 图
+  unpositionedNodes.forEach((node) => {
     const rank = getNodeRank(node)
     console.log(`[canvasLayout] 节点 ${node.id} (type: ${node.type}) 分配到 rank ${rank}`)
     dagreGraph.setNode(node.id, {
@@ -108,19 +163,30 @@ export function applyDagreLayout<T extends FlowNode>(
     console.log(`  ${node.id} (${node.type}): x=${pos.x?.toFixed(0)}, y=${pos.y?.toFixed(0)}`)
   })
 
-  // 将 dagre 位置映射回节点
+  // 映射节点位置：已定位保留，未定位用 dagre 计算
   const layoutedNodes = nodes.map((node) => {
+    const hasPosition =
+      node.position &&
+      typeof node.position.x === 'number' &&
+      typeof node.position.y === 'number' &&
+      !isNaN(node.position.x) &&
+      !isNaN(node.position.y)
+
+    // 已定位节点：保留原有位置
+    if (hasPosition) {
+      return {
+        ...node,
+        targetPosition,
+        sourcePosition,
+      } as T
+    }
+
+    // 未定位节点：用 dagre 计算
     const nodeWithPosition = dagreGraph.node(node.id)
-
-    // 设置 source/target position 以匹配连接线方向
-    const targetPosition: Position = isHorizontal ? Position.Left : Position.Top
-    const sourcePosition: Position = isHorizontal ? Position.Right : Position.Bottom
-
     return {
       ...node,
       targetPosition,
       sourcePosition,
-      // dagre 返回的是中心点坐标，转换为左上角坐标
       position: {
         x: nodeWithPosition.x - (opts.nodeWidth ?? DEFAULT_NODE_WIDTH) / 2,
         y: nodeWithPosition.y - (opts.nodeHeight ?? DEFAULT_NODE_HEIGHT) / 2,

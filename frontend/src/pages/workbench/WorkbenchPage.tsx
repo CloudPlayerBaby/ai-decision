@@ -314,6 +314,8 @@ export function WorkbenchPage() {
   const [isDirty, setIsDirty] = useState(false)
   // 追踪用户是否已实际修改过画布（区分初始化和用户操作）
   const hasUserEdited = useRef(false)
+  // 保存按钮回调时引用最新 canvas 数据（需要在使用前声明）
+  const canvasRef = useRef<import('@/types/canvas').Canvas | null>(null)
   // 等 canvasQuery 数据回来后，对比缓存和服务器内容决定初始 isDirty（仅执行一次）
   const didEvaluateCache = useRef(false)
   useEffect(() => {
@@ -321,15 +323,23 @@ export function WorkbenchPage() {
     if (didEvaluateCache.current) return
     didEvaluateCache.current = true
     const cached = readCanvasCache(id)
-    if (cached) {
+    console.log('[WorkbenchPage] evaluateCache: cached=', cached ? 'exists' : 'null', 'canvasQuery.data=', canvasQuery.data ? 'exists' : 'null')
+    if (cached && canvasQuery.data) {
       const serverVersion = buildServerVersion(canvasQuery.data)
-      const isDirty = serverVersion !== cached.serverVersion
-      console.log('[WorkbenchPage] evaluateCache: serverVersion=', serverVersion, 'cachedServerVersion=', cached.serverVersion, 'isDirty=', isDirty)
+      // 同时检查 serverVersion 和 canvas 内容是否变化
+      const isVersionDirty = serverVersion !== cached.serverVersion
+      // 比较 canvas 内容（nodes/edges 的位置等）
+      const isContentDirty = JSON.stringify(canvasQuery.data) !== JSON.stringify(cached.canvas)
+      const isDirty = isVersionDirty || isContentDirty
+      console.log('[WorkbenchPage] evaluateCache: serverVersion=', serverVersion, 'cachedServerVersion=', cached.serverVersion, 'versionDirty=', isVersionDirty, 'contentDirty=', isContentDirty, 'isDirty=', isDirty)
       setIsDirty(isDirty)
+      // 初始化 canvasRef，以便刷新后立即可以保存
+      canvasRef.current = cached.canvas
+    } else if (canvasQuery.data) {
+      // 没有缓存但有后端数据，也初始化 canvasRef
+      canvasRef.current = canvasQuery.data
     }
   }, [canvasQuery.data, id])
-  // 保存按钮回调时引用最新 canvas 数据
-  const canvasRef = useRef<import('@/types/canvas').Canvas | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
