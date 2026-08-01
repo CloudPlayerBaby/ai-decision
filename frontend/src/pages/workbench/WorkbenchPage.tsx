@@ -113,6 +113,10 @@ export function WorkbenchPage() {
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.analysisResult(id, event.analysisResultId),
       });
+      // 失效 canvas 查询，使画布能显示后端返回的新节点和边
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.canvas(id),
+      });
     },
     onTaskFailed: (event) => {
       if (event.retryable) {

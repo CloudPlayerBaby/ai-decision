@@ -588,6 +588,7 @@ body.is-resizing .resize-handle::before {
 }
 
 .canvas-node {
+  position: relative;
   min-width: 180px;
   max-width: 220px;
   padding: 10px 12px;
@@ -611,6 +612,10 @@ body.is-resizing .resize-handle::before {
 .canvas-node--option {
   border-color: var(--node-option-border);
   background: var(--node-option-bg);
+}
+
+.canvas-node--option-recommended {
+  border: 2px solid var(--decision);
 }
 
 .canvas-node__label {
@@ -642,6 +647,15 @@ body.is-resizing .resize-handle::before {
   color: var(--badge-text);
   font-size: 10px;
   font-weight: 600;
+}
+
+.canvas-node__badge--corner {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 10;
+  background: var(--decision);
+  color: #fff;
 }
 
 /* —— 右侧推演对话 —— */
