@@ -263,53 +263,61 @@ function createNode(type: 'factor' | 'option', existingNodes: FlowNode[]): FlowN
 
 // ── 主组件 ───────────────────────────────────────────────────
 
-export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
+// ── 外层：仅处理 viewModel 缺失的 early return ──────────────────
+// React 19 要求所有 hooks 在所有条件 return 之后调用，
+// 因此把内层组件拆分出来，保证 hooks 调用顺序稳定。
+function DecisionCanvasPanelEmpty() {
+  return (
+    <div className="canvas-panel">
+      <div className="canvas-panel__empty">
+        <span>暂无画布数据</span>
+      </div>
+    </div>
+  )
+}
+
+// ── 内层：包含所有 hooks，hooks 永远在 return 之前调用 ────────
+function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const { viewModel, onDirtyChange, onCanvasChange } = props
 
-  // viewModel 缺失时显示空状态，由父组件通过 React Query 获取后传入
-  if (!viewModel) {
-    return (
-      <div className="canvas-panel">
-        <div className="canvas-panel__empty">
-          <span>暂无画布数据</span>
-        </div>
-      </div>
-    )
-  }
+  const vm = viewModel as import('../../types/canvas').CanvasViewModel
+  const { canvas, factorsDetail = {}, optionsDetail = {}, recommendedOptionId = null } = vm
+  const decisionInfo = vm.decision
 
-  // 展示字段统一从 viewModel 读取，不再单独接收 optionsDetail / factorsDetail 等 prop
-  const {
-    canvas,
-    factorsDetail = {},
-    optionsDetail = {},
-    recommendedOptionId = null,
-  } = viewModel
+  // 通过 mapper 将后端 CanvasData → FlowNode/FlowEdge
+  // 注意：initialNodesRef / initialEdgesRef 只在首次渲染时初始化一次，
+  // 后续 viewModel 变化（如 canvasQuery refetch）不会重新初始化 nodes/edges，
+  // 从而保护用户本地编辑不被覆盖。
+  const initialNodesRef = useRef<FlowNode[]>(
+    toFlowNodes(canvas.nodes, {
+      factorsDetail,
+      optionsDetail,
+      recommendedOptionId,
+      decisionInfo,
+    }),
+  )
+  const initialEdgesRef = useRef<FlowEdge[]>(
+    canvas.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      relation: e.relation ?? '',
+    })),
+  )
 
-  const decisionInfo = viewModel.decision
-
-  // 通过 mapper 将后端 CanvasData → FlowNode/FlowEdge（丢弃仅展示字段）
-  const initialNodes = toFlowNodes(canvas.nodes, {
-    factorsDetail,
-    optionsDetail,
-    recommendedOptionId,
-    decisionInfo,
-  })
-
-  const initialEdges: FlowEdge[] = canvas.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    relation: e.relation ?? '',
-  }))
-
-  const [nodes, setNodes] = useNodesState(initialNodes)
-  const [edges, setEdges] = useEdgesState(initialEdges)
+  const [nodes, setNodes] = useNodesState(initialNodesRef.current)
+  const [edges, setEdges] = useEdgesState(initialEdgesRef.current)
   const themeMode = useLayoutStore((state) => state.themeMode)
   const dotColor = themeMode === 'eyeCare' ? '#2f3644' : '#d9dee7'
 
   // 脏检测：用 buildCanvasData 序列化语义快照
-  const initialSignature = useRef(JSON.stringify(buildCanvasData(initialNodes, initialEdges)))
-  const lastNotifiedSignature = useRef<string | null>(null)
+  const initialSignature = useRef(
+    JSON.stringify(buildCanvasData(initialNodesRef.current, initialEdgesRef.current)),
+  )
+  // 初始化为初始签名，避免首次 effect 就触发 handleCanvasChange
+  const lastNotifiedSignature = useRef<string>(initialSignature.current)
+  const lastNotifiedDirty = useRef<boolean>(false)
+  // 跳过首次渲染的 effect，避免从缓存恢复时覆盖父组件的 isDirty=true
   const didMount = useRef(false)
 
   const onDirtyChangeRef = useRef(onDirtyChange)
@@ -321,6 +329,7 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
   })
 
   useEffect(() => {
+    console.log('[CanvasPanel] effect triggered: nodes/edges changed')
     if (!didMount.current) {
       didMount.current = true
       return
@@ -328,13 +337,18 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
 
     const currentSignature = JSON.stringify(buildCanvasData(nodes, edges))
     const isDirty = currentSignature !== initialSignature.current
+    console.log('[CanvasPanel] effect: isDirty=', isDirty)
 
     if (currentSignature !== lastNotifiedSignature.current) {
       lastNotifiedSignature.current = currentSignature
       onCanvasChangeRef.current?.(buildCanvasData(nodes, edges))
     }
-
-    onDirtyChangeRef.current?.(isDirty)
+    // 仅在 dirty 状态真正变化时通知父组件（避免覆盖 sessionStorage 恢复的 isDirty=true）
+    if (isDirty !== lastNotifiedDirty.current) {
+      lastNotifiedDirty.current = isDirty
+      console.log('[CanvasPanel] effect: calling onDirtyChange(', isDirty, ')')
+      onDirtyChangeRef.current?.(isDirty)
+    }
   }, [nodes, edges])
 
   const nodesRef = useRef(nodes)
@@ -404,12 +418,8 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
 
   const closeModal = useCallback(() => {
     setModalOpen(false)
-    const nodeToRemove = isNewNode ? editingNode : null
     setEditingNode(null)
-    if (nodeToRemove) {
-      setNodes((prev) => prev.filter((n) => n.id !== nodeToRemove!.id) as FlowNode[])
-    }
-  }, [isNewNode, editingNode, setNodes])
+  }, [])
 
   // 提交表单：只更新 label / weight / scores，description 和 pros/cons/risks 不可持久化
   const submitForm = useCallback(() => {
@@ -417,10 +427,23 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
       if (!editingNode) return
 
       if (editingNode.type === 'factor') {
-        setNodes((prev) =>
-          prev.map((n) =>
-            n.id === editingNode.id
-              ? ({
+        if (isNewNode) {
+          // 新建：仅在确认时才加入节点列表
+          const newNode: FlowNode = {
+            ...editingNode,
+            data: {
+              ...editingNode.data,
+              label: values.label,
+              weight: weightValue,
+            },
+          }
+          setNodes((prev) => [...prev, newNode])
+        } else {
+          // 编辑：更新现有节点
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === editingNode.id
+                ? ({
                   ...n,
                   data: {
                     ...n.data,
@@ -428,14 +451,32 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
                     weight: weightValue,
                   },
                 } as FactorFlowNode)
-              : n,
-          ),
-        )
+                : n,
+            ),
+          )
+        }
       } else if (editingNode.type === 'option') {
-        setNodes((prev) =>
-          prev.map((n) =>
-            n.id === editingNode.id
-              ? ({
+        if (isNewNode) {
+          const newNode: FlowNode = {
+            ...editingNode,
+            data: {
+              ...editingNode.data,
+              label: values.label,
+              scores: {
+                cost: values.cost,
+                time: values.time,
+                benefit: values.benefit,
+                risk: values.risk,
+                feasibility: values.feasibility,
+              },
+            },
+          }
+          setNodes((prev) => [...prev, newNode])
+        } else {
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === editingNode.id
+                ? ({
                   ...n,
                   data: {
                     ...n.data,
@@ -449,15 +490,16 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
                     },
                   },
                 } as OptionFlowNode)
-              : n,
-          ),
-        )
+                : n,
+            ),
+          )
+        }
       }
 
       setModalOpen(false)
       setEditingNode(null)
     })
-  }, [editingNode, weightValue, form, setNodes])
+  }, [editingNode, isNewNode, weightValue, form, setNodes])
 
   const deleteNode = useCallback(
     (nodeId: string) => {
@@ -526,16 +568,14 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
 
   const addFactor = useCallback(() => {
     const node = createNode('factor', nodes)
-    setNodes((prev) => [...prev, node])
     openModal(node, true)
-  }, [nodes, setNodes, openModal])
+  }, [nodes, openModal])
 
   const addOption = useCallback(() => {
     const node = createNode('option', nodes)
-    setNodes((prev) => [...prev, node])
     setActiveTabKey('settings')
     openModal(node, true)
-  }, [nodes, setNodes, openModal])
+  }, [nodes, openModal])
 
   // pros / cons / risks 只从 editingNode.data 读取（由 toFlowNode 注入）
   // editingNode?.type === 'option' 收窄 editingNode，但三元表达式的收窄不传播到 editingNode.data
@@ -634,7 +674,7 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
           footer={null}
           width={720}
           closable={false}
-          maskClosable={false}
+          mask={{ closable: false }}
           keyboard={false}
           className="canvas-modal"
           styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto' } }}
@@ -817,4 +857,12 @@ export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
       </div>
     </CanvasActionsContext.Provider>
   )
+}
+
+// ── 出口组件：根据 viewModel 有无决定渲染空状态还是完整画布 ──────
+export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
+  if (!props.viewModel) {
+    return <DecisionCanvasPanelEmpty />
+  }
+  return <DecisionCanvasPanelInner {...props} />
 }

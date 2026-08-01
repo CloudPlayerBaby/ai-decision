@@ -1,4 +1,11 @@
-import { Navigate, Route, Routes, useParams } from 'react-router-dom'
+import {
+  Navigate,
+  Outlet,
+  Route,
+  createBrowserRouter,
+  createRoutesFromElements,
+  useParams,
+} from 'react-router-dom'
 import { AuthGuard } from '@/components/AuthGuard'
 import { MainLayout } from '@/layouts/MainLayout'
 import { LoginPage } from '@/pages/auth/LoginPage'
@@ -9,6 +16,7 @@ import { WorkbenchPage } from '@/pages/workbench/WorkbenchPage'
 import { ReportCenterPage } from '@/pages/reports/ReportCenterPage'
 import { ReportDetailPage } from '@/pages/reports/ReportDetailPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { ThemedApp } from './providers'
 
 function LegacyWorkbenchRedirect() {
   const { decisionId = 'demo-1' } = useParams<{ decisionId: string }>()
@@ -22,7 +30,15 @@ function LegacyReportRedirect() {
 
 export function AppRouter() {
   return (
-    <Routes>
+    <ThemedApp>
+      <Outlet />
+    </ThemedApp>
+  )
+}
+
+export const appRouter = createBrowserRouter(
+  createRoutesFromElements(
+    <Route element={<AppRouter />}>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
@@ -59,6 +75,6 @@ export function AppRouter() {
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />
-    </Routes>
-  )
-}
+    </Route>,
+  ),
+)

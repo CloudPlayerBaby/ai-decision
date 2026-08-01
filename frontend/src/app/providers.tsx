@@ -1,9 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfigProvider, App as AntApp, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { BrowserRouter } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { AppRouter } from '@/app/router'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { ThemeDocumentSync } from '@/components/layout/ThemeDocumentSync'
 import { LayoutViewportSync } from '@/components/layout/LayoutViewportSync'
@@ -23,7 +21,7 @@ interface AppProvidersProps {
   children?: ReactNode
 }
 
-function ThemedApp({ children }: { children?: ReactNode }) {
+export function ThemedApp({ children }: { children?: ReactNode }) {
   const themeMode = useLayoutStore((state) => state.themeMode)
   const isEyeCare = themeMode === 'eyeCare'
 
@@ -58,7 +56,7 @@ function ThemedApp({ children }: { children?: ReactNode }) {
       <ThemeDocumentSync />
       <LayoutViewportSync />
       <AntApp>
-        <BrowserRouter>{children ?? <AppRouter />}</BrowserRouter>
+        {children}
       </AntApp>
     </ConfigProvider>
   )
