@@ -1,5 +1,5 @@
 import { Button, Card, Form, Input, Space, Typography, message, Tooltip } from 'antd'
-import { BulbFilled, BulbOutlined } from '@ant-design/icons'
+import { BulbFilled, BulbOutlined, LockOutlined, UserOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
@@ -59,7 +59,7 @@ export function LoginPage() {
   return (
     <div className="auth-page">
       <div className="auth-page__theme-toggle">
-        <Tooltip title={isEyeCare ? '切换日间模式' : '切换护眼夜间模式'}>
+        <Tooltip title={isEyeCare ? '切换日间模式' : '切换护眼模式'}>
           <Button
             icon={isEyeCare ? <BulbFilled /> : <BulbOutlined />}
             onClick={toggleThemeMode}
@@ -68,14 +68,21 @@ export function LoginPage() {
           </Button>
         </Tooltip>
       </div>
-      <Card style={{ width: 400, maxWidth: '100%' }}>
+
+      <aside className="auth-page__brand">
+        <div className="auth-page__brand-mark">NovaAI</div>
+        <h1 className="auth-page__brand-title">开启智能决策空间</h1>
+        <p className="auth-page__brand-desc">
+          情景推演、方案对比与报告生成，一站完成关键决策。
+        </p>
+      </aside>
+
+      <Card className="auth-page__card" variant="borderless">
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>
-            <Title level={3} style={{ marginBottom: 4 }}>
-              登录
-            </Title>
+            <Title level={3}>欢迎回来</Title>
             <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              AI 情景推演决策系统
+              登录后继续你的决策推演
             </Paragraph>
           </div>
           <Form<LoginFormValues>
@@ -88,7 +95,12 @@ export function LoginPage() {
               name="account"
               rules={[{ required: true, message: '请输入用户名或邮箱' }]}
             >
-              <Input placeholder="邮箱或用户名" autoComplete="username" />
+              <Input
+                prefix={<UserOutlined />}
+                placeholder="邮箱或用户名"
+                autoComplete="username"
+                size="large"
+              />
             </Form.Item>
             <Form.Item
               label="密码"
@@ -96,12 +108,15 @@ export function LoginPage() {
               rules={[{ required: true, message: '请输入密码' }]}
             >
               <Input.Password
+                prefix={<LockOutlined />}
                 placeholder="密码"
                 autoComplete="current-password"
+                size="large"
               />
             </Form.Item>
             <Form.Item style={{ marginBottom: 8 }}>
               <Button
+                className="auth-page__submit"
                 type="primary"
                 htmlType="submit"
                 block
@@ -113,7 +128,10 @@ export function LoginPage() {
             </Form.Item>
           </Form>
           <Paragraph style={{ marginBottom: 0, textAlign: 'center' }}>
-            还没有账号？ <Link to="/register">注册</Link>
+            还没有账号？{' '}
+            <Link className="auth-page__link" to="/register">
+              立即注册
+            </Link>
           </Paragraph>
         </Space>
       </Card>

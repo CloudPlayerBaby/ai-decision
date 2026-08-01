@@ -10,6 +10,12 @@
   border-radius: 12px;
   font-size: 14px;
   line-height: 1.6;
-  background: #e6f4ff;
-  color: var(--text-h);
+  background: var(--chat-user-bg);
+  color: var(--chat-user-fg);
+  border: 1px solid var(--chat-user-border);
+  box-shadow: 0 4px 14px rgba(15, 27, 61, 0.08);
+}
+
+[data-theme='eye-care'] .chat-bubble--user .chat-bubble__content {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
 }
