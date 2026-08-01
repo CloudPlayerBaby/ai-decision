@@ -1,5 +1,11 @@
 import { Button, Card, Form, Input, Space, Typography, message, Tooltip } from 'antd'
-import { BulbFilled, BulbOutlined } from '@ant-design/icons'
+import {
+  BulbFilled,
+  BulbOutlined,
+  LockOutlined,
+  MailOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useLayoutStore } from '@/stores/layoutStore'
@@ -38,7 +44,7 @@ export function RegisterPage() {
   return (
     <div className="auth-page">
       <div className="auth-page__theme-toggle">
-        <Tooltip title={isEyeCare ? '切换日间模式' : '切换护眼夜间模式'}>
+        <Tooltip title={isEyeCare ? '切换日间模式' : '切换护眼模式'}>
           <Button
             icon={isEyeCare ? <BulbFilled /> : <BulbOutlined />}
             onClick={toggleThemeMode}
@@ -47,14 +53,21 @@ export function RegisterPage() {
           </Button>
         </Tooltip>
       </div>
-      <Card style={{ width: 400, maxWidth: '100%' }}>
+
+      <aside className="auth-page__brand">
+        <div className="auth-page__brand-mark">NovaAI</div>
+        <h1 className="auth-page__brand-title">开启智能决策空间</h1>
+        <p className="auth-page__brand-desc">
+          创建账号，开始你的情景推演与方案对比。
+        </p>
+      </aside>
+
+      <Card className="auth-page__card" variant="borderless">
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <div>
-            <Title level={3} style={{ marginBottom: 4 }}>
-              注册
-            </Title>
+            <Title level={3}>创建新账号</Title>
             <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              创建账号后开始决策推演
+              注册后即可开始决策推演
             </Paragraph>
           </div>
           <Form<RegisterFormValues>
@@ -73,7 +86,12 @@ export function RegisterPage() {
                 },
               ]}
             >
-              <Input placeholder="用户名" autoComplete="username" />
+              <Input
+                prefix={<UserOutlined />}
+                placeholder="用户名"
+                autoComplete="username"
+                size="large"
+              />
             </Form.Item>
             <Form.Item
               label="邮箱"
@@ -83,7 +101,12 @@ export function RegisterPage() {
                 { type: 'email', message: '请输入合法邮箱' },
               ]}
             >
-              <Input placeholder="email@example.com" autoComplete="email" />
+              <Input
+                prefix={<MailOutlined />}
+                placeholder="email@example.com"
+                autoComplete="email"
+                size="large"
+              />
             </Form.Item>
             <Form.Item
               label="密码"
@@ -98,12 +121,15 @@ export function RegisterPage() {
               ]}
             >
               <Input.Password
+                prefix={<LockOutlined />}
                 placeholder="8–64 位，含字母和数字"
                 autoComplete="new-password"
+                size="large"
               />
             </Form.Item>
             <Form.Item style={{ marginBottom: 8 }}>
               <Button
+                className="auth-page__submit"
                 type="primary"
                 htmlType="submit"
                 block
@@ -115,7 +141,10 @@ export function RegisterPage() {
             </Form.Item>
           </Form>
           <Paragraph style={{ marginBottom: 0, textAlign: 'center' }}>
-            已有账号？ <Link to="/login">登录</Link>
+            已有账号？{' '}
+            <Link className="auth-page__link" to="/login">
+              去登录
+            </Link>
           </Paragraph>
         </Space>
       </Card>

@@ -672,6 +672,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             nodesConnectable
             elementsSelectable
             colorMode={themeMode === 'eyeCare' ? 'dark' : 'light'}
+            defaultEdgeOptions={{
+              style: {
+                stroke:
+                  themeMode === 'eyeCare' ? '#b6c4d8' : '#94a3b8',
+                strokeWidth: themeMode === 'eyeCare' ? 2.5 : 1.75,
+              },
+            }}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={18} size={1} color={dotColor} />
