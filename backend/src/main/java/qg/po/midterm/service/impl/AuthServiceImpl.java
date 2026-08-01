@@ -23,6 +23,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
+    // 注册，并检查用户名和邮箱
     @Override
     public UserVO register(RegisterRequest request) {
         if (sysUserMapper.selectCount(new LambdaQueryWrapper<SysUser>()
@@ -43,6 +44,7 @@ public class AuthServiceImpl implements AuthService {
         return toUserVO(user);
     }
 
+    // 登录
     @Override
     public LoginVO login(LoginRequest request) {
         String account = request.getAccount();
@@ -66,6 +68,7 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
+    // 根据 userId 获取当前登录的用户信息
     @Override
     public UserVO getCurrentUser(Long userId) {
         SysUser user = sysUserMapper.selectById(userId);
@@ -75,6 +78,7 @@ public class AuthServiceImpl implements AuthService {
         return toUserVO(user);
     }
 
+    // 转成 userVO
     private UserVO toUserVO(SysUser user) {
         return UserVO.builder()
                 .id("u_" + user.getId())

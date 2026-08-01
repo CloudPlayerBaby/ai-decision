@@ -35,7 +35,7 @@ spring:
           min-idle: 2
 
 jwt:
-  secret: ${JWT_SECRET:ai-decision-default-secret-change-me-in-production}
+  secret: ${JWT_SECRET}
   expiration: 7200
 
 mybatis-plus:
@@ -48,6 +48,10 @@ mybatis-plus:
 
 tavily:
   api-key: ${TAVILY_API_KEY:}
+
+# 汇率 API 配置
+exchange-rate:
+  api-key: ${EXCHANGERATE_API_KEY:}
 
 # Sentry 错误日志监控配置
 sentry:

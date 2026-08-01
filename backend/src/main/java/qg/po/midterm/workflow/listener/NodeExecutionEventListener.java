@@ -1,30 +1,24 @@
 package qg.po.midterm.workflow.listener;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-import qg.po.midterm.common.enums.ErrorCode;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import qg.po.midterm.common.enums.DecisionStatus;
-import qg.po.midterm.entity.AnalysisResult;
-import qg.po.midterm.entity.AnalysisStep;
-import qg.po.midterm.entity.AnalysisTask;
-import qg.po.midterm.entity.Decision;
-import qg.po.midterm.entity.DecisionCanvas;
-import qg.po.midterm.mapper.AnalysisResultMapper;
-import qg.po.midterm.mapper.AnalysisStepMapper;
-import qg.po.midterm.mapper.AnalysisTaskMapper;
-import qg.po.midterm.mapper.DecisionMapper;
-import qg.po.midterm.mapper.DecisionCanvasMapper;
-import qg.po.midterm.service.AnalysisEventService;
-import qg.po.midterm.service.impl.CanvasMergeService;
+import qg.po.midterm.common.enums.ErrorCode;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.Canvas;
+import qg.po.midterm.entity.*;
+import qg.po.midterm.mapper.*;
+import qg.po.midterm.service.AnalysisEventService;
+import qg.po.midterm.service.impl.CanvasMergeService;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
 import qg.po.midterm.workflow.event.WorkflowFailedEvent;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import qg.po.midterm.workflow.utils.StepDisplayUtils;
 
 import java.time.LocalDateTime;
@@ -32,10 +26,6 @@ import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.ArrayList;
-import java.util.Comparator;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 把 Workflow 节点事件转换成数据库状态和 SSE 事件
@@ -170,7 +160,7 @@ public class NodeExecutionEventListener {
                     sseData.put("status", event.getStatus());
                     sseData.put("inputSummary", toolData.get("inputSummary"));
                     sseData.put("outputSummary", toolData.get("outputSummary"));
-                    
+
                     String externalTaskId = "t_" + task.getId();
                     sendAfterCommit(() -> eventService.sendToolCall(externalTaskId, sseData));
                 } catch (Exception e) {
@@ -274,7 +264,7 @@ public class NodeExecutionEventListener {
         data.put("message", message);
         data.put("failedStepId", step == null ? null : "s_" + step.getId());
         data.put("retryable", retryable);
-        
+
         if (aiException != null) {
             data.put("missingFields", aiException.getMissingFields());
             data.put("repairAttempted", aiException.isRepairAttempted());
@@ -450,7 +440,7 @@ public class NodeExecutionEventListener {
         data.put("taskId", "t_" + task.getId());
         data.put("stepId", "s_" + step.getId());
         data.put("status", step.getStatus());
-        
+
         StepDisplayUtils.StepDisplay display = StepDisplayUtils.parseDisplay(
                 step.getStepName(), step.getStatus(), step.getOutputData(), step.getErrorMessage());
 

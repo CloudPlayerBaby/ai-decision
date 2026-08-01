@@ -60,14 +60,10 @@ public class TaskRuntimeRepository {
 
     // 移除连接
     public void removeConnection(String taskId, SseEmitter emitter) {
-        List<SseEmitter> emitters = connections.get(taskId);
-        if (emitters == null) {
-            return;
-        }
-        emitters.remove(emitter);
-        if (emitters.isEmpty()) {
-            connections.remove(taskId);
-        }
+        connections.computeIfPresent(taskId, (key, emitters) -> {
+            emitters.remove(emitter);
+            return emitters.isEmpty() ? null : emitters;
+        });
     }
 
     // 获取taskId所有的Emitter

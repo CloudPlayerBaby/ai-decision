@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.jspecify.annotations.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -40,8 +41,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain chain) throws ServletException, IOException {
+                                    @NonNull HttpServletResponse response,
+                                    @NonNull FilterChain chain) throws ServletException, IOException {
 
         // 1. 从 HTTP 请求头中获取名为 "Authorization" 的 Header
         String header = request.getHeader("Authorization");
@@ -56,16 +57,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 3. 截取掉 "Bearer " 前缀（共 7 个字符），拿到真正的 JWT 字符串
         String token = header.substring(7);
-
-        // 针对测试开发加一个永不过期的后门 Token（白名单）
-        if ("dev-token-never-expire-123456".equals(token)) {
-            // 直接赋予测试用户（假设 userId 为 1）的登录态，跳过所有 JWT 解析和过期校验
-            UsernamePasswordAuthenticationToken auth =
-                    new UsernamePasswordAuthenticationToken(1L, null, List.of());
-            SecurityContextHolder.getContext().setAuthentication(auth);
-            chain.doFilter(request, response);
-            return;
-        }
 
         try {
             // 4.1 校验 Token（检查签名是否合法、是否过期等）

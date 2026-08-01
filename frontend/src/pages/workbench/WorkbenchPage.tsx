@@ -57,6 +57,7 @@ export function WorkbenchPage() {
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [animCompleted, setAnimCompleted] = useState(false)
+  const [activeResultId, setActiveResultId] = useState<string | null>(null)
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
@@ -100,10 +101,12 @@ export function WorkbenchPage() {
   const selectedOptionId = decision?.preferredOptionId ?? null
 
   const historyResultId = pendingResultId ?? confirmedResultId ?? null
+  const effectiveResultId = activeResultId ?? historyResultId
 
-  const { steps, connectionStatus, toolCalls } = useAnalysisStream({
+  const { steps, connectionStatus, toolCalls, retryable, failedStepId } = useAnalysisStream({
     taskId,
     onResultReady: async (event) => {
+      setActiveResultId(event.analysisResultId)
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
       });
@@ -122,18 +125,19 @@ export function WorkbenchPage() {
 
   useEffect(() => {
     setAnimCompleted(false);
+    setActiveResultId(null);
   }, [taskId]);
 
   const resultQuery = useQuery({
-    queryKey: queryKeys.decisions.analysisResult(id, historyResultId),
-    queryFn: () => getAnalysisResult(id, historyResultId),
+    queryKey: queryKeys.decisions.analysisResult(id, effectiveResultId),
+    queryFn: () => getAnalysisResult(id, effectiveResultId),
     enabled:
       Boolean(id) &&
       Boolean(
         decision?.status === 'WAITING_CONFIRM' ||
           decision?.status === 'COMPLETED' ||
           decision?.hasPendingResult ||
-          historyResultId,
+          effectiveResultId,
       ),
   })
 
@@ -370,11 +374,10 @@ export function WorkbenchPage() {
   }
 
   const canStartAnalysis =
-    decision.status === 'PENDING' ||
+    (decision.status === 'PENDING' && !animCompleted) ||
     decision.status === 'WAITING_CONFIRM' ||
     decision.status === 'COMPLETED' ||
-    decision.status === 'FAILED' ||
-    animCompleted
+    decision.status === 'FAILED'
 
   const analyzing =
     (decision.status === 'ANALYZING' ||
@@ -384,7 +387,7 @@ export function WorkbenchPage() {
   const canConfirm =
     decision.status === 'WAITING_CONFIRM' ||
     Boolean(decision.hasPendingResult) ||
-    animCompleted
+    (animCompleted && decision.status !== 'COMPLETED')
 
   return (
     <div className="workbench">
@@ -438,7 +441,7 @@ export function WorkbenchPage() {
               }
               onClick={() => startMutation.mutate()}
             >
-              {analyzing ? '推演中…' : '开始推演'}
+              {analyzing ? '推演中…' : decision.status === 'WAITING_CONFIRM' || decision.status === 'COMPLETED' ? '重新推演' : '开始推演'}
             </Button>
             <Button
               onClick={() => {
@@ -531,6 +534,9 @@ export function WorkbenchPage() {
                 recommendation={displayRecommendation}
                 analysisResultId={displayAnalysisResultId}
                 selectedOptionId={selectedOptionId}
+                retryable={retryable}
+                failedStepId={failedStepId}
+                decisionStatus={decision.status}
                 isHistory={decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM'}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
                 onRetryStep={(stepId) => retryMutation.mutate(stepId)}
