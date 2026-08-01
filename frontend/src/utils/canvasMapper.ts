@@ -240,7 +240,7 @@ function buildCanvasViewModel(
   }
 }
 
-export { toCanvasNode, toCanvasEdge, buildCanvasData, toFlowNode, toFlowNodes, buildCanvasViewModel, rebalanceWeights }
+export { toCanvasNode, toCanvasEdge, buildCanvasData, toFlowNode, toFlowNodes, buildCanvasViewModel, rebalanceWeights, redistributeWeightsOnDelete }
 
 // ── 权重比例重分配 ──────────────────────────────────────────────
 
@@ -302,5 +302,64 @@ function rebalanceWeights(
     const weight = isLast ? remaining : remaining * proportion
     remaining -= weight
     return { ...n, data: { ...n.data, weight: Math.max(0, weight) } }
+  }) as import('../types/flow').FlowNode[]
+}
+
+/**
+ * 删除因素后的权重重分配算法。
+ * 将被删除因素的权重按比例分配给其余因素，使总和精确保持 1。
+ *
+ * 规则：
+ * - 所有权重总和始终精确等于 1
+ * - 单因素时禁止删除（由调用方保证）
+ * - 其余因素按原权重比例分配
+ * - 最后剩余因素用余数补齐，处理浮点误差
+ * - 若剩余因素原权重总和为 0，则平均分配
+ *
+ * @param factorNodes  全部 factor 节点（FlowNode[]，type='factor'）
+ * @param deletedId    被删除的那个节点的 id
+ * @returns 更新后的 factor 节点数组（不包含被删除的节点）
+ */
+function redistributeWeightsOnDelete(
+  factorNodes: import('../types/flow').FlowNode[],
+  deletedId: string,
+): import('../types/flow').FlowNode[] {
+  // 过滤掉被删除的节点
+  const remaining = factorNodes.filter((n) => n.id !== deletedId)
+
+  // 边界：只剩一个因素时，它必须是 1
+  if (remaining.length === 1) {
+    return remaining.map((n) => ({
+      ...n,
+      data: { ...n.data, weight: 1 },
+    })) as import('../types/flow').FlowNode[]
+  }
+
+  // 计算剩余因素的原始权重总和
+  const remainingSum = remaining.reduce(
+    (sum, n) => sum + ((n.data as { weight: number }).weight ?? 0),
+    0,
+  )
+
+  if (remainingSum === 0) {
+    // 原权重总和为 0，平均分配
+    const each = 1 / remaining.length
+    return remaining.map((n) => ({
+      ...n,
+      data: { ...n.data, weight: each },
+    })) as import('../types/flow').FlowNode[]
+  }
+
+  // 按原权重比例分配，最后一个用余数补齐
+  let left = 1
+  return remaining.map((n, idx) => {
+    const isLast = idx === remaining.length - 1
+    const proportion = ((n.data as { weight: number }).weight ?? 0) / remainingSum
+    const weight = isLast ? left : 1 * proportion
+    left -= weight
+    return {
+      ...n,
+      data: { ...n.data, weight: Math.max(0, weight) },
+    }
   }) as import('../types/flow').FlowNode[]
 }
