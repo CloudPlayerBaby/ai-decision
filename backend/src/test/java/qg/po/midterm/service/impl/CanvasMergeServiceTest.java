@@ -11,6 +11,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CanvasMergeServiceTest {
 
@@ -39,5 +40,15 @@ class CanvasMergeServiceTest {
         assertEquals(3, mergedFactor.getPosition().getX());
         assertEquals("new factor", mergedFactor.getLabel());
         assertFalse(merged.getNodes().stream().anyMatch(node -> "stale".equals(node.getId())));
+        assertTrue(merged.getEdges().stream().anyMatch(edge ->
+                "root".equals(edge.getSource())
+                        && "factor_custom".equals(edge.getTarget())
+                        && "HAS_FACTOR".equals(edge.getRelation())));
+        assertTrue(merged.getEdges().stream().anyMatch(edge ->
+                "factor_custom".equals(edge.getSource())
+                        && "new_option".equals(edge.getTarget())
+                        && "AFFECTS".equals(edge.getRelation())));
+        assertFalse(merged.getEdges().stream().anyMatch(edge ->
+                "root".equals(edge.getSource()) && "new_option".equals(edge.getTarget())));
     }
 }

@@ -114,11 +114,11 @@ public class TavilySearchTool {
                     String finalSummary = summary.toString();
                     log.debug("🛠️ [Function Call] 搜索成功，获取了 {} 条结果。具体摘要内容如下：\n{}", results.size(), finalSummary);
                     publishToolEvent("SUCCEEDED", "搜索: " + query, "成功获取 " + results.size() + " 条搜索结果");
-                    return finalSummary + "\n\n[系统提示：你可以基于上述结果继续推理，或者根据需要再次调用 searchWeb/calculator 等工具。不要急于输出结论，直到你收集了充分的数据。]";
+                    return finalSummary;
                 }
 
                 publishToolEvent("SUCCEEDED", "搜索: " + query, "搜索失败，接口未返回有效数据");
-                return "搜索失败，接口未返回有效数据。\n[系统提示：请尝试换一个更宽泛或更准确的 query 重新搜索。]";
+                return "搜索失败，接口未返回有效数据；可以改用更宽泛或更准确的关键词重试。";
 
             } catch (RestClientException e) {
                 log.debug("🛠️ [Function Call] 搜索请求出现网络异常 (第 {}/{} 次尝试): {}", attempt, maxRetries, e.getMessage());
