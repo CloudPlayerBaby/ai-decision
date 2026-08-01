@@ -34,20 +34,27 @@ export function ThemedApp({ children }: { children?: ReactNode }) {
           : antdTheme.defaultAlgorithm,
         token: isEyeCare
           ? {
-              colorPrimary: '#6ea8fe',
-              colorBgBase: '#1a1d24',
-              colorBgContainer: '#22262f',
-              colorBgElevated: '#2a303b',
-              colorText: '#d7dde8',
-              colorTextSecondary: '#9aa3b2',
-              colorBorder: '#3a4150',
-              borderRadius: 6,
+              colorPrimary: '#38bdf8',
+              colorInfo: '#38bdf8',
+              colorLink: '#67e8f9',
+              colorBgBase: '#12131f',
+              colorBgContainer: '#1a1d2e',
+              colorBgElevated: '#22263a',
+              colorText: '#c5cde0',
+              colorTextSecondary: '#8b95b0',
+              colorBorder: '#2a3148',
+              borderRadius: 8,
               fontFamily:
                 '"IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif',
             }
           : {
-              colorPrimary: '#1f6feb',
-              borderRadius: 6,
+              colorPrimary: '#2f6bff',
+              colorInfo: '#2f6bff',
+              colorLink: '#3b82f6',
+              colorBgBase: '#eef3fb',
+              colorBgContainer: '#ffffff',
+              colorBgLayout: '#eef3fb',
+              borderRadius: 8,
               fontFamily:
                 '"IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif',
             },

@@ -17,6 +17,8 @@ import lombok.NoArgsConstructor;
 public class ReportSummaryVO {
 
     private String id;
+    private String decisionId;
+    private String title;
     private String analysisResultId;
     private String status;
     private String generatedAt;
