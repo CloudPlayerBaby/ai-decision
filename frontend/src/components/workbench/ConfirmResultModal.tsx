@@ -71,8 +71,8 @@ export function ConfirmResultModal({
           <Alert
             type="warning"
             showIcon
-            message={`确认草案 ID：${result.id}`}
-            description="确认后该草案将成为正式结果并生成报告；请确认选中的是当前这份 analysisResultId。"
+            message="确认后将生成正式报告"
+            description="请核对下方方案后确认；确认后该结果将成为正式结论并生成报告。"
           />
           {loading ? (
             <Alert

@@ -388,6 +388,8 @@ a {
 
 .page-shell__intro {
   min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .page-shell__body {
@@ -633,6 +635,8 @@ body.is-resizing .resize-handle::before {
 .canvas-panel__hint {
   color: var(--text-muted);
   font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .canvas-panel__empty {
@@ -1188,6 +1192,8 @@ body.is-resizing .resize-handle::before {
   color: var(--text-muted);
   margin-top: 6px;
   line-height: 1.5;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 五维评分 */
@@ -1349,6 +1355,8 @@ body.is-resizing .resize-handle::before {
   background: var(--surface-soft);
   border-radius: 6px;
   border: 1px solid var(--surface-soft-border);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .canvas-modal-analysis__section {
@@ -1402,6 +1410,8 @@ body.is-resizing .resize-handle::before {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.6;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* —— 局部推演状态面板（画布内） —— */

@@ -5,7 +5,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { PagePlaceholder } from '@/components/placeholders/PagePlaceholder'
 import { createDecision } from '@/services/decision.service'
 import { queryKeys } from '@/services/queryKeys'
-import { isMockEnabled } from '@/services/config'
 import type { CreateDecisionRequest } from '@/types/decision'
 
 const { TextArea } = Input
@@ -38,15 +37,7 @@ export function DecisionCreatePage() {
   }
 
   return (
-    <PagePlaceholder
-      title="新建推演"
-      description="填写决策背景、目标与约束，创建后进入决策工作台。"
-      hint={
-        isMockEnabled()
-          ? 'constraints 为自由文本 string · 当前 Mock 模式'
-          : 'constraints 为自由文本 string · POST /decisions'
-      }
-    >
+    <PagePlaceholder title="新建推演">
       <Card>
         <Form<CreateDecisionRequest>
           layout="vertical"
