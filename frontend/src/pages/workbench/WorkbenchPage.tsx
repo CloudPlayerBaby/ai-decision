@@ -7,7 +7,6 @@ import {
   Spin,
   Tag,
   Tooltip,
-  Typography,
   message,
 } from 'antd'
 import {
@@ -45,8 +44,6 @@ import { buildServerVersion } from '@/utils/canvasCache'
 import { queryKeys } from '@/services/queryKeys'
 import { ApiError, BusinessCode } from '@/types/api'
 import { isMockEnabled } from '@/services/config'
-
-const { Text } = Typography
 
 /**
  * 推演工作台：中间画布(A) + 右侧推演对话(B)。
@@ -580,10 +577,7 @@ export function WorkbenchPage() {
     <div className="workbench">
       <PageHeader
         className="workbench__header"
-        breadcrumb={[
-          { title: <Link to="/decisions">决策记录</Link> },
-          { title: decision.title },
-        ]}
+        breadcrumb={[{ title: <Link to="/decisions">决策记录</Link> }]}
         title={decision.title}
         status={
           <DecisionStatusTag
@@ -592,22 +586,11 @@ export function WorkbenchPage() {
           />
         }
         description={
-          <div className="workbench__meta">
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              ID: {decision.id}
-            </Text>
-            {taskId ? (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                任务: {taskId}
-              </Text>
-            ) : null}
-            {pendingResultId ? (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                待确认草案: {pendingResultId}
-              </Text>
-            ) : null}
-            {isMockEnabled() ? <Tag>Mock</Tag> : null}
-          </div>
+          isMockEnabled() ? (
+            <div className="workbench__meta">
+              <Tag>Mock</Tag>
+            </div>
+          ) : undefined
         }
         extra={
           <Space size={[8, 8]} wrap>
@@ -696,7 +679,7 @@ export function WorkbenchPage() {
           showIcon
           banner
           message="有新局部推演结果待确认"
-          description={`旧正式报告仍然有效。请确认草案 ${pendingResultId ?? ''} 后再覆盖正式结论。`}
+          description="旧正式报告仍然有效。请确认新结果后再覆盖正式结论。"
           style={{ marginBottom: 0 }}
         />
       ) : null}

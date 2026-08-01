@@ -11,7 +11,7 @@ import { ResizeHandle } from '../../components/layout/ResizeHandle'
 import { LAYOUT_LIMITS, useLayoutStore } from '../../stores/layoutStore'
 import type { CanvasData } from '../../types/canvas'
 
-const { Title, Text } = Typography
+const { Title } = Typography
 
 const TITLE_MAP: Record<string, string> = {
   'demo-1': '一周 Java 面试复习安排',
@@ -66,9 +66,6 @@ export function DecisionDetailPage() {
             <Tag color="gold">
               {canvasData && isDirty ? '已修改' : '待确认'}
             </Tag>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              ID: {decisionId}
-            </Text>
           </Space>
         </div>
         <Space>

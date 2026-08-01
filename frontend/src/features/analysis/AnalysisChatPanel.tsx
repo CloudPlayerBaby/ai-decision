@@ -43,7 +43,6 @@ export function AnalysisChatPanel({
   connectionStatus,
   options,
   recommendation,
-  analysisResultId,
   selectedOptionId,
   isHistory = false,
   retryable = false,
@@ -175,11 +174,6 @@ export function AnalysisChatPanel({
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         已选择方案: <Text strong>{selectedOptionId}</Text>
                       </Text>
-                      {analysisResultId ? (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          草案: {analysisResultId}
-                        </Text>
-                      ) : null}
                     </Space>
                   }
                 />

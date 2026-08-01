@@ -22,6 +22,7 @@ import {
 import { queryKeys } from '@/services/queryKeys'
 import { ApiError, BusinessCode } from '@/types/api'
 import { isMockEnabled } from '@/services/config'
+import { formatDateTime } from '@/utils/formatDate'
 
 const { Paragraph, Text, Title } = Typography
 
@@ -104,21 +105,13 @@ export function ReportDetailPage() {
         className="page-header page-header--padded"
         breadcrumb={[
           { title: <Link to="/reports">报告中心</Link> },
-          { title: report.title ?? report.id },
+          { title: report.title ?? '决策报告' },
         ]}
         title={report.title ?? '决策报告'}
         description={
-          <Space direction="vertical" size={0}>
-            <Text type="secondary">
-              报告 ID：{report.id} · 决策：{report.decisionId}
-            </Text>
-            <Text type="secondary">
-              对应已确认草案 analysisResultId：{report.analysisResultId}
-            </Text>
-            {isMockEnabled() ? (
-              <Text type="secondary">当前 Mock 模式</Text>
-            ) : null}
-          </Space>
+          isMockEnabled() ? (
+            <Text type="secondary">当前 Mock 模式</Text>
+          ) : undefined
         }
         extra={
           <Space>
@@ -148,7 +141,7 @@ export function ReportDetailPage() {
             <Descriptions column={1} size="small">
               <Descriptions.Item label="状态">{report.status}</Descriptions.Item>
               <Descriptions.Item label="生成时间">
-                {report.generatedAt}
+                {formatDateTime(report.generatedAt)}
               </Descriptions.Item>
             </Descriptions>
           </Card>

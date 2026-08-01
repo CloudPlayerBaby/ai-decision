@@ -4,8 +4,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { PagePlaceholder } from '@/components/placeholders/PagePlaceholder'
 import { listReports } from '@/services/report.service'
-import { isMockEnabled } from '@/services/config'
 import type { ReportListItem } from '@/types/report'
+import { formatDateTime } from '@/utils/formatDate'
 
 /** 报告中心：查看已确认生成的正式决策报告 */
 export function ReportCenterPage() {
@@ -18,16 +18,7 @@ export function ReportCenterPage() {
   })
 
   return (
-    <PagePlaceholder
-      title="报告中心"
-      description="查看已确认生成的正式决策报告。"
-      wide
-      hint={
-        isMockEnabled()
-          ? '当前 Mock 列表'
-          : '已接入 GET /reports'
-      }
-    >
+    <PagePlaceholder title="报告中心" wide>
       <Table<ReportListItem>
         rowKey="id"
         loading={isLoading}
@@ -51,7 +42,12 @@ export function ReportCenterPage() {
             width: 100,
             render: (status: string) => <Tag color="success">{status}</Tag>,
           },
-          { title: '生成时间', dataIndex: 'generatedAt', width: 200 },
+          {
+            title: '生成时间',
+            dataIndex: 'generatedAt',
+            width: 180,
+            render: (value: string) => formatDateTime(value),
+          },
           {
             title: '操作',
             width: 160,
