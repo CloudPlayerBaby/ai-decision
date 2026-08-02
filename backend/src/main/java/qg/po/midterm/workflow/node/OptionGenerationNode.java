@@ -87,11 +87,11 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
             qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<OptionGenerationResult> execution =
                     qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
-                    chatClient,
-                    prompt,
-                    new Object[]{calculatorTool, exchangeRateTool},
-                    OptionGenerationResult.class
-            );
+                            chatClient,
+                            prompt,
+                            new Object[]{calculatorTool, exchangeRateTool},
+                            OptionGenerationResult.class
+                    );
             OptionGenerationResult result = execution.value();
 
             log.info("<<< 【AI Response】\n{}", result);

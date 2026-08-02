@@ -13,6 +13,8 @@ import qg.po.midterm.workflow.state.DecisionState;
 
 import java.util.List;
 
+import static qg.po.midterm.config.AsyncConfig.WORKFLOW_TASK_EXECUTOR;
+
 /**
  * 将数据库任务异步交给 Workflow，避免创建任务接口被阻塞。
  */
@@ -26,7 +28,7 @@ public class AnalysisWorkflowDispatcher {
     private final ApplicationEventPublisher eventPublisher;
 
     // 异步调用整体推演
-    @Async
+    @Async(WORKFLOW_TASK_EXECUTOR)
     public void startFullAnalysis(String taskId, String decisionId, Decision decision) {
         try {
             // 调用提供的整轮推演接口
@@ -49,7 +51,7 @@ public class AnalysisWorkflowDispatcher {
      *
      * <p>currentState 应由局部推演业务根据已保存的 AnalysisResult/画布构建</p>
      */
-    @Async
+    @Async(WORKFLOW_TASK_EXECUTOR)
     public void startPartialAnalysis(
             String taskId,
             String decisionId,
@@ -75,7 +77,7 @@ public class AnalysisWorkflowDispatcher {
     }
 
     // 异步发起失败步骤尝试
-    @Async
+    @Async(WORKFLOW_TASK_EXECUTOR)
     public void retryStep(String taskId, String stepId, String startNode, DecisionState currentState) {
         try {
             workflowExecutor.retryStep(taskId, startNode, currentState);

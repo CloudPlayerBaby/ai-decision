@@ -4,20 +4,22 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Component;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.Resource;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.AnalysisResultDto;
+import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
 
-/** 工作流节点：综合所有信息，生成最终总结报告。 */
+/**
+ * 工作流节点：综合所有信息，生成最终总结报告。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -47,17 +49,17 @@ public class ReportGenerationNode implements NodeAction<DecisionState> {
             ));
 
             Map<String, Object> params = Map.of(
-                "analysisResult", analysisResult
+                    "analysisResult", analysisResult
             );
             String prompt = new PromptTemplate(promptResource).create(params).getContents();
-            
+
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
             String reportSummary = chatClient.prompt()
                     .user(prompt)
                     .call()
                     .content();
-                    
+
             log.info("<<< 【AI Response】\n{}", reportSummary);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
