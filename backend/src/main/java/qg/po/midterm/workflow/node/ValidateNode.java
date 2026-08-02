@@ -4,20 +4,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.stereotype.Component;
+import qg.po.midterm.common.exception.AiValidationException;
+import qg.po.midterm.dto.result.AnalysisResultDto;
+import qg.po.midterm.dto.result.ValidationResult;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
-import qg.po.midterm.dto.result.AnalysisResultDto;
-import qg.po.midterm.dto.result.ValidationResult;
-import qg.po.midterm.common.exception.AiValidationException;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
-/** 工作流节点：内部拦截校验节点。不向外抛出事件，用于拦截校验错误并触发重试。 */
+/**
+ * 工作流节点：内部拦截校验节点。不向外抛出事件，用于拦截校验错误并触发重试。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -119,7 +117,7 @@ public class ValidateNode implements NodeAction<DecisionState> {
         if (!missingFields.isEmpty()) {
             String errorDetails = "校验失败，字段不符合要求:\n- " + String.join("\n- ", missingFields);
             log.warn(">>> [ValidateNode] 发现不合法结构: \n{}", errorDetails);
-            
+
             if (retryCount >= 1) {
                 // 彻底封杀：已经给过一次机会（被 RepairNode 抢救过），依然不合格。
                 // 抛出异常会直接中止整个工作流任务，抛给上层统一异常处理，标记状态为 FAILED (42201)。
@@ -135,7 +133,7 @@ public class ValidateNode implements NodeAction<DecisionState> {
                 return Map.of("errorMsg", errorDetails);
             }
         }
-        
+
         // 绿灯放行：完全符合结构，清空 errorMsg（尤其是在被 RepairNode 修复成功的情况下），图引擎会流向 GENERATE_REPORT。
         log.info(">>> [ValidateNode] 校验完美通过！");
         ValidationResult validation = new ValidationResult(
