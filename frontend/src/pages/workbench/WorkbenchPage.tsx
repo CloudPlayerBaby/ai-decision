@@ -561,11 +561,15 @@ export function WorkbenchPage() {
 
   // 删除候选方案：保存画布（已删除方案节点）并自动局部重推
   const handleOptionDelete = useCallback(
-    async (canvas: import('@/types/canvas').Canvas, rollback: () => void) => {
+    async (
+      canvas: import('@/types/canvas').Canvas,
+      deletedOptionId: string,
+      rollback: () => void,
+    ) => {
       canvasRef.current = canvas
       hasUserEdited.current = true
       try {
-        await saveForOptionDeleteMutation.mutateAsync(canvas)
+        await saveForOptionDeleteMutation.mutateAsync({ canvas, deletedOptionId })
       } catch (_e: unknown) { rollback(); throw new Error('save failed') }
     },
     [],
@@ -650,23 +654,18 @@ export function WorkbenchPage() {
 
   // 删除方案节点专用 mutation：保存画布并自动触发局部重推
   const saveForOptionDeleteMutation = useMutation({
-    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+    mutationFn: ({ canvas }: { canvas: import('@/types/canvas').Canvas; deletedOptionId: string }) =>
       saveCanvas(id, canvas),
-    onSuccess: (data) => {
+    onSuccess: (_data, variables) => {
       message.success('方案已删除')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
-      const changedIds = data.changedNodeIds ?? []
+      const changedIds = [variables.deletedOptionId]
       setPendingChangedNodeIds(changedIds)
-
-      if (changedIds.length > 0) {
-        startPartialAnalysisMutation.mutate(changedIds)
-      } else {
-        message.info('方案已删除，无需重新推演')
-      }
+      startPartialAnalysisMutation.mutate(changedIds)
 
       if (leaveAction === 'save') {
         setLeaveAction(null)
@@ -962,8 +961,8 @@ export function WorkbenchPage() {
           onEdgeDelete={(canvasData) => {
             handleEdgeDelete(canvasData)
           }}
-          onOptionDelete={async (canvasData, rollback) => {
-            await handleOptionDelete(canvasData, rollback)
+          onOptionDelete={async (canvasData, deletedOptionId, rollback) => {
+            await handleOptionDelete(canvasData, deletedOptionId, rollback)
           }}
           onFactorDelete={async (canvasData, rollback) => {
             await handleFactorDelete(canvasData, rollback)

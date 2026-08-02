@@ -291,7 +291,7 @@ export interface DecisionCanvasPanelProps {
   /** 删除因素→方案连线后保存并自动局部重推 */
   onEdgeDelete?: (canvas: CanvasData) => void
   /** 删除候选方案节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
-  onOptionDelete?: (canvas: CanvasData, rollback: () => void) => Promise<void>
+  onOptionDelete?: (canvas: CanvasData, deletedOptionId: string, rollback: () => void) => Promise<void>
   /** 删除因素节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
   onFactorDelete?: (canvas: CanvasData, rollback: () => void) => Promise<void>
   /** 新增节点或连线后标记结构变更（由父组件决定何时触发局部重推） */
@@ -451,7 +451,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const onCanvasChangeRef = useRef(onCanvasChange)
   const onWeightSaveRef = useRef(onWeightSave)
   const onEdgeDeleteRef = useRef(onEdgeDelete)
-  const onOptionDeleteRef = useRef<((canvas: CanvasData, rollback: () => void) => Promise<void>) | undefined>(undefined)
+  const onOptionDeleteRef = useRef<((canvas: CanvasData, deletedOptionId: string, rollback: () => void) => Promise<void>) | undefined>(undefined)
   const onFactorDeleteRef = useRef<((canvas: CanvasData, rollback: () => void) => Promise<void>) | undefined>(undefined)
   const onStructuralChangePendingRef = useRef<((reason: 'OPTION_ADDED' | 'FACTOR_ADDED' | 'FACTOR_OPTION_EDGE_ADDED') => void) | undefined>(undefined)
   // eslint-disable-next-line react-hooks/static-lifecycle
@@ -850,7 +850,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           setEdges(edgesSnap)
         }
         // 传给父组件，由父组件决定何时回滚
-        onOptionDeleteRef.current?.(updatedCanvas, rollback).catch(() => {
+        onOptionDeleteRef.current?.(updatedCanvas, nodeId, rollback).catch(() => {
           rollback()
         })
       }, 0)
