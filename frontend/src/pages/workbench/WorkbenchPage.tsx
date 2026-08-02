@@ -18,7 +18,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBlocker } from 'react-router'
 import type { BlockerFunction } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
 import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
@@ -38,7 +38,8 @@ import {
   startPartialAnalysis,
 } from '@/services/analysis.service'
 import { getCanvas, saveCanvas } from '@/services/canvas.service'
-import { buildCanvasViewModel } from '@/utils/canvasMapper'
+import { buildCanvasViewModel, toFlowNodes } from '@/utils/canvasMapper'
+import { applyDagreLayout } from '@/utils/canvasLayout'
 import { readCanvasCache, writeCanvasCache, clearCanvasCache } from '@/utils/canvasCache'
 import { buildServerVersion } from '@/utils/canvasCache'
 import { queryKeys } from '@/services/queryKeys'
@@ -79,12 +80,15 @@ export function WorkbenchPage() {
   // ── 局部推演状态 ──────────────────────────────────────────
   /** 保存成功后，后端返回的 changedNodeIds；局部重推成功后保留，失败后允许重试 */
   const [pendingChangedNodeIds, setPendingChangedNodeIds] = useState<string[]>([])
+  void pendingChangedNodeIds // 保留 setter 供其他功能使用
   /** 当前局部推演任务；结束时清空 */
   const [partialAnalysisInfo, setPartialAnalysisInfo] = useState<{
     taskId: string
     affectedNodeIds: string[]
     status: 'RUNNING'
   } | null>(null)
+  /** 是否有待应用的结构变更（新增节点/连线） */
+  const [hasPendingStructuralChange, setHasPendingStructuralChange] = useState(false)
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
@@ -143,9 +147,11 @@ export function WorkbenchPage() {
       if (streamTaskIdRef.current !== event.taskId) return
 
       setActiveResultId(event.analysisResultId)
-      forceBackendData.current = true
       setPartialAnalysisInfo(null) // 局部推演结束，清除状态
       setPendingChangedNodeIds([])
+
+      // 重置 activeCanvas，让 effect 直接用后端数据初始化
+      setActiveCanvas(undefined)
 
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
@@ -303,9 +309,6 @@ export function WorkbenchPage() {
   // 追踪是否有未保存的本地编辑
   const hasLocalEdit = useRef(false)
 
-  // 追踪是否应该强制使用后端数据（比如推演完成时）
-  const forceBackendData = useRef(false)
-
   useEffect(() => {
     if (!canvasQuery.data) return
     if (idRef.current !== id) return
@@ -317,7 +320,7 @@ export function WorkbenchPage() {
 
     const newVersion = buildServerVersion(canvasQuery.data)
     const isDataUpdated = canvasQuery.dataUpdatedAt !== lastDataUpdatedAt.current
-    console.log('[WorkbenchPage] canvas effect: newVersion=', newVersion, 'lastVersion=', lastBackendVersion.current, 'dataUpdated=', isDataUpdated, 'hasLocalEdit=', hasLocalEdit.current, 'forceBackendData=', forceBackendData.current)
+    console.log('[WorkbenchPage] canvas effect: newVersion=', newVersion, 'lastVersion=', lastBackendVersion.current, 'dataUpdated=', isDataUpdated, 'hasLocalEdit=', hasLocalEdit.current)
 
     // 追踪后端 version
     serverVersionRef.current = newVersion
@@ -328,7 +331,6 @@ export function WorkbenchPage() {
         console.log('[WorkbenchPage] no local data, using backend data')
         lastBackendVersion.current = newVersion
         lastDataUpdatedAt.current = canvasQuery.dataUpdatedAt
-        forceBackendData.current = false
         return canvasQuery.data
       }
 
@@ -336,11 +338,10 @@ export function WorkbenchPage() {
       // 推演完成后版本会增加，如果版本更新且没有本地编辑，用后端数据
       if (isDataUpdated && newVersion !== lastBackendVersion.current) {
         // 后端数据更新了
-        if (!hasLocalEdit.current || forceBackendData.current) {
-          console.log('[WorkbenchPage] backend updated, syncing (forceBackendData:', forceBackendData.current, ')')
+        if (!hasLocalEdit.current) {
+          console.log('[WorkbenchPage] backend updated, syncing')
           lastBackendVersion.current = newVersion
           lastDataUpdatedAt.current = canvasQuery.dataUpdatedAt
-          forceBackendData.current = false
           return canvasQuery.data
         } else {
           console.log('[WorkbenchPage] backend updated but has local edits, keeping local')
@@ -389,6 +390,111 @@ export function WorkbenchPage() {
     }
   }, [canvasQuery.data, id])
 
+  // ── 布局转换函数：检测 TB 布局 → LR 布局 → 保存到后端 ──
+  const fixLayoutMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: () => {
+      console.log('[WorkbenchPage] LR 布局已保存到后端')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+    },
+    onError: (error) => {
+      console.error('[WorkbenchPage] 布局保存失败:', error)
+    },
+  })
+
+  const fixAndSaveLayout = useCallback((canvas: import('@/types/canvas').Canvas) => {
+    if (!canvas.nodes || canvas.nodes.length === 0) return
+
+    const decisionNode = canvas.nodes.find((n) => n.type === 'decision')
+    const factorNodes = canvas.nodes.filter((n) => n.type === 'factor')
+
+    if (!decisionNode || factorNodes.length === 0) return
+
+    const decisionX = decisionNode.position?.x ?? 0
+    const decisionY = decisionNode.position?.y ?? 0
+    const avgFactorY = factorNodes.reduce((sum, n) => sum + (n.position?.y ?? 0), 0) / factorNodes.length
+
+    // 判断条件：decision.x 小于所有 factor.x，且 y 坐标接近 → 可能是 LR
+    const allFactorX = factorNodes.map((n) => n.position?.x ?? 0)
+    const isLRLayout =
+      decisionX < Math.min(...allFactorX) + 50 &&
+      Math.abs(decisionY - avgFactorY) < 100
+
+    // 如果已经是 LR 布局，跳过
+    if (isLRLayout) {
+      console.log('[WorkbenchPage] 当前已是 LR 布局，跳过布局修复')
+      return
+    }
+
+    console.log('[WorkbenchPage] 检测到 TB 布局，开始转换为 LR 布局...')
+
+    // 转换为 FlowNode，应用 dagre LR 布局
+    const flowNodes = toFlowNodes(canvas.nodes, {})
+    const flowEdges = canvas.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      relation: e.relation ?? '',
+    }))
+
+    const { nodes: layoutedNodes } = applyDagreLayout(flowNodes, flowEdges, {
+      direction: 'LR',
+      rankSeparation: 250,
+      nodeSeparation: 80,
+    })
+
+    // 构建新的 canvas 数据
+    const newNodes: import('@/types/canvas').CanvasNode[] = layoutedNodes.map((n) => {
+      const base = {
+        id: n.id,
+        type: n.type as import('@/types/canvas').CanvasNode['type'],
+        label: (n.data as { label?: string }).label ?? '',
+        position: n.position,
+      }
+      if (n.type === 'factor') {
+        return { ...base, data: { weight: (n.data as { weight: number }).weight ?? 0.1 } } as import('@/types/canvas').FactorCanvasNode
+      }
+      if (n.type === 'option') {
+        return { ...base, data: { scores: (n.data as { scores: import('@/types/canvas').OptionScores }).scores ?? { cost: 3, time: 3, benefit: 3, risk: 3, feasibility: 3 } } } as import('@/types/canvas').OptionCanvasNode
+      }
+      return { ...base, data: {} } as import('@/types/canvas').DecisionCanvasNode
+    })
+
+    const newCanvas: import('@/types/canvas').Canvas = {
+      nodes: newNodes,
+      edges: canvas.edges,
+    }
+
+    fixLayoutMutation.mutate(newCanvas)
+  }, [fixLayoutMutation])
+
+  // ── 初始布局检测：如果是 TB 布局，自动转换为 LR 布局并保存 ──
+  const didFixLayoutOnLoadRef = useRef(false)
+  useEffect(() => {
+    if (!canvasQuery.data) return
+    if (didFixLayoutOnLoadRef.current) return
+    // 避免页面切换时误触发（只检查来自后端的首次数据）
+    if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) return
+
+    didFixLayoutOnLoadRef.current = true
+    fixAndSaveLayout(canvasQuery.data)
+  }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id, fixAndSaveLayout])
+
+  // ── 推演完成时自动转换布局 ──
+  const didFixLayoutOnAnalysisRef = useRef(false)
+  useEffect(() => {
+    // 只有当推演动画完成时才触发
+    if (!animCompleted) return
+    if (didFixLayoutOnAnalysisRef.current) return
+    // 确保 canvasQuery 数据已加载
+    if (!canvasQuery.data) return
+
+    didFixLayoutOnAnalysisRef.current = true
+    console.log('[WorkbenchPage] 推演完成，自动转换布局')
+    fixAndSaveLayout(canvasQuery.data)
+  }, [animCompleted, canvasQuery.data, fixAndSaveLayout])
+
   const saveMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
@@ -399,10 +505,21 @@ export function WorkbenchPage() {
       setActiveCanvas(undefined) // 触发重新从后端加载
       clearCanvasCache(id) // 清除旧缓存，刷新时走后端
 
-      // 保存 changedNodeIds，不自动触发局部重推
+      // 保存 changedNodeIds
       setPendingChangedNodeIds(
         buildPartialChangedNodeIds(data.changedNodeIds, data.canvas),
       )
+
+      // 若有待应用的结构变更，触发局部重推
+      if (hasPendingStructuralChange) {
+        setHasPendingStructuralChange(false)
+        const changedIds = data.changedNodeIds ?? []
+        if (changedIds.length > 0) {
+          startPartialAnalysisMutation.mutate(changedIds)
+        } else {
+          message.info('结构已保存，无需重新推演')
+        }
+      }
 
       // 保存完成后解锁导航
       if (leaveAction === 'save') {
@@ -435,6 +552,37 @@ export function WorkbenchPage() {
     saveForPartialMutation.mutate(canvas)
   }
 
+  // 删除连线：保存画布（已删除边）并自动局部重推
+  const handleEdgeDelete = (canvas: import('@/types/canvas').Canvas) => {
+    canvasRef.current = canvas
+    hasUserEdited.current = true
+    saveForEdgeDeleteMutation.mutate(canvas)
+  }
+
+  // 删除候选方案：保存画布（已删除方案节点）并自动局部重推
+  const handleOptionDelete = useCallback(
+    async (canvas: import('@/types/canvas').Canvas, rollback: () => void) => {
+      canvasRef.current = canvas
+      hasUserEdited.current = true
+      try {
+        await saveForOptionDeleteMutation.mutateAsync(canvas)
+      } catch (_e: unknown) { rollback(); throw new Error('save failed') }
+    },
+    [],
+  )
+
+  // 删除因素：保存画布（已删除因素节点及重分配权重）并自动局部重推
+  const handleFactorDelete = useCallback(
+    async (canvas: import('@/types/canvas').Canvas, rollback: () => void) => {
+      canvasRef.current = canvas
+      hasUserEdited.current = true
+      try {
+        await saveForFactorDeleteMutation.mutateAsync(canvas)
+      } catch (_e: unknown) { rollback(); throw new Error('save failed') }
+    },
+    [],
+  )
+
   // 专用 mutation：保存画布并自动触发局部重推（仅用于权重保存）
   const saveForPartialMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
@@ -446,10 +594,7 @@ export function WorkbenchPage() {
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
-      const changedIds = buildPartialChangedNodeIds(
-        data.changedNodeIds,
-        data.canvas,
-      )
+      const changedIds = data.changedNodeIds ?? []
       setPendingChangedNodeIds(changedIds)
 
       if (changedIds.length > 0) {
@@ -468,6 +613,104 @@ export function WorkbenchPage() {
       message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
       setIsDirty(true)
       setLeaveAction(null)
+    },
+  })
+
+  // 删除连线专用 mutation：保存画布并自动触发局部重推
+  const saveForEdgeDeleteMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: (data) => {
+      message.success('连线已删除')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      setActiveCanvas(undefined)
+      clearCanvasCache(id)
+
+      const changedIds = data.changedNodeIds ?? []
+      setPendingChangedNodeIds(changedIds)
+
+      if (changedIds.length > 0) {
+        startPartialAnalysisMutation.mutate(changedIds)
+      } else {
+        message.info('连线已删除，无需重新推演')
+      }
+
+      if (leaveAction === 'save') {
+        setLeaveAction(null)
+        blocker.proceed?.()
+      }
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      setIsDirty(true)
+      setLeaveAction(null)
+    },
+  })
+
+  // 删除方案节点专用 mutation：保存画布并自动触发局部重推
+  const saveForOptionDeleteMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: (data) => {
+      message.success('方案已删除')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      setActiveCanvas(undefined)
+      clearCanvasCache(id)
+
+      const changedIds = data.changedNodeIds ?? []
+      setPendingChangedNodeIds(changedIds)
+
+      if (changedIds.length > 0) {
+        startPartialAnalysisMutation.mutate(changedIds)
+      } else {
+        message.info('方案已删除，无需重新推演')
+      }
+
+      if (leaveAction === 'save') {
+        setLeaveAction(null)
+        blocker.proceed?.()
+      }
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      setIsDirty(true)
+      setLeaveAction(null)
+      // 失败时不清空 pendingChangedNodeIds，允许重试
+    },
+  })
+
+  // 删除因素节点专用 mutation：保存画布并自动触发局部重推
+  const saveForFactorDeleteMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: (data) => {
+      message.success('因素已删除，权重已重新分配')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      setActiveCanvas(undefined)
+      clearCanvasCache(id)
+
+      const changedIds = data.changedNodeIds ?? []
+      setPendingChangedNodeIds(changedIds)
+
+      if (changedIds.length > 0) {
+        startPartialAnalysisMutation.mutate(changedIds)
+      } else {
+        message.info('因素已删除，无需重新推演')
+      }
+
+      if (leaveAction === 'save') {
+        setLeaveAction(null)
+        blocker.proceed?.()
+      }
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      setIsDirty(true)
+      setLeaveAction(null)
+      // 失败时不清空 pendingChangedNodeIds，允许重试
     },
   })
 
@@ -668,35 +911,6 @@ export function WorkbenchPage() {
             >
               {saveMutation.isPending ? '保存中…' : '保存画布'}
             </Button>
-            <Tooltip
-              title={
-                pendingChangedNodeIds.length === 0
-                  ? '当前修改仅影响布局，无需局部重推'
-                  : partialAnalysisInfo !== null
-                    ? '已有局部推演进行中'
-                    : undefined
-              }
-            >
-              <Button
-                disabled={
-                  pendingChangedNodeIds.length === 0 ||
-                  partialAnalysisInfo !== null ||
-                  saveForPartialMutation.isPending ||
-                  startPartialAnalysisMutation.isPending
-                }
-                loading={startPartialAnalysisMutation.isPending}
-                onClick={() => {
-                  startPartialAnalysisMutation.mutate(
-                    buildPartialChangedNodeIds(
-                      pendingChangedNodeIds,
-                      canvasRef.current ?? activeCanvas,
-                    ),
-                  )
-                }}
-              >
-                {startPartialAnalysisMutation.isPending ? '局部重推中…' : '局部重推'}
-              </Button>
-            </Tooltip>
             <Button
               type="primary"
               disabled={!canConfirm || confirmMutation.isPending}
@@ -745,6 +959,18 @@ export function WorkbenchPage() {
           onWeightSave={(canvasData) => {
             handleWeightSave(canvasData)
           }}
+          onEdgeDelete={(canvasData) => {
+            handleEdgeDelete(canvasData)
+          }}
+          onOptionDelete={async (canvasData, rollback) => {
+            await handleOptionDelete(canvasData, rollback)
+          }}
+          onFactorDelete={async (canvasData, rollback) => {
+            await handleFactorDelete(canvasData, rollback)
+          }}
+          onStructuralChangePending={(_reason) => {
+            setHasPendingStructuralChange(true)
+          }}
           decisionId={decision.id}
           taskId={streamTaskId}
           pendingResultId={pendingResultId}
@@ -754,6 +980,31 @@ export function WorkbenchPage() {
           partialAnalysisInfo={partialAnalysisInfo}
           partialSteps={steps}
         />
+
+        {hasPendingStructuralChange && (
+          <Alert
+            type="info"
+            showIcon
+            banner
+            message="决策结构已变更，等待应用分析"
+            description="请确认后点击下方按钮，系统将重新评估受影响方案。"
+            action={
+              <Button
+                type="primary"
+                onClick={() => {
+                  if (!canvasRef.current) return
+                  setActiveCanvas(undefined)
+                  saveMutation.mutate(canvasRef.current)
+                }}
+                loading={saveMutation.isPending || startPartialAnalysisMutation.isPending}
+                disabled={!canvasRef.current || partialAnalysisInfo !== null}
+              >
+                应用结构变化并更新分析
+              </Button>
+            }
+            style={{ margin: '8px 0' }}
+          />
+        )}
 
         {!rightCollapsed ? (
           <>
