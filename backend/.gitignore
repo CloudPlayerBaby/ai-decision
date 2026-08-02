@@ -34,6 +34,7 @@ build/
 
 # Local secrets and Docker data (do not commit)
 .env
+.env.prod
 docker/mysql/data/
 
 # AI documentation and rules

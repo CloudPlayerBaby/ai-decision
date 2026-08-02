@@ -12,9 +12,9 @@ import org.springframework.stereotype.Component;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
-import qg.po.midterm.workflow.tools.TavilySearchTool;
 import qg.po.midterm.workflow.tools.CalculatorTool;
 import qg.po.midterm.workflow.tools.ExchangeRateTool;
+import qg.po.midterm.workflow.tools.TavilySearchTool;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -70,11 +70,11 @@ public class FactorAnalysisNode implements NodeAction<DecisionState> {
 
             qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<FactorAnalysisResult> execution =
                     qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
-                    chatClient,
-                    prompt,
-                    new Object[]{tavilySearchTool, calculatorTool, exchangeRateTool},
-                    FactorAnalysisResult.class
-            );
+                            chatClient,
+                            prompt,
+                            new Object[]{tavilySearchTool, calculatorTool, exchangeRateTool},
+                            FactorAnalysisResult.class
+                    );
             FactorAnalysisResult result = execution.value();
 
             log.info("<<< 【AI Response】\n{}", result);
