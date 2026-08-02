@@ -288,6 +288,8 @@ export interface DecisionCanvasPanelProps {
   onCanvasChange?: (canvas: CanvasData) => void
   /** 保存权重：触发保存画布 + 自动局部重推 */
   onWeightSave?: (canvas: CanvasData) => void
+  /** 编辑已有 option 节点并保存：触发保存画布 + 自动局部重推 */
+  onOptionEditSave?: (canvas: CanvasData) => void
   /** 删除因素→方案连线后保存并自动局部重推 */
   onEdgeDelete?: (canvas: CanvasData) => void
   /** 删除候选方案节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
@@ -401,6 +403,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onOptionDelete,
     onFactorDelete,
     onStructuralChangePending,
+    onOptionEditSave,
     partialAnalysisInfo,
     partialSteps,
     forceSyncKey,
@@ -461,6 +464,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const onOptionDeleteRef = useRef<((canvas: CanvasData, deletedOptionId: string, rollback: () => void) => Promise<void>) | undefined>(undefined)
   const onFactorDeleteRef = useRef<((canvas: CanvasData, rollback: () => void) => Promise<void>) | undefined>(undefined)
   const onStructuralChangePendingRef = useRef<((reason: 'OPTION_ADDED' | 'FACTOR_ADDED' | 'FACTOR_OPTION_EDGE_ADDED') => void) | undefined>(undefined)
+  const onOptionEditSaveRef = useRef<((canvas: CanvasData) => void) | undefined>(undefined)
   // eslint-disable-next-line react-hooks/static-lifecycle
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
@@ -470,6 +474,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onOptionDeleteRef.current = onOptionDelete
     onFactorDeleteRef.current = onFactorDelete
     onStructuralChangePendingRef.current = onStructuralChangePending
+    onOptionEditSaveRef.current = onOptionEditSave
   })
 
   useEffect(() => {
@@ -780,10 +785,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           setNodes((prev) => [...prev, newNode])
           onStructuralChangePendingRef.current?.('OPTION_ADDED')
         } else {
-          setNodes((prev) =>
-            prev.map((n) =>
-              n.id === editingNode.id
-                ? ({
+          // 先构造 nextNodes，避免在 setNodes 回调之外使用 nodesRef
+          const nextNodes = nodesRef.current.map((n) =>
+            n.id === editingNode.id
+              ? ({
                   ...n,
                   data: {
                     ...n.data,
@@ -797,9 +802,14 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     },
                   },
                 } as OptionFlowNode)
-                : n,
-            ),
+              : n,
           )
+          setNodes(nextNodes)
+          setModalOpen(false)
+          setEditingNode(null)
+          isEditingFactorRef.current = false
+          onOptionEditSaveRef.current?.(buildCanvasData(nextNodes, edgesRef.current))
+          return
         }
       }
 
@@ -807,7 +817,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       setEditingNode(null)
       isEditingFactorRef.current = false
     },
-    [editingNode, isNewNode, weightValue, setNodes],
+    [editingNode, isNewNode, setNodes],
   )
 
   // 提交表单：根据是否编辑 factor 权重选择不同处理逻辑

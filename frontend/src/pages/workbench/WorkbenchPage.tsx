@@ -580,6 +580,13 @@ export function WorkbenchPage() {
     saveForPartialMutation.mutate(canvas)
   }
 
+  // 编辑已有 option：保存画布并自动局部重推（局部推演进行中禁用）
+  const handleOptionEditSave = (canvas: import('@/types/canvas').Canvas) => {
+    canvasRef.current = canvas
+    hasUserEdited.current = true
+    saveForOptionEditMutation.mutate(canvas)
+  }
+
   // 删除连线：保存画布（已删除边）并自动局部重推
   const handleEdgeDelete = (canvas: import('@/types/canvas').Canvas) => {
     canvasRef.current = canvas
@@ -648,6 +655,33 @@ export function WorkbenchPage() {
       saveCanvas(id, canvas),
     onSuccess: (data) => {
       message.success('连线已删除')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      setActiveCanvas(undefined)
+      clearCanvasCache(id)
+
+      const changedIds = data.changedNodeIds ?? []
+      setPendingChangedNodeIds(changedIds)
+      requestPartialAnalysis(changedIds)
+
+      if (leaveAction === 'save') {
+        setLeaveAction(null)
+        blocker.proceed?.()
+      }
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      setIsDirty(true)
+      setLeaveAction(null)
+    },
+  })
+
+  // 编辑已有 option 专用 mutation：保存画布并自动触发局部重推
+  const saveForOptionEditMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: (data) => {
+      message.success('方案已保存')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
       setActiveCanvas(undefined)
@@ -923,7 +957,7 @@ export function WorkbenchPage() {
                 saveMutation.mutate(canvasRef.current)
               }}
               loading={saveMutation.isPending || startPartialAnalysisMutation.isPending}
-              disabled={!isDirty || saveMutation.isPending || saveForPartialMutation.isPending || saveForEdgeDeleteMutation.isPending || saveForOptionDeleteMutation.isPending || saveForFactorDeleteMutation.isPending || startPartialAnalysisMutation.isPending}
+              disabled={!isDirty || saveMutation.isPending || saveForPartialMutation.isPending || saveForEdgeDeleteMutation.isPending || saveForOptionDeleteMutation.isPending || saveForFactorDeleteMutation.isPending || saveForOptionEditMutation.isPending || startPartialAnalysisMutation.isPending}
             >
               {saveMutation.isPending ? '保存中…' : '保存画布'}
             </Button>
@@ -984,6 +1018,7 @@ export function WorkbenchPage() {
           onFactorDelete={async (canvasData, rollback) => {
             await handleFactorDelete(canvasData, rollback)
           }}
+          onOptionEditSave={handleOptionEditSave}
           onStructuralChangePending={(_reason) => {
             setHasPendingStructuralChange(true)
           }}
