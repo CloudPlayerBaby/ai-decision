@@ -307,6 +307,12 @@ export interface DecisionCanvasPanelProps {
   partialAnalysisInfo?: PartialAnalysisInfo | null
   /** 当前 SSE 步骤（直接复用 useAnalysisStream 返回值） */
   partialSteps?: AnalysisStep[]
+  /**
+   * 强制同步标识。当此值变化时（通常是新的 analysisResultId），
+   * 忽略 hasLocalEdit 保护，强制用服务端 Canvas 覆盖本地编辑。
+   * 用于局部推演完成后强制刷新画布。
+   */
+  forceSyncKey?: string | null
 }
 
 // ── 辅助函数 ─────────────────────────────────────────────────
@@ -397,6 +403,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onStructuralChangePending,
     partialAnalysisInfo,
     partialSteps,
+    forceSyncKey,
   } = props
 
   const vm = viewModel as import('../../types/canvas').CanvasViewModel
@@ -557,9 +564,23 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const hasLocalEdit = useRef(false)
   // 跟踪上一次同步的 signature，用于判断后端数据是否真正变化
   const lastSyncedSignature = useRef<string | null>(null)
+  // 跟踪上一次的 forceSyncKey，用于检测 forceSyncKey 变化
+  const lastForceSyncKey = useRef<string | null>(null)
+  // ref 版本，供 effect 内部同步最新值
+  const forceSyncKeyRef = useRef<string | null>(null)
+
+  // 同步 forceSyncKey 到 ref，供 effect 内部使用
+  // eslint-disable-next-line react-hooks/static-lifecycle
+  useEffect(() => {
+    forceSyncKeyRef.current = forceSyncKey ?? null
+  })
 
   // 监听 viewModel 变化，当后端 canvas 更新时同步到 ReactFlow
   useEffect(() => {
+    // 同步最新的 forceSyncKey（保持与组件 prop 同步）
+    const currentForceSyncKey = forceSyncKey ?? null
+    const isForceSync = currentForceSyncKey !== null && currentForceSyncKey !== lastForceSyncKey.current
+
     // 构建 viewModel 对应的节点和边
     const newRawNodes = toFlowNodes(canvas.nodes, {
       factorsDetail,
@@ -588,22 +609,31 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     const vmSignature = JSON.stringify({ ...buildCanvasData(newNodes, newEdges), factorsDetailKeys, optionsDetailKeys })
 
     // 如果后端数据没有变化，跳过同步
-    if (vmSignature === lastSyncedSignature.current) {
+    if (vmSignature === lastSyncedSignature.current && !isForceSync) {
       return
     }
 
-    // 后端数据变化了，检查是否有本地编辑
-    if (hasLocalEdit.current) {
+    // forceSyncKey 变化：强制同步，清除本地编辑保护
+    if (isForceSync) {
+      console.log('[CanvasPanel] forceSyncKey changed, forcing sync and clearing local edits')
+      lastForceSyncKey.current = currentForceSyncKey
+      hasLocalEdit.current = false
+      // 通知父组件清除 dirty 状态
+      onDirtyChangeRef.current?.(false)
+    }
+
+    // 后端数据变化了，检查是否有本地编辑（forceSync 时跳过此检查）
+    if (hasLocalEdit.current && !isForceSync) {
       console.log('[CanvasPanel] viewModel changed but has local edits, skipping sync')
       return
     }
 
-    // 没有本地编辑，执行同步
-    console.log('[CanvasPanel] viewModel changed, syncing nodes/edges')
+    // 执行同步
+    console.log('[CanvasPanel] syncing nodes/edges', isForceSync ? '(force)' : '')
     lastSyncedSignature.current = vmSignature
     setNodes(newNodes)
     setEdges(newEdges)
-  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo])
+  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo, forceSyncKey])
 
   // openOptionAnalysis：在 Context 内部实现，可访问所有内部状态
   const openOptionAnalysis = useCallback(
@@ -675,21 +705,21 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       const allFactorNodes = nodesRef.current.filter((n) => n.type === 'factor')
       const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, newWeight)
 
-      setNodes((prev) =>
-        prev.map((n) => {
-          if (n.type !== 'factor') return n
-          const updated = rebalanced.find((r) => r.id === n.id)
-          return updated ?? n
-        }),
-      )
+      // 将重分配后的 factors 按 id 合并回完整 nodes 数组
+      const nextNodes = nodesRef.current.map((n) => {
+        if (n.type !== 'factor') return n
+        const updated = rebalanced.find((r) => r.id === n.id)
+        return updated ?? n
+      })
 
+      setNodes(nextNodes)
       setModalOpen(false)
       setEditingNode(null)
       isEditingFactorRef.current = false
 
-      // 通知父组件：已更新全部因素权重，触发保存+局部重推
+      // 使用完整 nodes 构建保存 payload：包含 root + 全部 factor + 全部 option
       const updatedCanvas = buildCanvasData(
-        rebalanced as FlowNode[],
+        nextNodes,
         edgesRef.current,
       )
       onWeightSaveRef.current?.(updatedCanvas)

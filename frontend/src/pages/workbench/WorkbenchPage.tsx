@@ -78,6 +78,8 @@ export function WorkbenchPage() {
   const [activeResultId, setActiveResultId] = useState<string | null>(null)
 
   // ── 局部推演状态 ──────────────────────────────────────────
+  /** 同步锁：防止重复发起局部重推请求 */
+  const partialAnalysisLockRef = useRef(false)
   /** 保存成功后，后端返回的 changedNodeIds；局部重推成功后保留，失败后允许重试 */
   const [pendingChangedNodeIds, setPendingChangedNodeIds] = useState<string[]>([])
   void pendingChangedNodeIds // 保留 setter 供其他功能使用
@@ -89,6 +91,31 @@ export function WorkbenchPage() {
   } | null>(null)
   /** 是否有待应用的结构变更（新增节点/连线） */
   const [hasPendingStructuralChange, setHasPendingStructuralChange] = useState(false)
+  /** 强制同步标识：用于局部推演完成后强制刷新画布 */
+  const [forceSyncKey, setForceSyncKey] = useState<string | null>(null)
+
+  // ── 统一局部重推请求入口 ──────────────────────────────────
+  /**
+   * 唯一入口：所有触发局部重推的地方必须走此函数。
+   * - changedNodeIds 为空时不发请求
+   * - 锁或 partialAnalysisInfo 非空时拒绝请求并提示
+   * - 成功后设置锁；失败/409 时释放锁
+   */
+  const requestPartialAnalysis = useCallback(
+    (changedNodeIds: string[]) => {
+      if (changedNodeIds.length === 0) {
+        message.info('画布已保存，无需重新推演')
+        return
+      }
+      if (partialAnalysisLockRef.current || partialAnalysisInfo !== null) {
+        message.warning('当前局部推演正在进行，请等待完成')
+        return
+      }
+      partialAnalysisLockRef.current = true
+      startPartialAnalysisMutation.mutate(changedNodeIds)
+    },
+    [partialAnalysisInfo],
+  )
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
   const rightWidth = useLayoutStore((state) => state.rightWidth)
@@ -148,10 +175,14 @@ export function WorkbenchPage() {
 
       setActiveResultId(event.analysisResultId)
       setPartialAnalysisInfo(null) // 局部推演结束，清除状态
+      partialAnalysisLockRef.current = false // 释放锁
       setPendingChangedNodeIds([])
 
       // 重置 activeCanvas，让 effect 直接用后端数据初始化
       setActiveCanvas(undefined)
+
+      // 设置 forceSyncKey，触发 DecisionCanvasPanel 强制同步（忽略本地编辑保护）
+      setForceSyncKey(event.analysisResultId)
 
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
@@ -173,6 +204,7 @@ export function WorkbenchPage() {
         message.error(`局部推演失败: ${event.message}`);
       }
       setPartialAnalysisInfo(null) // 失败也清除局部状态，但 pendingChangedNodeIds 保留
+      partialAnalysisLockRef.current = false // 释放锁，允许重试
     },
   });
 
@@ -510,15 +542,11 @@ export function WorkbenchPage() {
         buildPartialChangedNodeIds(data.changedNodeIds, data.canvas),
       )
 
-      // 若有待应用的结构变更，触发局部重推
+      // 若有待应用的结构变更，通过统一入口触发局部重推
       if (hasPendingStructuralChange) {
         setHasPendingStructuralChange(false)
-        const changedIds = data.changedNodeIds ?? []
-        if (changedIds.length > 0) {
-          startPartialAnalysisMutation.mutate(changedIds)
-        } else {
-          message.info('结构已保存，无需重新推演')
-        }
+        const changedIds = buildPartialChangedNodeIds(data.changedNodeIds, data.canvas)
+        requestPartialAnalysis(changedIds)
       }
 
       // 保存完成后解锁导航
@@ -600,13 +628,7 @@ export function WorkbenchPage() {
 
       const changedIds = data.changedNodeIds ?? []
       setPendingChangedNodeIds(changedIds)
-
-      if (changedIds.length > 0) {
-        // 自动发起局部重推
-        startPartialAnalysisMutation.mutate(changedIds)
-      } else {
-        message.info('权重已保存，无需重新推演')
-      }
+      requestPartialAnalysis(changedIds)
 
       if (leaveAction === 'save') {
         setLeaveAction(null)
@@ -633,12 +655,7 @@ export function WorkbenchPage() {
 
       const changedIds = data.changedNodeIds ?? []
       setPendingChangedNodeIds(changedIds)
-
-      if (changedIds.length > 0) {
-        startPartialAnalysisMutation.mutate(changedIds)
-      } else {
-        message.info('连线已删除，无需重新推演')
-      }
+      requestPartialAnalysis(changedIds)
 
       if (leaveAction === 'save') {
         setLeaveAction(null)
@@ -665,7 +682,7 @@ export function WorkbenchPage() {
 
       const changedIds = [variables.deletedOptionId]
       setPendingChangedNodeIds(changedIds)
-      startPartialAnalysisMutation.mutate(changedIds)
+      requestPartialAnalysis(changedIds)
 
       if (leaveAction === 'save') {
         setLeaveAction(null)
@@ -693,12 +710,7 @@ export function WorkbenchPage() {
 
       const changedIds = data.changedNodeIds ?? []
       setPendingChangedNodeIds(changedIds)
-
-      if (changedIds.length > 0) {
-        startPartialAnalysisMutation.mutate(changedIds)
-      } else {
-        message.info('因素已删除，无需重新推演')
-      }
+      requestPartialAnalysis(changedIds)
 
       if (leaveAction === 'save') {
         setLeaveAction(null)
@@ -795,8 +807,13 @@ export function WorkbenchPage() {
         queryKey: queryKeys.decisions.canvas(id),
       })
     },
-    onError: () => {
-      message.error('局部重推发起失败，请稍后重试')
+    onError: (error) => {
+      partialAnalysisLockRef.current = false // 释放锁
+      if (error instanceof ApiError && error.code === BusinessCode.Conflict) {
+        message.error('当前决策已有推演任务正在运行，请等待完成')
+      } else {
+        message.error('局部重推发起失败，请稍后重试')
+      }
       // pendingChangedNodeIds 保留，允许重试
     },
   })
@@ -905,8 +922,8 @@ export function WorkbenchPage() {
                 }
                 saveMutation.mutate(canvasRef.current)
               }}
-              loading={saveMutation.isPending}
-              disabled={!isDirty || partialAnalysisInfo !== null || saveForPartialMutation.isPending}
+              loading={saveMutation.isPending || startPartialAnalysisMutation.isPending}
+              disabled={!isDirty || saveMutation.isPending || saveForPartialMutation.isPending || saveForEdgeDeleteMutation.isPending || saveForOptionDeleteMutation.isPending || saveForFactorDeleteMutation.isPending || startPartialAnalysisMutation.isPending}
             >
               {saveMutation.isPending ? '保存中…' : '保存画布'}
             </Button>
@@ -978,6 +995,7 @@ export function WorkbenchPage() {
           onRequestRefresh={refreshDecision}
           partialAnalysisInfo={partialAnalysisInfo}
           partialSteps={steps}
+          forceSyncKey={forceSyncKey}
         />
 
         {hasPendingStructuralChange && (
@@ -996,7 +1014,15 @@ export function WorkbenchPage() {
                   saveMutation.mutate(canvasRef.current)
                 }}
                 loading={saveMutation.isPending || startPartialAnalysisMutation.isPending}
-                disabled={!canvasRef.current || partialAnalysisInfo !== null}
+                disabled={
+                  !canvasRef.current ||
+                  saveMutation.isPending ||
+                  startPartialAnalysisMutation.isPending ||
+                  saveForPartialMutation.isPending ||
+                  saveForEdgeDeleteMutation.isPending ||
+                  saveForOptionDeleteMutation.isPending ||
+                  saveForFactorDeleteMutation.isPending
+                }
               >
                 应用结构变化并更新分析
               </Button>
