@@ -29,16 +29,24 @@ import type {
   OptionFlowData,
 } from '../../types/flow'
 import type { AnalysisStep } from '../../types/analysis'
-import { toFlowNodes, buildCanvasData, rebalanceWeights } from '../../utils/canvasMapper'
+import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete } from '../../utils/canvasMapper'
 import { applyDagreLayout } from '../../utils/canvasLayout'
 import { CanvasActionsContext, useCanvasActions } from '../../contexts/CanvasActionsContext'
 import { createContext, useContext } from 'react'
+import type { Node } from '@xyflow/react'
 
 // ── 局部推演上下文 ─────────────────────────────────────────────
 const PartialAnalysisContext = createContext<{
   partialAnalysisInfo: PartialAnalysisInfo | null | undefined
   partialSteps: AnalysisStep[] | undefined
 }>({ partialAnalysisInfo: null, partialSteps: undefined })
+
+// ── 边删除上下文 ───────────────────────────────────────────────
+// 在 ReactFlow 外部渲染确认框时，需要知道边的源节点和目标节点类型
+const EdgeDeleteContext = createContext<{
+  nodes: Node[]
+  onEdgeDelete: (edgeId: string, sourceId: string, targetId: string) => void
+} | null>(null)
 
 // ── 节点组件 Props 窄类型 ──────────────────────────────────────
 // NodeProps 接受 Node<NodeData>，传 FlowNode 具名类型满足约束
@@ -193,6 +201,71 @@ function OptionNode({ data, id }: OptionNodeProps) {
   )
 }
 
+// ── 方案→因素 AFFECTS 连线组件（带删除按钮）──────────────────
+import type { EdgeProps } from '@xyflow/react'
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  MarkerType,
+} from '@xyflow/react'
+
+/** AFFECTS 类型的连线：可删除，鼠标悬停显示删除按钮 */
+function AffectsEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  source,
+  target,
+  style,
+}: EdgeProps) {
+  const edgeContext = useContext(EdgeDeleteContext)
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  })
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (edgeContext) {
+      edgeContext.onEdgeDelete(id, source, target)
+    }
+  }
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={MarkerType.ArrowClosed}
+        style={style}
+      />
+      <EdgeLabelRenderer>
+        <button
+          className="edge-delete-btn nodrag nopan"
+          onClick={handleDelete}
+          title="删除此连线"
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            pointerEvents: 'all',
+          }}
+        >
+          <DeleteOutlined />
+        </button>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
 // Tab key 类型
 type OptionModalTab = 'settings' | 'analysis'
 
@@ -215,6 +288,16 @@ export interface DecisionCanvasPanelProps {
   onCanvasChange?: (canvas: CanvasData) => void
   /** 保存权重：触发保存画布 + 自动局部重推 */
   onWeightSave?: (canvas: CanvasData) => void
+  /** 编辑已有 option 节点并保存：触发保存画布 + 自动局部重推 */
+  onOptionEditSave?: (canvas: CanvasData) => void
+  /** 删除因素→方案连线后保存并自动局部重推 */
+  onEdgeDelete?: (canvas: CanvasData) => void
+  /** 删除候选方案节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
+  onOptionDelete?: (canvas: CanvasData, deletedOptionId: string, rollback: () => void) => Promise<void>
+  /** 删除因素节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
+  onFactorDelete?: (canvas: CanvasData, rollback: () => void) => Promise<void>
+  /** 新增节点或连线后标记结构变更（由父组件决定何时触发局部重推） */
+  onStructuralChangePending?: (reason: 'OPTION_ADDED' | 'FACTOR_ADDED' | 'FACTOR_OPTION_EDGE_ADDED') => void
   /** 以下为 WorkbenchSlot 契约槽位 props（DecisionCanvasPanel 目前不直接使用，由父组件按需传递） */
   decisionId?: string
   taskId?: string | null
@@ -226,6 +309,12 @@ export interface DecisionCanvasPanelProps {
   partialAnalysisInfo?: PartialAnalysisInfo | null
   /** 当前 SSE 步骤（直接复用 useAnalysisStream 返回值） */
   partialSteps?: AnalysisStep[]
+  /**
+   * 强制同步标识。当此值变化时（通常是新的 analysisResultId），
+   * 忽略 hasLocalEdit 保护，强制用服务端 Canvas 覆盖本地编辑。
+   * 用于局部推演完成后强制刷新画布。
+   */
+  forceSyncKey?: string | null
 }
 
 // ── 辅助函数 ─────────────────────────────────────────────────
@@ -310,8 +399,14 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onDirtyChange,
     onCanvasChange,
     onWeightSave,
+    onEdgeDelete,
+    onOptionDelete,
+    onFactorDelete,
+    onStructuralChangePending,
+    onOptionEditSave,
     partialAnalysisInfo,
     partialSteps,
+    forceSyncKey,
   } = props
 
   const vm = viewModel as import('../../types/canvas').CanvasViewModel
@@ -332,7 +427,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     id: e.id,
     source: e.source,
     target: e.target,
+    type: e.relation ?? '', // React Flow 用 type 匹配 edgeTypes
     relation: e.relation ?? '',
+    selectable: true,
   }))
 
   // 应用 dagre 水平布局（从左到右：决策 → 因素 → 方案）
@@ -363,11 +460,21 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const onDirtyChangeRef = useRef(onDirtyChange)
   const onCanvasChangeRef = useRef(onCanvasChange)
   const onWeightSaveRef = useRef(onWeightSave)
+  const onEdgeDeleteRef = useRef(onEdgeDelete)
+  const onOptionDeleteRef = useRef<((canvas: CanvasData, deletedOptionId: string, rollback: () => void) => Promise<void>) | undefined>(undefined)
+  const onFactorDeleteRef = useRef<((canvas: CanvasData, rollback: () => void) => Promise<void>) | undefined>(undefined)
+  const onStructuralChangePendingRef = useRef<((reason: 'OPTION_ADDED' | 'FACTOR_ADDED' | 'FACTOR_OPTION_EDGE_ADDED') => void) | undefined>(undefined)
+  const onOptionEditSaveRef = useRef<((canvas: CanvasData) => void) | undefined>(undefined)
   // eslint-disable-next-line react-hooks/static-lifecycle
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
     onCanvasChangeRef.current = onCanvasChange
     onWeightSaveRef.current = onWeightSave
+    onEdgeDeleteRef.current = onEdgeDelete
+    onOptionDeleteRef.current = onOptionDelete
+    onFactorDeleteRef.current = onFactorDelete
+    onStructuralChangePendingRef.current = onStructuralChangePending
+    onOptionEditSaveRef.current = onOptionEditSave
   })
 
   useEffect(() => {
@@ -406,6 +513,36 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   nodesRef.current = nodes
   edgesRef.current = edges
 
+  // ── 删除 AFFECTS 连线状态 ────────────────────────────────────
+  // 暂存待确认删除的边信息（显示确认 Modal）
+  const [pendingEdgeDelete, setPendingEdgeDelete] = useState<{
+    edgeId: string
+    factorName: string
+    optionName: string
+  } | null>(null)
+  // 保存删除前的 edges 快照，用于失败时回滚
+  const edgesSnapshotRef = useRef<FlowEdge[]>(edges)
+
+  // ── 删除候选方案节点状态 ─────────────────────────────────────
+  // 暂存待确认删除的方案节点信息（显示确认 Modal）
+  const [pendingOptionDelete, setPendingOptionDelete] = useState<{
+    nodeId: string
+    nodeLabel: string
+  } | null>(null)
+  // 保存删除前的 nodes 和 edges 快照，用于失败时回滚
+  const optionDeleteNodesSnapshotRef = useRef<FlowNode[]>([])
+  const optionDeleteEdgesSnapshotRef = useRef<FlowEdge[]>([])
+
+  // ── 删除因素节点状态 ─────────────────────────────────────────
+  // 暂存待确认删除的因素节点信息（显示确认 Modal）
+  const [pendingFactorDelete, setPendingFactorDelete] = useState<{
+    nodeId: string
+    nodeLabel: string
+  } | null>(null)
+  // 保存删除前的 nodes 和 edges 快照，用于失败时回滚
+  const factorDeleteNodesSnapshotRef = useRef<FlowNode[]>([])
+  const factorDeleteEdgesSnapshotRef = useRef<FlowEdge[]>([])
+
   // 跟踪 factor 节点的初始权重（用于判断用户是否真的修改了权重）
   const initialWeightRef = useRef<number>(0.1)
   // 跟踪当前是否正在编辑 factor（用于区分"保存权重"和"保存修改"按钮）
@@ -418,14 +555,37 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const [form] = Form.useForm()
   const [weightValue, setWeightValue] = useState(0.1)
   const [activeTabKey, setActiveTabKey] = useState<OptionModalTab>('settings')
+  // 删除连线确认 Modal
+  const [edgeDeleteConfirmOpen, setEdgeDeleteConfirmOpen] = useState(false)
+
+  // pendingEdgeDelete 变化时打开/关闭确认 Modal
+  useEffect(() => {
+    setEdgeDeleteConfirmOpen(pendingEdgeDelete !== null)
+  }, [pendingEdgeDelete])
+
+  // pendingOptionDelete 变化时：仅更新状态，不直接控制 Modal（由单独 Modal 的 open prop 控制）
 
   // 跟踪是否有本地编辑（用于在 viewModel 变化时决定是否覆盖）
   const hasLocalEdit = useRef(false)
   // 跟踪上一次同步的 signature，用于判断后端数据是否真正变化
   const lastSyncedSignature = useRef<string | null>(null)
+  // 跟踪上一次的 forceSyncKey，用于检测 forceSyncKey 变化
+  const lastForceSyncKey = useRef<string | null>(null)
+  // ref 版本，供 effect 内部同步最新值
+  const forceSyncKeyRef = useRef<string | null>(null)
+
+  // 同步 forceSyncKey 到 ref，供 effect 内部使用
+  // eslint-disable-next-line react-hooks/static-lifecycle
+  useEffect(() => {
+    forceSyncKeyRef.current = forceSyncKey ?? null
+  })
 
   // 监听 viewModel 变化，当后端 canvas 更新时同步到 ReactFlow
   useEffect(() => {
+    // 同步最新的 forceSyncKey（保持与组件 prop 同步）
+    const currentForceSyncKey = forceSyncKey ?? null
+    const isForceSync = currentForceSyncKey !== null && currentForceSyncKey !== lastForceSyncKey.current
+
     // 构建 viewModel 对应的节点和边
     const newRawNodes = toFlowNodes(canvas.nodes, {
       factorsDetail,
@@ -438,6 +598,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       source: e.source,
       target: e.target,
       relation: e.relation ?? '',
+      selectable: true,
     })) as FlowEdge[]
 
     // 应用 dagre 水平布局（从左到右：决策 → 因素 → 方案）
@@ -453,22 +614,31 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     const vmSignature = JSON.stringify({ ...buildCanvasData(newNodes, newEdges), factorsDetailKeys, optionsDetailKeys })
 
     // 如果后端数据没有变化，跳过同步
-    if (vmSignature === lastSyncedSignature.current) {
+    if (vmSignature === lastSyncedSignature.current && !isForceSync) {
       return
     }
 
-    // 后端数据变化了，检查是否有本地编辑
-    if (hasLocalEdit.current) {
+    // forceSyncKey 变化：强制同步，清除本地编辑保护
+    if (isForceSync) {
+      console.log('[CanvasPanel] forceSyncKey changed, forcing sync and clearing local edits')
+      lastForceSyncKey.current = currentForceSyncKey
+      hasLocalEdit.current = false
+      // 通知父组件清除 dirty 状态
+      onDirtyChangeRef.current?.(false)
+    }
+
+    // 后端数据变化了，检查是否有本地编辑（forceSync 时跳过此检查）
+    if (hasLocalEdit.current && !isForceSync) {
       console.log('[CanvasPanel] viewModel changed but has local edits, skipping sync')
       return
     }
 
-    // 没有本地编辑，执行同步
-    console.log('[CanvasPanel] viewModel changed, syncing nodes/edges')
+    // 执行同步
+    console.log('[CanvasPanel] syncing nodes/edges', isForceSync ? '(force)' : '')
     lastSyncedSignature.current = vmSignature
     setNodes(newNodes)
     setEdges(newEdges)
-  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo])
+  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo, forceSyncKey])
 
   // openOptionAnalysis：在 Context 内部实现，可访问所有内部状态
   const openOptionAnalysis = useCallback(
@@ -540,21 +710,21 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       const allFactorNodes = nodesRef.current.filter((n) => n.type === 'factor')
       const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, newWeight)
 
-      setNodes((prev) =>
-        prev.map((n) => {
-          if (n.type !== 'factor') return n
-          const updated = rebalanced.find((r) => r.id === n.id)
-          return updated ?? n
-        }),
-      )
+      // 将重分配后的 factors 按 id 合并回完整 nodes 数组
+      const nextNodes = nodesRef.current.map((n) => {
+        if (n.type !== 'factor') return n
+        const updated = rebalanced.find((r) => r.id === n.id)
+        return updated ?? n
+      })
 
+      setNodes(nextNodes)
       setModalOpen(false)
       setEditingNode(null)
       isEditingFactorRef.current = false
 
-      // 通知父组件：已更新全部因素权重，触发保存+局部重推
+      // 使用完整 nodes 构建保存 payload：包含 root + 全部 factor + 全部 option
       const updatedCanvas = buildCanvasData(
-        rebalanced as FlowNode[],
+        nextNodes,
         edgesRef.current,
       )
       onWeightSaveRef.current?.(updatedCanvas)
@@ -579,6 +749,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             },
           }
           setNodes((prev) => [...prev, newNode])
+          onStructuralChangePendingRef.current?.('FACTOR_ADDED')
         } else {
           setNodes((prev) =>
             prev.map((n) =>
@@ -612,11 +783,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             },
           }
           setNodes((prev) => [...prev, newNode])
+          onStructuralChangePendingRef.current?.('OPTION_ADDED')
         } else {
-          setNodes((prev) =>
-            prev.map((n) =>
-              n.id === editingNode.id
-                ? ({
+          // 先构造 nextNodes，避免在 setNodes 回调之外使用 nodesRef
+          const nextNodes = nodesRef.current.map((n) =>
+            n.id === editingNode.id
+              ? ({
                   ...n,
                   data: {
                     ...n.data,
@@ -630,9 +802,14 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     },
                   },
                 } as OptionFlowNode)
-                : n,
-            ),
+              : n,
           )
+          setNodes(nextNodes)
+          setModalOpen(false)
+          setEditingNode(null)
+          isEditingFactorRef.current = false
+          onOptionEditSaveRef.current?.(buildCanvasData(nextNodes, edgesRef.current))
+          return
         }
       }
 
@@ -640,7 +817,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       setEditingNode(null)
       isEditingFactorRef.current = false
     },
-    [editingNode, isNewNode, weightValue, setNodes],
+    [editingNode, isNewNode, setNodes],
   )
 
   // 提交表单：根据是否编辑 factor 权重选择不同处理逻辑
@@ -674,6 +851,154 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     [editingNode, setNodes, setEdges],
   )
 
+  // 仅允许删除 option 节点；弹出确认框而非直接删除
+  const handleOptionDeleteClick = useCallback(
+    (nodeId: string) => {
+      if (nodeId === 'root') return
+      const node = nodesRef.current.find((n) => n.id === nodeId)
+      if (!node || node.type !== 'option') return
+
+      // 至少保留 2 个方案
+      const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
+      if (optionCount <= 2) return
+
+      // 保存快照，用于失败时回滚
+      optionDeleteNodesSnapshotRef.current = nodesRef.current
+      optionDeleteEdgesSnapshotRef.current = edgesRef.current
+      setPendingOptionDelete({ nodeId, nodeLabel: node.data?.label ?? '' })
+    },
+    [],
+  )
+
+  // 确认删除方案：执行删除 + 保存画布 + 局部重推
+  const confirmOptionDelete = useCallback(() => {
+    if (!pendingOptionDelete) return
+    const { nodeId } = pendingOptionDelete
+    setPendingOptionDelete(null)
+
+    // 快照已在上一步保存，这里乐观删除
+    setNodes((prev) => prev.filter((n) => n.id !== nodeId))
+    setEdges((prev) => {
+      const newEdges = prev.filter((e) => e.source !== nodeId && e.target !== nodeId)
+      // 用 setTimeout 确保 nodesRef 已更新
+      setTimeout(() => {
+        const updatedCanvas = buildCanvasData(nodesRef.current, newEdges)
+        const rollback = () => {
+          const nodesSnap = optionDeleteNodesSnapshotRef.current
+          const edgesSnap = optionDeleteEdgesSnapshotRef.current
+          setNodes(nodesSnap)
+          setEdges(edgesSnap)
+        }
+        // 传给父组件，由父组件决定何时回滚
+        onOptionDeleteRef.current?.(updatedCanvas, nodeId, rollback).catch(() => {
+          rollback()
+        })
+      }, 0)
+      return newEdges
+    })
+
+    if (editingNode?.id === nodeId) {
+      setModalOpen(false)
+      setEditingNode(null)
+    }
+  }, [pendingOptionDelete, setNodes, setEdges])
+
+  // 取消删除：恢复 nodes 和 edges
+  const cancelOptionDelete = useCallback(() => {
+    const nodesSnap = optionDeleteNodesSnapshotRef.current
+    const edgesSnap = optionDeleteEdgesSnapshotRef.current
+    if (nodesSnap.length > 0 || edgesSnap.length > 0) {
+      setNodes(nodesSnap)
+      setEdges(edgesSnap)
+    }
+    setPendingOptionDelete(null)
+  }, [setNodes, setEdges])
+
+  // ── 删除因素节点 ─────────────────────────────────────────────
+
+  // 统一的删除因素入口：点击按钮 / 删除 HAS_FACTOR 连线共用
+  const initiateFactorDelete = useCallback(
+    (nodeId: string, nodeLabel: string) => {
+      const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
+      // 至少保留 1 个因素
+      if (factorCount <= 1) return
+
+      // 保存快照，用于失败时回滚
+      factorDeleteNodesSnapshotRef.current = nodesRef.current
+      factorDeleteEdgesSnapshotRef.current = edgesRef.current
+      setPendingFactorDelete({ nodeId, nodeLabel })
+    },
+    [],
+  )
+
+  // 点击"删除此因素"按钮
+  const handleFactorDeleteClick = useCallback(
+    (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId)
+      if (!node || node.type !== 'factor') return
+      initiateFactorDelete(nodeId, node.data?.label ?? '')
+    },
+    [initiateFactorDelete],
+  )
+
+  // 确认删除因素：权重重分配 + 删除节点和连线 + 保存画布 + 局部重推
+  const confirmFactorDelete = useCallback(() => {
+    if (!pendingFactorDelete) return
+    const { nodeId } = pendingFactorDelete
+    setPendingFactorDelete(null)
+
+    // 快照已在上一步保存，这里执行乐观删除 + 权重重分配
+    setNodes((prev) => {
+      const allFactors = prev.filter((n) => n.type === 'factor')
+
+      // 计算删除后剩余因素的权重（按比例重分配）
+      const rebalanced = redistributeWeightsOnDelete(allFactors, nodeId)
+
+      // 删除 factor 节点，同时更新剩余 factor 权重
+      const newNodes = prev
+        .filter((n) => n.id !== nodeId)
+        .map((n) => {
+          const updated = rebalanced.find((r) => r.id === n.id)
+          return updated ?? n
+        })
+
+      // 用 setTimeout 确保 nodesRef 已更新
+      setTimeout(() => {
+        const rollback = () => {
+          setNodes(factorDeleteNodesSnapshotRef.current)
+          setEdges(factorDeleteEdgesSnapshotRef.current)
+        }
+        const updatedCanvas = buildCanvasData(newNodes, edgesRef.current)
+        // 传给父组件，由父组件决定何时回滚
+        onFactorDeleteRef.current?.(updatedCanvas, rollback).catch(() => {
+          rollback()
+        })
+      }, 0)
+
+      return newNodes
+    })
+
+    setEdges((prev) =>
+      prev.filter((e) => e.source !== nodeId && e.target !== nodeId),
+    )
+
+    if (editingNode?.id === nodeId) {
+      setModalOpen(false)
+      setEditingNode(null)
+    }
+  }, [pendingFactorDelete, setNodes, setEdges])
+
+  // 取消删除因素：恢复快照
+  const cancelFactorDelete = useCallback(() => {
+    const nodesSnap = factorDeleteNodesSnapshotRef.current
+    const edgesSnap = factorDeleteEdgesSnapshotRef.current
+    if (nodesSnap.length > 0 || edgesSnap.length > 0) {
+      setNodes(nodesSnap)
+      setEdges(edgesSnap)
+    }
+    setPendingFactorDelete(null)
+  }, [setNodes, setEdges])
+
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: FlowNode) => {
       if (node.type === 'decision') return
@@ -683,8 +1008,74 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     [openModal],
   )
 
+  const handleEdgeClick = useCallback(
+    (_: React.MouseEvent, edge: FlowEdge) => {
+      console.log('[Canvas] Edge clicked:', edge.id, edge)
+    },
+    [],
+  )
+
   const handleEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
+      // 分离 HAS_FACTOR 边的删除操作（需级联删除因素节点）
+      const hasFactorRemovals = changes.filter(
+        (c): c is Extract<EdgeChange, { type: 'remove' }> =>
+          c.type === 'remove' &&
+          edgesRef.current.find((e) => e.id === c.id)?.relation === 'HAS_FACTOR',
+      )
+      // 分离 AFFECTS 边的删除操作（需弹出确认框）
+      const affectsRemovals = changes.filter(
+        (c): c is Extract<EdgeChange, { type: 'remove' }> =>
+          c.type === 'remove' &&
+          edgesRef.current.find((e) => e.id === c.id)?.relation === 'AFFECTS',
+      )
+      // 非 HAS_FACTOR / AFFECTS 边的操作正常处理
+      const otherChanges = changes.filter(
+        (c) =>
+          !(
+            (c.type === 'remove' &&
+              (edgesRef.current.find((e) => e.id === c.id)?.relation === 'HAS_FACTOR' ||
+                edgesRef.current.find((e) => e.id === c.id)?.relation === 'AFFECTS'))
+          ),
+      )
+
+      if (hasFactorRemovals.length > 0) {
+        // HAS_FACTOR 删除：级联删除因素节点
+        const first = hasFactorRemovals[0]
+        const edge = edgesRef.current.find((e) => e.id === first.id)!
+        const factorNode = nodesRef.current.find((n) => n.id === edge.target)
+        const factorId = factorNode?.id
+        if (factorId) {
+          // 先正常应用其他变更（包括移除该边的选中状态）
+          if (otherChanges.length > 0) {
+            setEdges((prev) => applyEdgeChanges(otherChanges, prev) as FlowEdge[])
+          }
+          // 调用统一的删除因素函数
+          initiateFactorDelete(factorId, factorNode?.data?.label ?? '')
+        }
+        return
+      }
+
+      if (affectsRemovals.length > 0) {
+        // 第一个 AFFECTS 删除，弹出确认框
+        const first = affectsRemovals[0]
+        const edge = edgesRef.current.find((e) => e.id === first.id)!
+        const factorNode = nodesRef.current.find((n) => n.id === edge.source)
+        const optionNode = nodesRef.current.find((n) => n.id === edge.target)
+
+        // 先正常应用其他变更（包括移除该边的选中状态）
+        if (otherChanges.length > 0) {
+          setEdges((prev) => applyEdgeChanges(otherChanges, prev) as FlowEdge[])
+        }
+        // 弹出确认框，不在此处删除
+        setPendingEdgeDelete({
+          edgeId: edge.id,
+          factorName: factorNode?.data?.label ?? '该因素',
+          optionName: optionNode?.data?.label ?? '该方案',
+        })
+        return
+      }
+
       setEdges((prev) => applyEdgeChanges(changes, prev) as FlowEdge[])
     },
     [setEdges],
@@ -696,6 +1087,49 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     },
     [setNodes],
   )
+
+  // 处理点击 AFFECTS 连线删除按钮
+  const handleEdgeDelete = useCallback(
+    (edgeId: string, _source: string, _target: string) => {
+      const edge = edgesRef.current.find((e) => e.id === edgeId)
+      if (!edge || edge.relation !== 'AFFECTS') return
+
+      const factorNode = nodesRef.current.find((n) => n.id === edge.source)
+      const optionNode = nodesRef.current.find((n) => n.id === edge.target)
+      const factorName = factorNode?.data?.label ?? '该因素'
+      const optionName = optionNode?.data?.label ?? '该方案'
+
+      // 保存当前 edges 快照，用于失败时回滚
+      edgesSnapshotRef.current = edgesRef.current
+      setPendingEdgeDelete({ edgeId, factorName, optionName })
+    },
+    [],
+  )
+
+  // 确认删除连线：执行删除 + 保存画布 + 局部重推
+  const confirmEdgeDelete = useCallback(() => {
+    if (!pendingEdgeDelete) return
+    const { edgeId } = pendingEdgeDelete
+    setPendingEdgeDelete(null)
+
+    // 乐观删除：立即更新 edges，在回调中获取更新后的 edges 构建 canvas
+    setEdges((prev) => {
+      const newEdges = prev.filter((e) => e.id !== edgeId)
+      // nodesRef 在上次渲染时已更新为最新值，且本操作不涉及 nodes 变化
+      const updatedCanvas = buildCanvasData(
+        nodesRef.current,
+        newEdges,
+      )
+      // 延迟调用父组件保存（setEdges 是同步的，在其回调中 nodesRef 已是最新的）
+      setTimeout(() => onEdgeDeleteRef.current?.(updatedCanvas), 0)
+      return newEdges
+    })
+  }, [pendingEdgeDelete])
+
+  // 取消删除：恢复边
+  const cancelEdgeDelete = useCallback(() => {
+    setPendingEdgeDelete(null)
+  }, [])
 
   const handleConnect = useCallback(
     (connection: Connection) => {
@@ -716,12 +1150,29 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         id: genId('e'),
         source: connection.source,
         target: connection.target,
+        type: relation,
         relation,
+        selectable: true,
       }
 
       setEdges((prev) => [...prev, newEdge])
+
+      // 判断结构变更类型并通知父组件
+      if (relation === 'HAS_FACTOR') {
+        // root → factor 连线：检查该 factor 是否已有 root 连线
+        const hasExistingRootConnection = edgesRef.current.some(
+          (e) => e.source === connection.source && e.target === connection.target && e.relation === 'HAS_FACTOR',
+        )
+        if (!hasExistingRootConnection) {
+          // 新增 root → factor 连线，等同于 FACTOR_ADDED
+          onStructuralChangePendingRef.current?.('FACTOR_ADDED')
+        }
+      } else if (relation === 'AFFECTS') {
+        // factor → option 连线
+        onStructuralChangePendingRef.current?.('FACTOR_OPTION_EDGE_ADDED')
+      }
     },
-    [setEdges],
+    [],
   )
 
   const addFactor = useCallback(() => {
@@ -749,6 +1200,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     option: OptionNode,
   }
 
+  const edgeTypes = {
+    AFFECTS: AffectsEdge,
+  }
+
   // 派生局部推演状态：取最近 3 个非 WAITING 步骤
   const recentSteps = (partialSteps ?? [])
     .filter((s) => s.status !== 'WAITING')
@@ -759,7 +1214,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   return (
     <PartialAnalysisContext.Provider value={{ partialAnalysisInfo, partialSteps: partialSteps ?? [] }}>
       <CanvasActionsContext.Provider value={canvasActions}>
-        <div className="canvas-panel">
+        <EdgeDeleteContext.Provider value={{ nodes: nodes as Node[], onEdgeDelete: handleEdgeDelete }}>
+          <div className="canvas-panel">
           <div className="canvas-panel__toolbar">
           <Space>
             <Button size="small" icon={<PlusOutlined />} onClick={addFactor}>
@@ -782,7 +1238,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
             onNodeClick={handleNodeClick}
+            onEdgeClick={handleEdgeClick}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             fitView
             nodesDraggable
             nodesConnectable
@@ -794,6 +1252,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                   themeMode === 'eyeCare' ? '#b6c4d8' : '#94a3b8',
                 strokeWidth: themeMode === 'eyeCare' ? 2.5 : 1.75,
               },
+              selectable: true,
             }}
             proOptions={{ hideAttribution: true }}
           >
@@ -1044,17 +1503,70 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
                 {/* 底部操作栏 */}
                 <div className="canvas-modal__footer">
-                  <Popconfirm
-                    title={`删除此${editingNode.type === 'factor' ? '因素' : '方案'}？`}
-                    onConfirm={() => deleteNode(editingNode.id)}
-                    okText="删除"
-                    cancelText="取消"
-                    disabled={editingNode.id === 'root'}
-                  >
-                    <Button danger type="text" icon={<DeleteOutlined />} disabled={editingNode.id === 'root'}>
-                      删除此{editingNode.type === 'factor' ? '因素' : '方案'}
-                    </Button>
-                  </Popconfirm>
+                  {editingNode.type === 'option' ? (
+                    <>
+                      {(() => {
+                        const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
+                        const canDelete = optionCount > 2
+                        return (
+                          <Popconfirm
+                            title={canDelete
+                              ? `删除后，该方案及其关联关系将不再参与方案对比。是否继续？`
+                              : '至少保留两个候选方案用于对比'}
+                            disabled={!canDelete}
+                            onConfirm={() => handleOptionDeleteClick(editingNode.id)}
+                            okText="删除"
+                            cancelText="取消"
+                          >
+                            <Button
+                              danger
+                              type="text"
+                              icon={<DeleteOutlined />}
+                              disabled={!canDelete}
+                            >
+                              删除此方案
+                            </Button>
+                          </Popconfirm>
+                        )
+                      })()}
+                    </>
+                  ) : (
+                    <>
+                      {editingNode.type === 'factor' ? (
+                        (() => {
+                          const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
+                          const canDelete = factorCount > 1
+                          return (
+                            <Popconfirm
+                              title={canDelete
+                                ? `删除后，该因素的权重将按比例分配给其余因素，并重新评估受影响方案。是否继续？`
+                                : '至少保留一个关键影响因素'}
+                              onConfirm={() => handleFactorDeleteClick(editingNode.id)}
+                              okText="删除"
+                              cancelText="取消"
+                              disabled={!canDelete}
+                            >
+                              <Button danger type="text" icon={<DeleteOutlined />} disabled={!canDelete}>
+                                删除此因素
+                              </Button>
+                            </Popconfirm>
+                          )
+                        })()
+                      ) : (
+                        <Popconfirm
+                          title={`删除此方案？`}
+                          onConfirm={() => deleteNode(editingNode.id)}
+                          okText="删除"
+                          cancelText="取消"
+                          disabled={editingNode.id === 'root'}
+                        >
+                          <Button danger type="text" icon={<DeleteOutlined />} disabled={editingNode.id === 'root'}>
+                            删除此方案
+                          </Button>
+                        </Popconfirm>
+                      )}
+                    </>
+                  )}
                   <Space>
                     <Button onClick={closeModal}>取消</Button>
                     {editingNode.type === 'factor' && !isNewNode ? (
@@ -1077,7 +1589,66 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             </>
           )}
         </Modal>
+
+        {/* 删除连线确认 */}
+        <Modal
+          title="确认删除连线"
+          open={edgeDeleteConfirmOpen}
+          onCancel={cancelEdgeDelete}
+          footer={null}
+          width={420}
+        >
+          <p style={{ margin: '0 0 16px', lineHeight: 1.6 }}>
+            删除后，<strong>{pendingEdgeDelete?.factorName ?? '该因素'}</strong> 将不再参与
+            <strong>{pendingEdgeDelete?.optionName ?? '该方案'}</strong> 的评估。是否继续？
+          </p>
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={cancelEdgeDelete}>取消</Button>
+            <Button danger type="primary" onClick={confirmEdgeDelete}>
+              确认删除
+            </Button>
+          </Space>
+        </Modal>
+
+        {/* 删除候选方案确认 */}
+        <Modal
+          title="确认删除方案"
+          open={pendingOptionDelete !== null}
+          onCancel={cancelOptionDelete}
+          footer={null}
+          width={420}
+        >
+          <p style={{ margin: '0 0 16px', lineHeight: 1.6 }}>
+            删除后，该方案及其关联关系将不再参与方案对比。是否继续？
+          </p>
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={cancelOptionDelete}>取消</Button>
+            <Button danger type="primary" onClick={confirmOptionDelete}>
+              确认删除
+            </Button>
+          </Space>
+        </Modal>
+
+        {/* 删除因素确认 */}
+        <Modal
+          title="确认删除因素及其连线"
+          open={pendingFactorDelete !== null}
+          onCancel={cancelFactorDelete}
+          footer={null}
+          width={420}
+        >
+          <p style={{ margin: '0 0 16px', lineHeight: 1.6 }}>
+            删除后，该影响因素及其关联关系将从当前决策中移除，剩余因素权重将按比例重新分配。是否继续？
+          </p>
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={cancelFactorDelete}>取消</Button>
+            <Button danger type="primary" onClick={confirmFactorDelete}>
+              确认删除
+            </Button>
+          </Space>
+        </Modal>
       </div>
+    </EdgeDeleteContext.Provider>
     </CanvasActionsContext.Provider>
     </PartialAnalysisContext.Provider>
   )

@@ -192,7 +192,6 @@ public class AnalysisEventServiceImpl implements AnalysisEventService {
             );
         } catch (IOException | IllegalStateException exception) {
             runtimeRepository.removeConnection(taskId, emitter);
-            emitter.complete();
         }
     }
 

@@ -6,6 +6,7 @@ import qg.po.midterm.common.exception.AiValidationException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,6 +42,22 @@ public class LlmRetryUtils {
             Object[] tools,
             Class<T> returnType) {
 
+        return executeWithRepairResult(chatClient, userPrompt, tools, returnType, result -> List.of());
+    }
+
+    /**
+     * 执行结构化调用，并在 JSON 反序列化后校验业务字段。
+     *
+     * <p>部分模型会返回语法正确但字段为空的 JSON。此时也应进入同一次修复流程，
+     * 避免将不完整结果当作节点成功结果继续向下游传递。</p>
+     */
+    public static <T> ExecutionResult<T> executeWithRepairResult(
+            ChatClient chatClient,
+            String userPrompt,
+            Object[] tools,
+            Class<T> returnType,
+            Function<T, List<String>> validator) {
+
         MarkdownStrippingConverter<T> converter = new MarkdownStrippingConverter<>(returnType);
         String formatInstruction = converter.getFormat();
         String fullPrompt = userPrompt + "\n\n" + formatInstruction;
@@ -54,7 +71,7 @@ public class LlmRetryUtils {
         }
 
         try {
-            return new ExecutionResult<>(converter.convert(rawResponse), false);
+            return new ExecutionResult<>(convertAndValidate(converter, rawResponse, validator), false);
         } catch (Exception e) {
             log.warn("大模型第一次返回非标准 JSON 格式，触发修复流程。报错: {}", e.getMessage());
             
@@ -72,7 +89,7 @@ public class LlmRetryUtils {
             }
 
             try {
-                return new ExecutionResult<>(converter.convert(repairedRawResponse), true);
+                return new ExecutionResult<>(convertAndValidate(converter, repairedRawResponse, validator), true);
             } catch (Exception e2) {
                 log.error("大模型修复 JSON 失败: {}", e2.getMessage());
                 throw new AiValidationException("AI 结果结构校验失败：" + e2.getMessage(), missingFields, true);
@@ -81,6 +98,18 @@ public class LlmRetryUtils {
     }
 
     public record ExecutionResult<T>(T value, boolean repaired) {}
+
+    private static <T> T convertAndValidate(
+            MarkdownStrippingConverter<T> converter,
+            String rawResponse,
+            Function<T, List<String>> validator) {
+        T result = converter.convert(rawResponse);
+        List<String> errors = validator.apply(result);
+        if (errors != null && !errors.isEmpty()) {
+            throw new IllegalArgumentException("业务字段校验失败: " + String.join(", ", errors));
+        }
+        return result;
+    }
 
     /**
      * 为节点级解析失败和工作流级语义校验失败构造统一的修复提示。

@@ -4,13 +4,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Component;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.Resource;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import qg.po.midterm.workflow.event.NodeExecutionEvent;
+import org.springframework.stereotype.Component;
 import qg.po.midterm.dto.result.AnalysisResultDto;
+import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Option;
 import tools.jackson.databind.ObjectMapper;
@@ -18,7 +18,9 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 
-/** 工作流节点：对比方案风险，生成最终推荐。 */
+/**
+ * 工作流节点：对比方案风险，生成最终推荐。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -36,9 +38,10 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
             String summary,
             @com.fasterxml.jackson.annotation.JsonPropertyDescription("对本阶段评估对比结果的详细总结文本，适合直接展示给用户看，主要概括你最终推荐的方案及其核心理由")
             String content,
-            AnalysisResultDto.Recommendation recommendation, 
+            AnalysisResultDto.Recommendation recommendation,
             List<String> nextActions
-    ) {}
+    ) {
+    }
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
@@ -49,40 +52,40 @@ public class RiskAnalysisNode implements NodeAction<DecisionState> {
 
             String understanding = state.getUnderstanding();
             List<Option> options = state.getOptions();
-            
+
             String optionStr = objectMapper.writeValueAsString(options != null ? options : List.of());
 
             String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";
 
             Map<String, Object> params = Map.of(
-                "title", title,
-                "understanding", understanding != null ? understanding : "无",
-                "options", optionStr
+                    "title", title,
+                    "understanding", understanding != null ? understanding : "无",
+                    "options", optionStr
             );
             String prompt = new PromptTemplate(promptResource).create(params).getContents();
-            
+
             log.info(">>> 【AI Prompt】\n{}", prompt);
 
             qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<RiskAnalysisResult> execution =
                     qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
-                    chatClient,
-                    prompt,
-                    null, // 没有 tools
-                    RiskAnalysisResult.class
-            );
+                            chatClient,
+                            prompt,
+                            null, // 没有 tools
+                            RiskAnalysisResult.class
+                    );
             RiskAnalysisResult result = execution.value();
-                    
+
             log.info("<<< 【AI Response】\n{}", result);
 
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
             String outputData = objectMapper.writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "RiskAnalysis", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));
-            
+
             return Map.of(
-                "recommendation", result.recommendation() != null
-                        ? result.recommendation() : new AnalysisResultDto.Recommendation(),
-                "nextActions", result.nextActions() != null ? result.nextActions() : List.of(),
-                "repairAttempted", state.isRepairAttempted() || execution.repaired()
+                    "recommendation", result.recommendation() != null
+                            ? result.recommendation() : new AnalysisResultDto.Recommendation(),
+                    "nextActions", result.nextActions() != null ? result.nextActions() : List.of(),
+                    "repairAttempted", state.isRepairAttempted() || execution.repaired()
             );
         } catch (Exception e) {
             throw e;

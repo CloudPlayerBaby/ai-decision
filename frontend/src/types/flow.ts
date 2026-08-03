@@ -53,7 +53,10 @@ export type DecisionFlowNodeForProps = DecisionFlowNode
 export type FactorFlowNodeForProps = FactorFlowNode
 export type OptionFlowNodeForProps = OptionFlowNode
 
-/** Flow 边：Edge 顶层 + relation */
+/** Flow 边：Edge 顶层 + relation
+ * - type 字段设为 relation 值（'HAS_FACTOR' | 'AFFECTS'），供 React Flow edgeTypes 匹配
+ * - relation 字段保留业务语义
+ */
 export type FlowEdge = Edge & {
   relation: EdgeRelation
 }

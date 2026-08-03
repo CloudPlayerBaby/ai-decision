@@ -772,7 +772,9 @@ body.is-resizing .resize-handle::before {
 /* 画布连线：跟随主题色，护眼模式加粗提亮 */
 .canvas-panel__flow .react-flow__edge-path {
   stroke: var(--canvas-edge);
-  stroke-width: var(--canvas-edge-width);
+  stroke-width: max(var(--canvas-edge-width), 6px);
+  cursor: pointer;
+  transition: stroke 0.15s, stroke-width 0.15s, filter 0.15s;
 }
 
 .canvas-panel__flow .react-flow__connection-path {
@@ -780,10 +782,39 @@ body.is-resizing .resize-handle::before {
   stroke-width: 2;
 }
 
+/* 边选中状态：更醒目的高亮 */
 .canvas-panel__flow .react-flow__edge.selected .react-flow__edge-path,
 .canvas-panel__flow .react-flow__edge:focus .react-flow__edge-path,
 .canvas-panel__flow .react-flow__edge:focus-visible .react-flow__edge-path {
-  stroke: var(--decision);
+  stroke: var(--decision, #f97316);
+  stroke-width: calc(max(var(--canvas-edge-width), 6px) + 2px);
+  filter: drop-shadow(0 0 4px var(--decision, #f97316));
+}
+
+/* AFFECTS 连线删除按钮（EdgeLabelRenderer 是 Portal，样式需全局选择器） */
+.react-flow__edgelabelrenderer .edge-delete-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid #e53935;
+  background: #fff;
+  color: #e53935;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  z-index: 10;
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.react-flow__edgelabelrenderer .edge-delete-btn:hover {
+  opacity: 1;
+  background: #e53935;
+  color: #fff;
 }
 
 [data-theme='eye-care'] .canvas-panel__flow .react-flow__edge-path {

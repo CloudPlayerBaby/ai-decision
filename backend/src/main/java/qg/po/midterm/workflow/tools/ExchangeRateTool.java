@@ -1,6 +1,7 @@
 package qg.po.midterm.workflow.tools;
 
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.context.ApplicationEventPublisher;
@@ -16,10 +17,11 @@ import java.util.Map;
 /**
  * 外部工具调用示例：汇率转换工具
  */
-@Slf4j
 @Service
 @lombok.RequiredArgsConstructor
 public class ExchangeRateTool {
+
+    private static final Logger log = LoggerFactory.getLogger(ExchangeRateTool.class);
 
     private final ApplicationEventPublisher eventPublisher;
     private final RestTemplate restTemplate = createRestTemplate();

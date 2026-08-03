@@ -15,6 +15,7 @@ import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 import qg.po.midterm.workflow.tools.CalculatorTool;
 import qg.po.midterm.workflow.tools.ExchangeRateTool;
+import qg.po.midterm.workflow.utils.AnalysisResultValidator;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -87,11 +88,12 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
             qg.po.midterm.workflow.utils.LlmRetryUtils.ExecutionResult<OptionGenerationResult> execution =
                     qg.po.midterm.workflow.utils.LlmRetryUtils.executeWithRepairResult(
-                    chatClient,
-                    prompt,
-                    new Object[]{calculatorTool, exchangeRateTool},
-                    OptionGenerationResult.class
-            );
+                            chatClient,
+                            prompt,
+                            new Object[]{calculatorTool, exchangeRateTool},
+                            OptionGenerationResult.class,
+                            result -> AnalysisResultValidator.validateOptions(result.options())
+                    );
             OptionGenerationResult result = execution.value();
 
             log.info("<<< 【AI Response】\n{}", result);

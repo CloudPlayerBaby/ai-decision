@@ -28,6 +28,10 @@ class CanvasMergeServiceTest {
         Option option = new Option();
         option.setId("new_option");
         option.setName("new option");
+        option.setDescription("display only");
+        option.setPros(List.of("pro"));
+        option.setCons(List.of("con"));
+        option.setRisks(List.of("risk"));
         option.setScores(Map.of("cost", 4));
         AnalysisResultDto result = new AnalysisResultDto();
         result.setFactors(List.of(factor));
@@ -39,6 +43,10 @@ class CanvasMergeServiceTest {
                 .filter(node -> "factor_custom".equals(node.getId())).findFirst().orElseThrow();
         assertEquals(3, mergedFactor.getPosition().getX());
         assertEquals("new factor", mergedFactor.getLabel());
+        assertEquals(Map.of("weight", 0.7), mergedFactor.getData());
+        Canvas.CanvasNode mergedOption = merged.getNodes().stream()
+                .filter(node -> "new_option".equals(node.getId())).findFirst().orElseThrow();
+        assertEquals(Map.of("scores", Map.of("cost", 4)), mergedOption.getData());
         assertFalse(merged.getNodes().stream().anyMatch(node -> "stale".equals(node.getId())));
         assertTrue(merged.getEdges().stream().anyMatch(edge ->
                 "root".equals(edge.getSource())

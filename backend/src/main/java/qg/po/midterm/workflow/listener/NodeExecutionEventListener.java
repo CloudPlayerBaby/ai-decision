@@ -19,6 +19,7 @@ import qg.po.midterm.service.impl.CanvasMergeService;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.event.WorkflowCompletedEvent;
 import qg.po.midterm.workflow.event.WorkflowFailedEvent;
+import qg.po.midterm.workflow.utils.WorkflowErrorMessageResolver;
 import qg.po.midterm.workflow.utils.StepDisplayUtils;
 
 import java.time.LocalDateTime;
@@ -221,13 +222,14 @@ public class NodeExecutionEventListener {
             Exception exception) {
         LocalDateTime now = LocalDateTime.now();
         Exception rootException = unwrap(exception);
+        String clientMessage = WorkflowErrorMessageResolver.toClientMessage(exception);
         if (step == null) {
             step = resolveFailureStep(task, rootException);
         }
 
         if (step != null) {
             step.setStatus("FAILED");
-            step.setErrorMessage(message);
+            step.setErrorMessage(clientMessage);
             step.setOutputData(null);
             step.setFinishedAt(now);
             step.setUpdatedAt(now);
@@ -244,7 +246,7 @@ public class NodeExecutionEventListener {
         boolean retryable = step != null;
 
         task.setStatus("FAILED");
-        task.setErrorMessage(message);
+        task.setErrorMessage(clientMessage);
         task.setErrorCode(errorCode);
         task.setMissingFields(writeMissingFields(aiException));
         task.setRepairAttempted(aiException != null && aiException.isRepairAttempted());
@@ -262,7 +264,7 @@ public class NodeExecutionEventListener {
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("errorCode", errorCode);
-        data.put("message", message);
+        data.put("message", clientMessage);
         data.put("failedStepId", step == null ? null : "s_" + step.getId());
         data.put("retryable", retryable);
 

@@ -544,7 +544,7 @@ public class DecisionServiceImpl implements DecisionService {
         for (String id : newNodes.keySet()) {
             if (!oldNodes.containsKey(id)) {
                 changed.add(id); // 新增
-            } else if (!nodeEquals(oldNodes.get(id), newNodes.get(id))) {
+            } else if (!CanvasNodeComparator.businessEquals(oldNodes.get(id), newNodes.get(id))) {
                 changed.add(id); // 修改
             }
         }
@@ -588,21 +588,6 @@ public class DecisionServiceImpl implements DecisionService {
             }
         }
         return set;
-    }
-
-    private boolean nodeEquals(Canvas.CanvasNode a, Canvas.CanvasNode b) {
-        // position 只影响布局；type、label 和 data 都属于业务变更。
-        if (!Objects.equals(a.getType(), b.getType())
-                || !Objects.equals(a.getLabel(), b.getLabel())) {
-            return false;
-        }
-        try {
-            String jsonA = objectMapper.writeValueAsString(a.getData());
-            String jsonB = objectMapper.writeValueAsString(b.getData());
-            return jsonA.equals(jsonB);
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     // ==================== 私有工具方法 ====================

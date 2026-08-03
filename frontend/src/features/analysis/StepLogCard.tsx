@@ -96,6 +96,7 @@ export function StepLogCard({ step, onRetry, animate = true }: Props) {
         }
       `}</style>
       <Collapse
+        defaultActiveKey={[step.id]}
         items={[
           {
             key: step.id,

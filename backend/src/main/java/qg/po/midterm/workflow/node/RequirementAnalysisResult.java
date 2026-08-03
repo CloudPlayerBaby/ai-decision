@@ -9,4 +9,5 @@ public record RequirementAnalysisResult(
         String content,
         @JsonPropertyDescription("给下一个节点的提示信息，详细说明问题的背景和核心目标")
         String understanding
-) {}
+) {
+}
