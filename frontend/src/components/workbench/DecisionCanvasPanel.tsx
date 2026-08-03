@@ -292,6 +292,8 @@ export interface DecisionCanvasPanelProps {
   onOptionEditSave?: (canvas: CanvasData) => void
   /** 删除因素→方案连线后保存并自动局部重推 */
   onEdgeDelete?: (canvas: CanvasData) => void
+  /** 仅保存因素名称：触发保存画布，不触发局部重推 */
+  onFactorLabelSave?: (canvas: CanvasData) => void
   /** 删除候选方案节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
   onOptionDelete?: (canvas: CanvasData, deletedOptionId: string, rollback: () => void) => Promise<void>
   /** 删除因素节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
@@ -412,6 +414,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onFactorDelete,
     onStructuralChangePending,
     onOptionEditSave,
+    onFactorLabelSave,
     partialAnalysisInfo,
     partialSteps,
     forceSyncKey,
@@ -473,6 +476,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const onFactorDeleteRef = useRef<((canvas: CanvasData, rollback: () => void) => Promise<void>) | undefined>(undefined)
   const onStructuralChangePendingRef = useRef<((reason: 'OPTION_ADDED' | 'FACTOR_ADDED' | 'FACTOR_OPTION_EDGE_ADDED') => void) | undefined>(undefined)
   const onOptionEditSaveRef = useRef<((canvas: CanvasData) => void) | undefined>(undefined)
+  const onFactorLabelSaveRef = useRef<((canvas: CanvasData) => void) | undefined>(undefined)
   // eslint-disable-next-line react-hooks/static-lifecycle
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
@@ -483,6 +487,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onFactorDeleteRef.current = onFactorDelete
     onStructuralChangePendingRef.current = onStructuralChangePending
     onOptionEditSaveRef.current = onOptionEditSave
+    onFactorLabelSaveRef.current = onFactorLabelSave
   })
 
   useEffect(() => {
@@ -824,6 +829,37 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       setModalOpen(false)
       setEditingNode(null)
       isEditingFactorRef.current = false
+    },
+    [editingNode, isNewNode, setNodes],
+  )
+
+  // 仅保存因素名称：构造 nextNodes 后直接调用 onFactorLabelSave，不触发 effect 链路
+  const handleSaveFactorLabel = useCallback(
+    (values: Record<string, unknown>) => {
+      if (!editingNode || editingNode.type !== 'factor' || isNewNode) return
+      const label = String(values.label ?? '')
+
+      // 先构造 nextNodes，避免依赖 setNodes 回调
+      const nextNodes = nodesRef.current.map((n) =>
+        n.id === editingNode.id
+          ? ({
+              ...n,
+              data: {
+                ...n.data,
+                label,
+              },
+            } as FactorFlowNode)
+          : n,
+      )
+
+      setNodes(nextNodes)
+      setModalOpen(false)
+      setEditingNode(null)
+      isEditingFactorRef.current = false
+
+      // 使用完整的 nextNodes 构建 Canvas，直接触发保存（不经过 effect）
+      const updatedCanvas = buildCanvasData(nextNodes, edgesRef.current)
+      onFactorLabelSaveRef.current?.(updatedCanvas)
     },
     [editingNode, isNewNode, setNodes],
   )
@@ -1579,7 +1615,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     <Button onClick={closeModal}>取消</Button>
                     {editingNode.type === 'factor' && !isNewNode ? (
                       <>
-                        <Button onClick={() => { form.validateFields().then(handleSaveNormal) }}>
+                        <Button onClick={() => { form.validateFields().then(handleSaveFactorLabel) }}>
                           仅保存名称
                         </Button>
                         <Button type="primary" onClick={submitForm}>
