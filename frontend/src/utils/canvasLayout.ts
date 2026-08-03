@@ -10,11 +10,39 @@
 
 import dagre from 'dagre'
 import { Position } from '@xyflow/react'
-import type { FlowNode, FlowEdge } from '../types/flow'
+import type { FlowNode, FlowEdge, FactorFlowData } from '../types/flow'
 
 /** 节点默认尺寸 */
 const DEFAULT_NODE_WIDTH = 220
 const DEFAULT_NODE_HEIGHT = 100
+
+/** Factor 节点高度估算常量 */
+const FACTOR_TITLE_HEIGHT = 20   // 标签 + 标题
+const FACTOR_WEIGHT_HEIGHT = 20   // 权重行
+const FACTOR_PADDING = 20        // 上下 padding
+const FACTOR_LINE_HEIGHT = 18    // description 单行高度
+const FACTOR_MAX_LINES = 4       // description 最多行数
+const FACTOR_DESC_HEIGHT = FACTOR_LINE_HEIGHT * FACTOR_MAX_LINES // 72px
+export const FACTOR_MIN_HEIGHT = FACTOR_TITLE_HEIGHT + FACTOR_WEIGHT_HEIGHT + FACTOR_DESC_HEIGHT + FACTOR_PADDING // 132px
+
+/**
+ * 估算单个节点的高度
+ * - factor 节点：按 description 文字长度估算行数（最多 4 行）
+ * - decision/option 节点：使用默认高度
+ */
+export function estimateNodeHeight(node: FlowNode): number {
+  if (node.type === 'factor') {
+    const description = (node.data as FactorFlowData).description ?? ''
+    const charPerLine = 22 // 约 22 字符/行（220px 宽度减去 padding）
+    const estimatedLines = Math.min(Math.ceil(description.length / charPerLine), FACTOR_MAX_LINES)
+    const descHeight = estimatedLines * FACTOR_LINE_HEIGHT
+    return FACTOR_TITLE_HEIGHT + FACTOR_WEIGHT_HEIGHT + descHeight + FACTOR_PADDING
+  }
+  if (node.type === 'option') {
+    return 160 // option 节点固定高度（包含评分行）
+  }
+  return DEFAULT_NODE_HEIGHT // decision 节点
+}
 
 interface LayoutOptions {
   direction?: 'LR' | 'TB'
@@ -22,9 +50,10 @@ interface LayoutOptions {
   nodeHeight?: number
   rankSeparation?: number
   nodeSeparation?: number
+  customHeightFn?: (node: FlowNode) => number
 }
 
-const DEFAULT_OPTIONS: Required<LayoutOptions> = {
+const DEFAULT_OPTIONS: Omit<Required<LayoutOptions>, 'customHeightFn'> & { customHeightFn?: (node: FlowNode) => number } = {
   direction: 'LR',
   nodeWidth: DEFAULT_NODE_WIDTH,
   nodeHeight: DEFAULT_NODE_HEIGHT,
@@ -62,9 +91,10 @@ export function applyDagreLayout<T extends FlowNode>(
 
   // 添加所有节点到 dagre 图
   nodes.forEach((node) => {
+    const height = opts.customHeightFn ? opts.customHeightFn(node) : opts.nodeHeight
     dagreGraph.setNode(node.id, {
       width: opts.nodeWidth,
-      height: opts.nodeHeight,
+      height,
     })
   })
 
@@ -139,19 +169,21 @@ export function layoutNewNodes<T extends FlowNode>(
 
   // 添加已存在节点（固定位置）
   existingNodes.forEach((node) => {
+    const height = opts.customHeightFn ? opts.customHeightFn(node) : opts.nodeHeight
     dagreGraph.setNode(node.id, {
       width: opts.nodeWidth,
-      height: opts.nodeHeight,
+      height,
       [isHorizontal ? 'x' : 'y']: node.position.x + opts.nodeWidth / 2,
-      [isHorizontal ? 'y' : 'x']: node.position.y + opts.nodeHeight / 2,
+      [isHorizontal ? 'y' : 'x']: node.position.y + height / 2,
     })
   })
 
   // 添加新节点
   newNodes.forEach((node) => {
+    const height = opts.customHeightFn ? opts.customHeightFn(node) : opts.nodeHeight
     dagreGraph.setNode(node.id, {
       width: opts.nodeWidth,
-      height: opts.nodeHeight,
+      height,
     })
   })
 
@@ -171,12 +203,13 @@ export function layoutNewNodes<T extends FlowNode>(
     if (!nodePos) {
       return node
     }
+    const height = opts.customHeightFn ? opts.customHeightFn(node) : opts.nodeHeight
 
     return {
       ...node,
       position: {
         x: nodePos.x - opts.nodeWidth / 2,
-        y: nodePos.y - opts.nodeHeight / 2,
+        y: nodePos.y - height / 2,
       },
       targetPosition: isHorizontal ? Position.Left : Position.Top,
       sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
