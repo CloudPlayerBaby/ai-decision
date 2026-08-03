@@ -42,6 +42,23 @@ class PartialAnalysisPlannerTest {
         assertEquals("COMPARE_OPTIONS", plan.startNode());
     }
 
+    @Test
+    void startsComparisonWhenOnlyExistingOptionChanged() {
+        Canvas canvas = new Canvas(List.of(
+                node("root", "decision"),
+                node("factor_1", "factor"),
+                node("option_1", "option")
+        ), List.of());
+
+        PartialAnalysisPlanner.Plan plan = planner.plan(
+                canvas,
+                new AnalysisResultDto(),
+                List.of("option_1")
+        );
+
+        assertEquals("COMPARE_OPTIONS", plan.startNode());
+    }
+
     private Canvas.CanvasNode node(String id, String type) {
         return new Canvas.CanvasNode(id, type, id, new Canvas.Position(0, 0), null);
     }

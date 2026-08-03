@@ -82,6 +82,15 @@ public final class AnalysisResultValidator {
         }
     }
 
+    /**
+     * 校验候选方案字段，供方案生成节点在进入后续风险分析前复用。
+     */
+    public static List<String> validateOptions(List<Option> options) {
+        List<String> errors = new ArrayList<>();
+        validateOptions(options, errors);
+        return errors;
+    }
+
     private static void validateOptions(List<Option> options, List<String> errors) {
         if (options == null || options.size() < 2 || options.size() > 3) {
             errors.add("options (必须包含2到3个候选方案)");

@@ -5,6 +5,7 @@ import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -60,6 +61,12 @@ class AnalysisResultValidatorTest {
         AnalysisResultDto dto = validDto();
         dto.setOptions(List.of(dto.getOptions().get(0)));
         assertHasError(dto, "options");
+    }
+
+    @Test
+    void testEmptyGeneratedOptions_FailBeforeRiskAnalysis() {
+        List<String> errors = AnalysisResultValidator.validateOptions(List.of());
+        assertTrue(errors.stream().anyMatch(error -> error.startsWith("options")));
     }
 
     @Test
@@ -128,7 +135,8 @@ class AnalysisResultValidatorTest {
 
     private void assertHasError(AnalysisResultDto dto, String path) {
         List<String> errors = AnalysisResultValidator.validate(dto);
-        assertTrue(errors.contains(path), "应包含错误: " + path + "，实际: " + errors);
+        assertTrue(errors.stream().anyMatch(error -> error.equals(path) || error.startsWith(path + " (")),
+                "应包含错误: " + path + "，实际: " + errors);
     }
 
     private AnalysisResultDto validDto() {
@@ -149,11 +157,11 @@ class AnalysisResultValidatorTest {
     }
 
     private Map<String, Integer> scores(int cost, int time, int benefit, int risk, int feasibility) {
-        return Map.of(
+        return new HashMap<>(Map.of(
                 "cost", cost,
                 "time", time,
                 "benefit", benefit,
                 "risk", risk,
-                "feasibility", feasibility);
+                "feasibility", feasibility));
     }
 }

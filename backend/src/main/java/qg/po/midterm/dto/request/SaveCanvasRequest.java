@@ -17,13 +17,11 @@ public class SaveCanvasRequest {
      * 完整画布节点列表
      */
     @NotNull(message = "nodes 不能为空")
-    @Valid
-    private List<Canvas.CanvasNode> nodes;
+    private List<Canvas.@Valid CanvasNode> nodes;
 
     /**
      * 完整画布边列表
      */
     @NotNull(message = "edges 不能为空")
-    @Valid
-    private List<Canvas.CanvasEdge> edges;
+    private List<Canvas.@Valid CanvasEdge> edges;
 }
