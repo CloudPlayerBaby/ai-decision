@@ -1642,7 +1642,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                             <Button onClick={closeModal}>取消</Button>
                             {editingNode.type === 'factor' && !isNewNode ? (
                               <>
-                                <Button onClick={() => { form.validateFields().then(handleSaveNormal) }}>
+                                <Button onClick={() => { form.validateFields().then(handleSaveFactorLabel) }}>
                                   仅保存名称
                                 </Button>
                                 <Button type="primary" onClick={submitForm}>
@@ -1659,22 +1659,24 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                       </Form>
                     </>
                   )}
-                  <Space>
-                    <Button onClick={closeModal}>取消</Button>
-                    {editingNode && editingNode.type === 'factor' && !isNewNode ? (
-                      <>
-                        <Button onClick={() => { form.validateFields().then(handleSaveFactorLabel) }}>
-                          仅保存名称
-                        </Button>
-                        <Button type="primary" onClick={submitForm}>
-                          保存权重
-                        </Button>
-                      </>
-                    ) : (
-                      <Button type="primary" onClick={submitForm}>
-                        保存修改
-                      </Button>
-                    )}
+                </Modal>
+
+                {/* 删除候选方案确认 */}
+                <Modal
+                  title="确认删除方案"
+                  open={pendingOptionDelete !== null}
+                  onCancel={cancelOptionDelete}
+                  footer={null}
+                  width={420}
+                >
+                  <p style={{ margin: '0 0 16px', lineHeight: 1.6 }}>
+                    删除后，该方案及其关联关系将不再参与方案对比。是否继续？
+                  </p>
+                  <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button onClick={cancelOptionDelete}>取消</Button>
+                    <Button danger type="primary" onClick={confirmOptionDelete}>
+                      确认删除
+                    </Button>
                   </Space>
                 </Modal>
 
