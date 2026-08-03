@@ -464,7 +464,7 @@ public class NodeExecutionEventListener {
             case "RequirementAnalysis" -> "UNDERSTAND";
             case "FactorAnalysis" -> "EXTRACT_FACTORS";
             case "OptionGeneration" -> "GENERATE_OPTIONS";
-            case "OptionEnrichment" -> "GENERATE_OPTIONS";
+            case "OptionEnrichment", "OptionReevaluation" -> "GENERATE_OPTIONS";
             case "RiskAnalysis" -> "COMPARE_OPTIONS";
             default -> null;
         };
@@ -473,8 +473,8 @@ public class NodeExecutionEventListener {
     private boolean isEnrichmentRetryMetadata(String outputData) {
         if (outputData == null || outputData.isBlank()) return false;
         try {
-            return "ENRICH_OPTIONS".equals(
-                    objectMapper.readTree(outputData).path("workflowStartNode").asText());
+            String startNode = objectMapper.readTree(outputData).path("workflowStartNode").asText();
+            return "ENRICH_OPTIONS".equals(startNode) || "REEVALUATE_OPTIONS".equals(startNode);
         } catch (Exception exception) {
             return false;
         }

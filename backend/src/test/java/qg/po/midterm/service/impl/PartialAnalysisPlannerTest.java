@@ -25,8 +25,8 @@ class PartialAnalysisPlannerTest {
 
         PartialAnalysisPlanner.Plan plan = planner.plan(canvas, new AnalysisResultDto(), List.of("tmp_1"));
 
-        assertEquals("GENERATE_OPTIONS", plan.startNode());
-        assertTrue(plan.affectedNodeIds().containsAll(List.of("tmp_1", "choice_a", "choice_b")));
+        assertEquals("REEVALUATE_OPTIONS", plan.startNode());
+        assertEquals(List.of("tmp_1"), plan.affectedNodeIds());
     }
 
     @Test
@@ -94,7 +94,7 @@ class PartialAnalysisPlannerTest {
         PartialAnalysisPlanner.Plan plan = planner.plan(
                 canvas, result, List.of("factor_1", "option_new"));
 
-        assertEquals("GENERATE_OPTIONS", plan.startNode());
+        assertEquals("REEVALUATE_OPTIONS", plan.startNode());
         assertTrue(plan.optionIdsToEnrich().isEmpty());
     }
 

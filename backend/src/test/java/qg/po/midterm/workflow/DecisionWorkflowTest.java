@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import qg.po.midterm.workflow.node.FactorAnalysisNode;
 import qg.po.midterm.workflow.node.OptionEnrichmentNode;
 import qg.po.midterm.workflow.node.OptionGenerationNode;
+import qg.po.midterm.workflow.node.OptionReevaluationNode;
 import qg.po.midterm.workflow.node.RepairNode;
 import qg.po.midterm.workflow.node.RequirementAnalysisNode;
 import qg.po.midterm.workflow.node.RiskAnalysisNode;
@@ -24,6 +25,7 @@ class DecisionWorkflowTest {
         RequirementAnalysisNode requirement = mock(RequirementAnalysisNode.class);
         FactorAnalysisNode factor = mock(FactorAnalysisNode.class);
         OptionGenerationNode generation = mock(OptionGenerationNode.class);
+        OptionReevaluationNode reevaluation = mock(OptionReevaluationNode.class);
         OptionEnrichmentNode enrichment = mock(OptionEnrichmentNode.class);
         RiskAnalysisNode comparison = mock(RiskAnalysisNode.class);
         RepairNode repair = mock(RepairNode.class);
@@ -34,7 +36,7 @@ class DecisionWorkflowTest {
         when(validate.apply(any())).thenReturn(Map.of());
 
         DecisionWorkflow workflow = new DecisionWorkflow(
-                requirement, factor, generation, enrichment, comparison, repair, validate);
+                requirement, factor, generation, reevaluation, enrichment, comparison, repair, validate);
         workflow.init();
 
         workflow.getGraph().invoke(Map.of("startNode", "ENRICH_OPTIONS"));
@@ -45,5 +47,33 @@ class DecisionWorkflowTest {
         verify(generation, never()).apply(any());
         verify(requirement, never()).apply(any());
         verify(factor, never()).apply(any());
+    }
+
+    @Test
+    void routesFactorChangesThroughReevaluationThenComparison() throws Exception {
+        RequirementAnalysisNode requirement = mock(RequirementAnalysisNode.class);
+        FactorAnalysisNode factor = mock(FactorAnalysisNode.class);
+        OptionGenerationNode generation = mock(OptionGenerationNode.class);
+        OptionReevaluationNode reevaluation = mock(OptionReevaluationNode.class);
+        OptionEnrichmentNode enrichment = mock(OptionEnrichmentNode.class);
+        RiskAnalysisNode comparison = mock(RiskAnalysisNode.class);
+        RepairNode repair = mock(RepairNode.class);
+        ValidateNode validate = mock(ValidateNode.class);
+
+        when(reevaluation.apply(any())).thenReturn(Map.of());
+        when(comparison.apply(any())).thenReturn(Map.of());
+        when(validate.apply(any())).thenReturn(Map.of());
+
+        DecisionWorkflow workflow = new DecisionWorkflow(
+                requirement, factor, generation, reevaluation, enrichment, comparison, repair, validate);
+        workflow.init();
+
+        workflow.getGraph().invoke(Map.of("startNode", "REEVALUATE_OPTIONS"));
+
+        verify(reevaluation).apply(any());
+        verify(comparison).apply(any());
+        verify(validate).apply(any());
+        verify(generation, never()).apply(any());
+        verify(enrichment, never()).apply(any());
     }
 }

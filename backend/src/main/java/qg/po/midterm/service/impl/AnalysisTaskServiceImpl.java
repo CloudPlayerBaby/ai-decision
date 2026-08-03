@@ -440,7 +440,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
     private void markEnrichmentRetryMetadata(
             Long taskId, PartialAnalysisPlanner.Plan plan, LocalDateTime now) {
-        if (!"ENRICH_OPTIONS".equals(plan.startNode())) return;
+        if (!"ENRICH_OPTIONS".equals(plan.startNode()) && !"REEVALUATE_OPTIONS".equals(plan.startNode())) return;
         AnalysisStep step = stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
                 .eq(AnalysisStep::getRunId, taskId)
                 .eq(AnalysisStep::getStepName, "GENERATE_OPTIONS")
@@ -448,7 +448,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         if (step == null) return;
         try {
             step.setOutputData(objectMapper.writeValueAsString(Map.of(
-                    "workflowStartNode", "ENRICH_OPTIONS",
+                    "workflowStartNode", plan.startNode(),
                     "optionIdsToEnrich", plan.optionIdsToEnrich())));
             step.setUpdatedAt(now);
             stepMapper.updateById(step);
@@ -459,8 +459,11 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
     private String resolveRetryStartNode(AnalysisStep step) {
         JsonNode metadata = readStepMetadata(step);
-        if (metadata != null && "ENRICH_OPTIONS".equals(metadata.path("workflowStartNode").asText())) {
-            return "ENRICH_OPTIONS";
+        if (metadata != null) {
+            String workflowStartNode = metadata.path("workflowStartNode").asText();
+            if ("ENRICH_OPTIONS".equals(workflowStartNode) || "REEVALUATE_OPTIONS".equals(workflowStartNode)) {
+                return workflowStartNode;
+            }
         }
         return step.getStepName();
     }
@@ -632,7 +635,8 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             String startNode,
             LocalDateTime now) {
         List<String> reusedStepNames;
-        if ("GENERATE_OPTIONS".equals(startNode) || "ENRICH_OPTIONS".equals(startNode)) {
+        if ("GENERATE_OPTIONS".equals(startNode) || "ENRICH_OPTIONS".equals(startNode)
+                || "REEVALUATE_OPTIONS".equals(startNode)) {
             reusedStepNames = List.of(
                     "UNDERSTAND",
                     "EXTRACT_FACTORS"
