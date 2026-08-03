@@ -776,6 +776,13 @@ export function WorkbenchPage() {
     saveForEdgeDeleteMutation.mutate(canvas)
   }
 
+  // 仅保存因素名称：保存画布，不触发局部重推
+  const handleFactorLabelSave = (canvas: import('@/types/canvas').Canvas) => {
+    canvasRef.current = canvas
+    hasUserEdited.current = true
+    saveForFactorLabelMutation.mutate(canvas)
+  }
+
   // 删除候选方案：保存画布（已删除方案节点）并自动局部重推
   const handleOptionDelete = useCallback(
     async (
@@ -884,6 +891,29 @@ export function WorkbenchPage() {
       const changedIds = data.changedNodeIds ?? []
       setPendingChangedNodeIds(changedIds)
       requestPartialAnalysis(changedIds)
+
+      if (leaveAction === 'save') {
+        setLeaveAction(null)
+        blocker.proceed?.()
+      }
+    },
+    onError: (error) => {
+      message.error(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+      setIsDirty(true)
+      setLeaveAction(null)
+    },
+  })
+
+  // 仅保存因素名称：保存画布，不触发局部重推
+  const saveForFactorLabelMutation = useMutation({
+    mutationFn: (canvas: import('@/types/canvas').Canvas) =>
+      saveCanvas(id, canvas),
+    onSuccess: () => {
+      message.success('名称已保存')
+      queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      setActiveCanvas(undefined)
+      clearCanvasCache(id)
 
       if (leaveAction === 'save') {
         setLeaveAction(null)
@@ -1270,6 +1300,7 @@ export function WorkbenchPage() {
             await handleFactorDelete(canvasData, rollback)
           }}
           onOptionEditSave={handleOptionEditSave}
+          onFactorLabelSave={handleFactorLabelSave}
           onStructuralChangePending={(_reason) => {
             setHasPendingStructuralChange(true)
           }}
