@@ -5,6 +5,7 @@ import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +61,34 @@ class AnalysisResultValidatorTest {
     void testOnlyOneOption_Fails() {
         AnalysisResultDto dto = validDto();
         dto.setOptions(List.of(dto.getOptions().get(0)));
+        assertHasError(dto, "options");
+    }
+
+    @Test
+    void testFourOptions_PassesForManualCanvasAddition() {
+        AnalysisResultDto dto = validDto();
+        List<Option> options = new ArrayList<>(dto.getOptions());
+        options.add(new Option("opt_kafka", "优先学习 Kafka", "消息队列与异步解耦",
+                List.of("适合异步场景"), List.of("学习成本较高"),
+                List.of("缺少实践经验"), scores(3, 3, 4, 3, 3)));
+        options.add(new Option("opt_k8s", "优先学习 Kubernetes", "容器编排与部署能力",
+                List.of("适合云原生岗位"), List.of("概念较多"),
+                List.of("本地资源有限"), scores(2, 2, 4, 3, 3)));
+        dto.setOptions(options);
+
+        assertTrue(AnalysisResultValidator.validate(dto).isEmpty());
+    }
+
+    @Test
+    void testMoreThanFiveOptions_Fails() {
+        AnalysisResultDto dto = validDto();
+        List<Option> options = new ArrayList<>(dto.getOptions());
+        for (int index = 3; index <= 6; index++) {
+            options.add(new Option("opt_" + index, "方案" + index, "方案描述" + index,
+                    List.of("优点"), List.of("缺点"), List.of("风险"), scores(3, 3, 3, 3, 3)));
+        }
+        dto.setOptions(options);
+
         assertHasError(dto, "options");
     }
 
