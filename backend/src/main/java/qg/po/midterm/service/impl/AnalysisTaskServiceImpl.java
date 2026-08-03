@@ -784,11 +784,14 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             Factor factor = new Factor();
             factor.setId(node.getId());
             factor.setName(node.getLabel());
-            factor.setDescription(readText(
+            String description = readText(
                     nodeData,
                     "description",
                     oldFactor == null ? null : oldFactor.getDescription()
-            ));
+            );
+            factor.setDescription(oldFactor == null
+                    ? FactorWeightNormalizer.descriptionForNewFactor(node.getLabel(), description)
+                    : description);
             factor.setWeight(readDouble(
                     nodeData,
                     "weight",
@@ -796,6 +799,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             ));
             factors.add(factor);
         }
+        FactorWeightNormalizer.normalize(factors);
         return factors;
     }
 
