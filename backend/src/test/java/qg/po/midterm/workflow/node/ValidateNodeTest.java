@@ -8,6 +8,7 @@ import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,21 @@ class ValidateNodeTest {
         ValidationResult validation = (ValidationResult) update.get("validation");
         assertTrue(validation.isSchemaValid());
         assertTrue(validation.isRepaired());
+    }
+
+    @Test
+    void acceptsFourOptionsAfterManualAddition() throws Exception {
+        DecisionState state = validState();
+        List<Option> options = new ArrayList<>(state.getOptions());
+        options.add(option("opt_c", "Option C"));
+        options.add(option("opt_d", "Option D"));
+        state = withStateValue(state, "options", options);
+
+        Map<String, Object> update = validateNode.apply(state);
+
+        ValidationResult validation = (ValidationResult) update.get("validation");
+        assertTrue(validation.isSchemaValid());
+        assertEquals("", update.get("errorMsg"));
     }
 
     @Test

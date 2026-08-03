@@ -33,11 +33,14 @@ export async function listDecisions(
 
 export async function createDecision(
   body: CreateDecisionRequest,
+  options?: { signal?: AbortSignal },
 ): Promise<CreateDecisionResponse> {
   if (isMockEnabled()) {
     return delay(mockCreateDecision(body))
   }
-  return postData<CreateDecisionResponse>('/decisions', body)
+  return postData<CreateDecisionResponse>('/decisions', body, {
+    signal: options?.signal,
+  })
 }
 
 export async function getDecisionDetail(

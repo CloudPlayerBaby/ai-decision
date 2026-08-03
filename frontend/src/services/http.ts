@@ -133,6 +133,11 @@ http.interceptors.response.use(
     )
   },
   (error: unknown) => {
+    // 用户主动取消请求：不弹错误
+    if (axios.isCancel(error) || (axios.isAxiosError(error) && error.code === 'ERR_CANCELED')) {
+      return Promise.reject(error)
+    }
+
     if (axios.isAxiosError(error)) {
       const status = error.response?.status
       const payload = error.response?.data as ApiResponse<unknown> | undefined

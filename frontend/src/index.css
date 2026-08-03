@@ -129,10 +129,34 @@ body,
   margin: 0;
   height: 100%;
   width: 100%;
+  /* 全局不可选中；输入框与推演对话再单独放开 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 body {
   background: var(--bg);
+}
+
+/* 表单输入仍可编辑/选中 */
+input,
+textarea,
+[contenteditable='true'],
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-textarea textarea,
+.ant-select-selection-search-input {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 右侧推演对话内容允许复制 */
+.analysis-panel,
+.analysis-panel *,
+.conversation-panel,
+.conversation-panel * {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 a {

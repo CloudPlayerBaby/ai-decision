@@ -44,6 +44,10 @@ class PartialAnalysisPlannerTest {
 
     @Test
     void startsComparisonWhenOnlyExistingOptionChanged() {
+        AnalysisResultDto result = new AnalysisResultDto();
+        Option existing = new Option();
+        existing.setId("option_1");
+        result.setOptions(List.of(existing));
         Canvas canvas = new Canvas(List.of(
                 node("root", "decision"),
                 node("factor_1", "factor"),
@@ -52,11 +56,46 @@ class PartialAnalysisPlannerTest {
 
         PartialAnalysisPlanner.Plan plan = planner.plan(
                 canvas,
-                new AnalysisResultDto(),
+                result,
                 List.of("option_1")
         );
 
         assertEquals("COMPARE_OPTIONS", plan.startNode());
+        assertTrue(plan.optionIdsToEnrich().isEmpty());
+    }
+
+    @Test
+    void enrichesOptionThatExistsOnlyInLatestCanvas() {
+        AnalysisResultDto result = new AnalysisResultDto();
+        Option existing = new Option();
+        existing.setId("option_1");
+        result.setOptions(List.of(existing));
+
+        Canvas canvas = new Canvas(List.of(
+                node("root", "decision"),
+                node("option_1", "option"),
+                node("option_new", "option")
+        ), List.of());
+
+        PartialAnalysisPlanner.Plan plan = planner.plan(canvas, result, List.of("option_new"));
+
+        assertEquals("ENRICH_OPTIONS", plan.startNode());
+        assertEquals(List.of("option_new"), plan.optionIdsToEnrich());
+    }
+
+    @Test
+    void factorChangeTakesPriorityOverNewOption() {
+        AnalysisResultDto result = new AnalysisResultDto();
+        Canvas canvas = new Canvas(List.of(
+                node("factor_1", "factor"),
+                node("option_new", "option")
+        ), List.of());
+
+        PartialAnalysisPlanner.Plan plan = planner.plan(
+                canvas, result, List.of("factor_1", "option_new"));
+
+        assertEquals("GENERATE_OPTIONS", plan.startNode());
+        assertTrue(plan.optionIdsToEnrich().isEmpty());
     }
 
     private Canvas.CanvasNode node(String id, String type) {
