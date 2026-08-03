@@ -539,6 +539,7 @@ export function WorkbenchPage() {
       const isDirty = isVersionDirty || isContentDirty
       console.log('[WorkbenchPage] evaluateCache: serverVersion=', serverVersion, 'cachedServerVersion=', cached.serverVersion, 'versionDirty=', isVersionDirty, 'contentDirty=', isContentDirty, 'isDirty=', isDirty)
       setIsDirty(isDirty)
+      hasUserEdited.current = isDirty
       // 初始化 canvasRef，以便刷新后立即可以保存
       canvasRef.current = cached.canvas
     } else if (canvasQuery.data) {
@@ -605,6 +606,9 @@ export function WorkbenchPage() {
     onSuccess: () => {
       console.log('[WorkbenchPage] LR 布局已保存到后端')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
+      setIsDirty(false)
+      hasUserEdited.current = false
+      clearCanvasCache(id)
     },
     onError: (error) => {
       console.error('[WorkbenchPage] 布局保存失败:', error)
@@ -679,6 +683,12 @@ export function WorkbenchPage() {
 
   // ── 初始布局检测：如果是 TB 布局，自动转换为 LR 布局并保存 ──
   const didFixLayoutOnLoadRef = useRef(false)
+  const didFixLayoutOnAnalysisRef = useRef(false)
+  useEffect(() => {
+    didFixLayoutOnLoadRef.current = false
+    didFixLayoutOnAnalysisRef.current = false
+  }, [id])
+
   useEffect(() => {
     if (!canvasQuery.data) return
     if (didFixLayoutOnLoadRef.current) return
@@ -690,7 +700,6 @@ export function WorkbenchPage() {
   }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id, fixAndSaveLayout])
 
   // ── 推演完成时自动转换布局 ──
-  const didFixLayoutOnAnalysisRef = useRef(false)
   useEffect(() => {
     // 只有当推演动画完成时才触发
     if (!animCompleted) return
@@ -745,13 +754,10 @@ export function WorkbenchPage() {
     },
   })
 
-  // 画布变化时：更新 canvasRef + 写入 sessionStorage + 标记 dirty
+  // 画布变化时：仅更新 canvasRef（dirty / 缓存由 onDirtyChange 驱动，避免程序化布局同步误标未保存）
   const handleCanvasChange = (canvas: import('@/types/canvas').Canvas) => {
     console.log('[WorkbenchPage] handleCanvasChange called')
     canvasRef.current = canvas
-    hasUserEdited.current = true
-    setIsDirty(true)
-    writeCanvasCache(id, canvas, serverVersionRef.current)
   }
 
   // 保存权重：先保存画布，成功后自动发起局部重推
@@ -1280,9 +1286,14 @@ export function WorkbenchPage() {
             console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
             if (!dirty) {
               setIsDirty(false)
+              hasUserEdited.current = false
               return
             }
-            if (hasUserEdited.current) setIsDirty(dirty)
+            hasUserEdited.current = true
+            setIsDirty(true)
+            if (canvasRef.current) {
+              writeCanvasCache(id, canvasRef.current, serverVersionRef.current)
+            }
           }}
           onCanvasChange={(canvasData) => {
             handleCanvasChange(canvasData)

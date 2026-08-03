@@ -519,6 +519,17 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   // 跳过首次渲染的 effect，避免从缓存恢复时覆盖父组件的 isDirty=true
   const didMount = useRef(false)
 
+  /** 服务端/程序化同步后重置 dirty 基线，避免分析结果加载触发的布局变化被误判为用户编辑 */
+  const applyDirtyBaseline = useCallback((baselineNodes: FlowNode[], baselineEdges: FlowEdge[]) => {
+    const sig = JSON.stringify(buildCanvasData(baselineNodes, baselineEdges))
+    initialSignature.current = sig
+    lastNotifiedSignature.current = sig
+    lastNotifiedDirty.current = false
+    hasLocalEdit.current = false
+    onDirtyChangeRef.current?.(false)
+    onCanvasChangeRef.current?.(buildCanvasData(baselineNodes, baselineEdges))
+  }, [])
+
   const onDirtyChangeRef = useRef(onDirtyChange)
   const onCanvasChangeRef = useRef(onCanvasChange)
   const onWeightSaveRef = useRef(onWeightSave)
@@ -561,15 +572,20 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       hasLocalEdit.current = true
     }
 
-    if (currentSignature !== lastNotifiedSignature.current) {
-      lastNotifiedSignature.current = currentSignature
-      onCanvasChangeRef.current?.(buildCanvasData(nodes, edges))
-    }
-    // 仅在 dirty 状态真正变化时通知父组件（避免覆盖 sessionStorage 恢复的 isDirty=true）
-    if (isDirty !== lastNotifiedDirty.current) {
-      lastNotifiedDirty.current = isDirty
-      console.log('[CanvasPanel] effect: calling onDirtyChange(', isDirty, ')')
-      onDirtyChangeRef.current?.(isDirty)
+    // 仅用户真实编辑时才通知父组件（程序化 sync / 分析结果加载不应触发保存态）
+    if (isDirty) {
+      if (currentSignature !== lastNotifiedSignature.current) {
+        lastNotifiedSignature.current = currentSignature
+        onCanvasChangeRef.current?.(buildCanvasData(nodes, edges))
+      }
+      if (isDirty !== lastNotifiedDirty.current) {
+        lastNotifiedDirty.current = isDirty
+        console.log('[CanvasPanel] effect: calling onDirtyChange(', isDirty, ')')
+        onDirtyChangeRef.current?.(isDirty)
+      }
+    } else if (lastNotifiedDirty.current) {
+      lastNotifiedDirty.current = false
+      onDirtyChangeRef.current?.(false)
     }
   }, [nodes, edges])
 
@@ -675,9 +691,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     if (isForceSync) {
       console.log('[CanvasPanel] forceSyncKey changed, forcing sync and clearing local edits')
       lastForceSyncKey.current = currentForceSyncKey
-      hasLocalEdit.current = false
-      // 通知父组件清除 dirty 状态
-      onDirtyChangeRef.current?.(false)
     }
 
     // 后端数据变化了，检查是否有本地编辑（forceSync 时跳过此检查）
@@ -691,7 +704,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     lastSyncedSignature.current = vmSignature
     setNodes(newNodes)
     setEdges(newEdges)
-  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo, forceSyncKey])
+    applyDirtyBaseline(newNodes, newEdges)
+  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo, forceSyncKey, applyDirtyBaseline])
 
   // openOptionAnalysis：在 Context 内部实现，可访问所有内部状态
   const openOptionAnalysis = useCallback(
