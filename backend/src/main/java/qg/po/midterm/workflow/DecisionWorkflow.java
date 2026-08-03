@@ -25,6 +25,7 @@ public class DecisionWorkflow {
     private final RequirementAnalysisNode requirementAnalysisNode;
     private final FactorAnalysisNode factorAnalysisNode;
     private final OptionGenerationNode optionGenerationNode;
+    private final OptionReevaluationNode optionReevaluationNode;
     private final OptionEnrichmentNode optionEnrichmentNode;
     private final RiskAnalysisNode riskAnalysisNode;
     private final RepairNode repairNode;
@@ -39,6 +40,7 @@ public class DecisionWorkflow {
         graph.addNode("UNDERSTAND", node_async(requirementAnalysisNode));
         graph.addNode("EXTRACT_FACTORS", node_async(factorAnalysisNode));
         graph.addNode("GENERATE_OPTIONS", node_async(optionGenerationNode));
+        graph.addNode("REEVALUATE_OPTIONS", node_async(optionReevaluationNode));
         graph.addNode("ENRICH_OPTIONS", node_async(optionEnrichmentNode));
         graph.addNode("COMPARE_OPTIONS", node_async(riskAnalysisNode));
         graph.addNode("REPAIR", node_async(repairNode));
@@ -64,6 +66,7 @@ public class DecisionWorkflow {
                         "UNDERSTAND", "UNDERSTAND",
                         "EXTRACT_FACTORS", "EXTRACT_FACTORS",
                         "GENERATE_OPTIONS", "GENERATE_OPTIONS",
+                        "REEVALUATE_OPTIONS", "REEVALUATE_OPTIONS",
                         "ENRICH_OPTIONS", "ENRICH_OPTIONS",
                         "COMPARE_OPTIONS", "COMPARE_OPTIONS"
                 )
@@ -78,6 +81,7 @@ public class DecisionWorkflow {
         graph.addEdge("UNDERSTAND", "EXTRACT_FACTORS");
         graph.addEdge("EXTRACT_FACTORS", "GENERATE_OPTIONS");
         graph.addEdge("GENERATE_OPTIONS", "COMPARE_OPTIONS");
+        graph.addEdge("REEVALUATE_OPTIONS", "COMPARE_OPTIONS");
         graph.addEdge("ENRICH_OPTIONS", "COMPARE_OPTIONS");
 
         /*

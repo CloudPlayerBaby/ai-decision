@@ -46,11 +46,8 @@ public class PartialAnalysisPlanner {
             startNode = "UNDERSTAND";
             affected.addAll(nodeTypes.keySet());
         } else if (factorChanged) {
-            startNode = "GENERATE_OPTIONS";
+            startNode = "REEVALUATE_OPTIONS";
             optionIdsToEnrich.clear();
-            nodeTypes.forEach((id, type) -> {
-                if ("option".equals(type)) affected.add(id);
-            });
         } else if (!optionIdsToEnrich.isEmpty()) {
             startNode = "ENRICH_OPTIONS";
         } else if (optionChanged) {
