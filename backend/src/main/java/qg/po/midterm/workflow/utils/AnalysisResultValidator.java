@@ -91,11 +91,26 @@ public final class AnalysisResultValidator {
         return errors;
     }
 
+    /** Validates one or more option payloads without enforcing the full result's 2-3 option count. */
+    public static List<String> validateOptionDetails(List<Option> options) {
+        List<String> errors = new ArrayList<>();
+        if (options == null || options.isEmpty()) {
+            errors.add("options (至少需要一个待补全方案)");
+            return errors;
+        }
+        validateOptionItems(options, errors);
+        return errors;
+    }
+
     private static void validateOptions(List<Option> options, List<String> errors) {
         if (options == null || options.size() < 2 || options.size() > 3) {
             errors.add("options (必须包含2到3个候选方案)");
             return;
         }
+        validateOptionItems(options, errors);
+    }
+
+    private static void validateOptionItems(List<Option> options, List<String> errors) {
         Set<String> ids = new HashSet<>();
         for (int i = 0; i < options.size(); i++) {
             Option option = options.get(i);

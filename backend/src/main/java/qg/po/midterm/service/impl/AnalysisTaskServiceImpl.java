@@ -172,11 +172,14 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         );
 
         // 使用旧分析结果作为基础，再用最新画布覆盖用户修改的因素和方案
-        DecisionState currentState = buildCurrentState(
+        DecisionState baseState = buildCurrentState(
                 decision,
                 oldResult,
                 latestCanvas
         );
+        Map<String, Object> partialStateData = new HashMap<>(baseState.data());
+        partialStateData.put("optionIdsToEnrich", partialPlan.optionIdsToEnrich());
+        DecisionState currentState = new DecisionState(partialStateData);
 
         // 保留完整业务链路；未重新执行的前置步骤会标记为复用历史结果。
         List<String> stepNames = List.of(
@@ -196,6 +199,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 now
         );
         markReusedPartialSteps(task.getId(), partialPlan.startNode(), now);
+        markEnrichmentRetryMetadata(task.getId(), partialPlan, now);
 
         // 先持久化到数据库
         decision.setStatus(DecisionStatus.PARTIAL_ANALYZING.name());
@@ -350,7 +354,9 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             );
         }
 
-        DecisionState retryState = buildRetryState(decision, task, step);
+        String retryStartNode = resolveRetryStartNode(step);
+        DecisionState baseRetryState = buildRetryState(decision, task, step);
+        DecisionState retryState = addEnrichmentTargets(baseRetryState, step, retryStartNode);
 
         // 确定 count 次数
         int retryCount = step.getRetryCount() == null ? 1 : step.getRetryCount() + 1;
@@ -388,7 +394,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         runAfterCommit(() -> workflowDispatcher.retryStep(
                 "t_" + task.getId(),
                 "s_" + step.getId(),
-                step.getStepName(),
+                retryStartNode,
                 retryState
         ));
 
@@ -430,6 +436,55 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         }
         data.put("startNode", failedStep.getStepName());
         return new DecisionState(data);
+    }
+
+    private void markEnrichmentRetryMetadata(
+            Long taskId, PartialAnalysisPlanner.Plan plan, LocalDateTime now) {
+        if (!"ENRICH_OPTIONS".equals(plan.startNode())) return;
+        AnalysisStep step = stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
+                .eq(AnalysisStep::getRunId, taskId)
+                .eq(AnalysisStep::getStepName, "GENERATE_OPTIONS")
+                .last("LIMIT 1"));
+        if (step == null) return;
+        try {
+            step.setOutputData(objectMapper.writeValueAsString(Map.of(
+                    "workflowStartNode", "ENRICH_OPTIONS",
+                    "optionIdsToEnrich", plan.optionIdsToEnrich())));
+            step.setUpdatedAt(now);
+            stepMapper.updateById(step);
+        } catch (JacksonException exception) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "新增方案重试信息保存失败");
+        }
+    }
+
+    private String resolveRetryStartNode(AnalysisStep step) {
+        JsonNode metadata = readStepMetadata(step);
+        if (metadata != null && "ENRICH_OPTIONS".equals(metadata.path("workflowStartNode").asText())) {
+            return "ENRICH_OPTIONS";
+        }
+        return step.getStepName();
+    }
+
+    private DecisionState addEnrichmentTargets(
+            DecisionState state, AnalysisStep step, String retryStartNode) {
+        if (!"ENRICH_OPTIONS".equals(retryStartNode)) return state;
+        JsonNode metadata = readStepMetadata(step);
+        List<String> ids = new ArrayList<>();
+        if (metadata != null && metadata.path("optionIdsToEnrich").isArray()) {
+            metadata.path("optionIdsToEnrich").forEach(node -> ids.add(node.asText()));
+        }
+        Map<String, Object> data = new HashMap<>(state.data());
+        data.put("optionIdsToEnrich", ids);
+        return new DecisionState(data);
+    }
+
+    private JsonNode readStepMetadata(AnalysisStep step) {
+        if (step.getOutputData() == null || step.getOutputData().isBlank()) return null;
+        try {
+            return objectMapper.readTree(step.getOutputData());
+        } catch (JacksonException exception) {
+            return null;
+        }
     }
 
     private void applyStepOutput(Map<String, Object> state, AnalysisStep step) {
@@ -577,7 +632,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             String startNode,
             LocalDateTime now) {
         List<String> reusedStepNames;
-        if ("GENERATE_OPTIONS".equals(startNode)) {
+        if ("GENERATE_OPTIONS".equals(startNode) || "ENRICH_OPTIONS".equals(startNode)) {
             reusedStepNames = List.of(
                     "UNDERSTAND",
                     "EXTRACT_FACTORS"

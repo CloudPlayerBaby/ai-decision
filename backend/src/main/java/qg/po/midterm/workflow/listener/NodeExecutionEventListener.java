@@ -230,7 +230,9 @@ public class NodeExecutionEventListener {
         if (step != null) {
             step.setStatus("FAILED");
             step.setErrorMessage(clientMessage);
-            step.setOutputData(null);
+            if (!isEnrichmentRetryMetadata(step.getOutputData())) {
+                step.setOutputData(null);
+            }
             step.setFinishedAt(now);
             step.setUpdatedAt(now);
             stepMapper.updateById(step);
@@ -462,9 +464,20 @@ public class NodeExecutionEventListener {
             case "RequirementAnalysis" -> "UNDERSTAND";
             case "FactorAnalysis" -> "EXTRACT_FACTORS";
             case "OptionGeneration" -> "GENERATE_OPTIONS";
+            case "OptionEnrichment" -> "GENERATE_OPTIONS";
             case "RiskAnalysis" -> "COMPARE_OPTIONS";
             default -> null;
         };
+    }
+
+    private boolean isEnrichmentRetryMetadata(String outputData) {
+        if (outputData == null || outputData.isBlank()) return false;
+        try {
+            return "ENRICH_OPTIONS".equals(
+                    objectMapper.readTree(outputData).path("workflowStartNode").asText());
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     private Long parseTaskId(String taskId) {
