@@ -21,6 +21,8 @@ public class PartialAnalysisPlanner {
     public Plan plan(Canvas canvas, AnalysisResultDto currentResult, List<String> changedNodeIds) {
         Map<String, String> nodeTypes = indexNodeTypes(canvas, currentResult);
         Set<String> affected = new LinkedHashSet<>(changedNodeIds);
+        Set<String> oldOptionIds = optionIds(currentResult);
+        Set<String> optionIdsToEnrich = new LinkedHashSet<>();
 
         boolean factorChanged = false;
         boolean optionChanged = false;
@@ -31,6 +33,9 @@ public class PartialAnalysisPlanner {
                 factorChanged = true;
             } else if ("option".equals(type)) {
                 optionChanged = true;
+                if (!oldOptionIds.contains(changedNodeId) && isCanvasOption(canvas, changedNodeId)) {
+                    optionIdsToEnrich.add(changedNodeId);
+                }
             } else {
                 fullAnalysisRequired = true;
             }
@@ -41,17 +46,34 @@ public class PartialAnalysisPlanner {
             startNode = "UNDERSTAND";
             affected.addAll(nodeTypes.keySet());
         } else if (factorChanged) {
-            startNode = "GENERATE_OPTIONS";
-            nodeTypes.forEach((id, type) -> {
-                if ("option".equals(type)) affected.add(id);
-            });
+            startNode = "REEVALUATE_OPTIONS";
+            optionIdsToEnrich.clear();
+        } else if (!optionIdsToEnrich.isEmpty()) {
+            startNode = "ENRICH_OPTIONS";
         } else if (optionChanged) {
             startNode = "COMPARE_OPTIONS";
         } else {
             startNode = "UNDERSTAND";
             affected.addAll(nodeTypes.keySet());
         }
-        return new Plan(startNode, new ArrayList<>(affected));
+        return new Plan(startNode, new ArrayList<>(affected), new ArrayList<>(optionIdsToEnrich));
+    }
+
+    private Set<String> optionIds(AnalysisResultDto result) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (result != null && result.getOptions() != null) {
+            for (Option option : result.getOptions()) {
+                if (option != null && option.getId() != null) ids.add(option.getId());
+            }
+        }
+        return ids;
+    }
+
+    private boolean isCanvasOption(Canvas canvas, String nodeId) {
+        if (canvas == null || canvas.getNodes() == null) return false;
+        return canvas.getNodes().stream().anyMatch(node -> node != null
+                && nodeId.equals(node.getId())
+                && "option".equalsIgnoreCase(node.getType()));
     }
 
     private Map<String, String> indexNodeTypes(Canvas canvas, AnalysisResultDto result) {
@@ -76,5 +98,5 @@ public class PartialAnalysisPlanner {
         return types;
     }
 
-    public record Plan(String startNode, List<String> affectedNodeIds) {}
+    public record Plan(String startNode, List<String> affectedNodeIds, List<String> optionIdsToEnrich) {}
 }

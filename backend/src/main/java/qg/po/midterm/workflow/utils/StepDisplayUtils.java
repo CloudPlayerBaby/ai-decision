@@ -18,7 +18,9 @@ public class StepDisplayUtils {
         String content = null;
 
         if ("RUNNING".equals(status)) {
-            summary = getRunningSummary(stepName);
+            summary = isOptionEnrichment(outputData)
+                    ? "正在完善新增方案"
+                    : getRunningSummary(stepName);
             content = "思考中...";
         } else if ("WAITING".equals(status)) {
             summary = "等待" + getDisplayName(stepName);
@@ -48,6 +50,16 @@ public class StepDisplayUtils {
         }
 
         return new StepDisplay(summary, content);
+    }
+
+    private boolean isOptionEnrichment(String outputData) {
+        if (outputData == null || outputData.isBlank()) return false;
+        try {
+            return "ENRICH_OPTIONS".equals(
+                    objectMapper.readTree(outputData).path("workflowStartNode").asText());
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     public static String getDisplayName(String name) {

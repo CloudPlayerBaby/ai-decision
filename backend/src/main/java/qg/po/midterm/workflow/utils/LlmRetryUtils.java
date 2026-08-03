@@ -65,9 +65,13 @@ public class LlmRetryUtils {
         // 1. 第一次请求
         String rawResponse;
         if (tools != null && tools.length > 0) {
-            rawResponse = chatClient.prompt().user(fullPrompt).tools(tools).call().content();
+            rawResponse = chatClient.prompt().user(fullPrompt)
+                    .options(JsonOutputOptions.create())
+                    .tools(tools).call().content();
         } else {
-            rawResponse = chatClient.prompt().user(fullPrompt).call().content();
+            rawResponse = chatClient.prompt().user(fullPrompt)
+                    .options(JsonOutputOptions.create())
+                    .call().content();
         }
 
         try {
@@ -83,9 +87,13 @@ public class LlmRetryUtils {
 
             String repairedRawResponse;
             if (tools != null && tools.length > 0) {
-                repairedRawResponse = chatClient.prompt().user(repairPrompt).tools(tools).call().content();
+                repairedRawResponse = chatClient.prompt().user(repairPrompt)
+                        .options(JsonOutputOptions.create())
+                        .tools(tools).call().content();
             } else {
-                repairedRawResponse = chatClient.prompt().user(repairPrompt).call().content();
+                repairedRawResponse = chatClient.prompt().user(repairPrompt)
+                        .options(JsonOutputOptions.create())
+                        .call().content();
             }
 
             try {

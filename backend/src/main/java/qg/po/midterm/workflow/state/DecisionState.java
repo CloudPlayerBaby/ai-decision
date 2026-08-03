@@ -44,6 +44,13 @@ public class DecisionState extends AgentState {
         return value("options").map(v -> (java.util.List<Option>) v).orElse(null);
     }
 
+    @SuppressWarnings("unchecked")
+    public java.util.List<String> getOptionIdsToEnrich() {
+        return value("optionIdsToEnrich")
+                .map(v -> (java.util.List<String>) v)
+                .orElse(java.util.List.of());
+    }
+
     public qg.po.midterm.dto.result.AnalysisResultDto.Recommendation getRecommendation() {
         return value("recommendation").map(v -> (qg.po.midterm.dto.result.AnalysisResultDto.Recommendation) v).orElse(null);
     }

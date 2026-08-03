@@ -129,10 +129,34 @@ body,
   margin: 0;
   height: 100%;
   width: 100%;
+  /* 全局不可选中；输入框与推演对话再单独放开 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 body {
   background: var(--bg);
+}
+
+/* 表单输入仍可编辑/选中 */
+input,
+textarea,
+[contenteditable='true'],
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-textarea textarea,
+.ant-select-selection-search-input {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 右侧推演对话内容允许复制 */
+.analysis-panel,
+.analysis-panel *,
+.conversation-panel,
+.conversation-panel * {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 a {
@@ -639,6 +663,12 @@ body.is-resizing .resize-handle::before {
   -webkit-user-select: none;
 }
 
+.canvas-panel__stats {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .canvas-panel__empty {
   display: flex;
   align-items: center;
@@ -852,6 +882,17 @@ body.is-resizing .resize-handle::before {
   margin-top: 4px;
   color: var(--text-muted);
   line-height: 1.35;
+}
+
+/* Factor description 最多 4 行省略 */
+.canvas-node__subtitle--clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+  max-height: calc(18px * 4);
 }
 
 .canvas-node__badge {
@@ -1523,6 +1564,12 @@ body.is-resizing .resize-handle::before {
 /* —— 局部推演加载中的节点样式 —— */
 .canvas-node--partial-loading {
   box-shadow: 0 0 0 2px var(--partial-border) !important;
+}
+
+/* 悬停高亮：相关节点轻微高亮 */
+.canvas-node--hovered {
+  box-shadow: 0 0 0 2px var(--decision) !important;
+  transition: box-shadow 0.15s ease;
 }
 
 .canvas-node__partial-spinner {

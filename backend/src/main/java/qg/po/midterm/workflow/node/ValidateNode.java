@@ -10,6 +10,7 @@ import qg.po.midterm.dto.result.ValidationResult;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
+import qg.po.midterm.workflow.utils.AnalysisResultValidator;
 
 import java.util.*;
 
@@ -60,7 +61,8 @@ public class ValidateNode implements NodeAction<DecisionState> {
 
         List<Option> options = state.getOptions();
         Set<String> optionIds = new HashSet<>();
-        if (options == null || options.size() < 2 || options.size() > 3) {
+        if (options == null || options.size() < 2
+                || options.size() > AnalysisResultValidator.OPTION_COUNT_MAX) {
             missingFields.add("options");
         } else {
             for (int i = 0; i < options.size(); i++) {
