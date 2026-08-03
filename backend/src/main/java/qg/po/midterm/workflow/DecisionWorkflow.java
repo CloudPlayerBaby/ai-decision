@@ -60,6 +60,7 @@ public class DecisionWorkflow {
                 },
                 Map.of(
                         "UNDERSTAND", "UNDERSTAND",
+                        "EXTRACT_FACTORS", "EXTRACT_FACTORS",
                         "GENERATE_OPTIONS", "GENERATE_OPTIONS",
                         "COMPARE_OPTIONS", "COMPARE_OPTIONS"
                 )
