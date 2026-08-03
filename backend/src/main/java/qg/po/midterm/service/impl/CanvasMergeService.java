@@ -31,7 +31,6 @@ public class CanvasMergeService {
             Factor factor = factors.get(index);
             if (factor == null || factor.getId() == null) continue;
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("description", factor.getDescription());
             data.put("weight", factor.getWeight());
             nodes.add(node(factor.getId(), "factor", factor.getName(),
                     position(oldNodes, factor.getId(), spread(index, factors.size()), 180), data));
@@ -43,10 +42,6 @@ public class CanvasMergeService {
             Option option = options.get(index);
             if (option == null || option.getId() == null) continue;
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("description", option.getDescription());
-            data.put("pros", option.getPros());
-            data.put("cons", option.getCons());
-            data.put("risks", option.getRisks());
             data.put("scores", option.getScores());
             nodes.add(node(option.getId(), "option", option.getName(),
                     position(oldNodes, option.getId(), spread(index, options.size()), 340), data));
