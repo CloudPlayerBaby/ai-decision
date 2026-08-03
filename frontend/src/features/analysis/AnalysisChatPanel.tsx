@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { Empty, Result, Space, Spin, Typography } from 'antd'
-import { CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Button, Empty, Result, Space, Spin, Typography } from 'antd'
+import { CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type {
   AnalysisStep,
   DecisionOption,
@@ -32,6 +32,9 @@ interface Props {
   failedStepId?: string | null
   /** 决策状态，用于区分整轮推演 / 局部推演 */
   decisionStatus?: string
+  /** 切换页面导致 SSE 主动断开（需用户手动重试） */
+  connectionInterrupted?: boolean
+  onRetryInterrupted?: () => void
   onAllStepsCompleted?: () => void
   onRetryStep?: (stepId: string) => void
 }
@@ -55,6 +58,8 @@ export function AnalysisChatPanel({
   retryable = false,
   failedStepId = null,
   decisionStatus,
+  connectionInterrupted = false,
+  onRetryInterrupted,
   onAllStepsCompleted,
   onRetryStep,
 }: Props) {
@@ -77,6 +82,7 @@ export function AnalysisChatPanel({
   }, [analysisCompleted])
 
   const footerText = () => {
+    if (connectionInterrupted) return '连接已断开'
     if (isHistory) return '历史记录'
     switch (connectionStatus) {
       case 'idle':
@@ -95,7 +101,22 @@ export function AnalysisChatPanel({
       <div className="analysis-panel__header">推演对话</div>
 
       <div className="analysis-panel__body">
-        {connectionStatus === 'idle' && !hasHistoryData && (
+        {connectionInterrupted && (
+          <Result
+            status="warning"
+            title="连接已断开"
+            subTitle="切换决策页面时已断开实时连接，请重试以继续局部推演。"
+            extra={
+              onRetryInterrupted ? (
+                <Button type="primary" icon={<ReloadOutlined />} onClick={onRetryInterrupted}>
+                  重试
+                </Button>
+              ) : null
+            }
+          />
+        )}
+
+        {!connectionInterrupted && connectionStatus === 'idle' && !hasHistoryData && (
           <Empty
             image={
               <ThunderboltOutlined style={{ fontSize: 48, color: '#1677ff' }} />
@@ -109,14 +130,14 @@ export function AnalysisChatPanel({
           />
         )}
 
-        {connectionStatus === 'connecting' && (
+        {!connectionInterrupted && connectionStatus === 'connecting' && (
           <div className="analysis-panel__loading">
             <Spin size="small" />
             <span>正在连接...</span>
           </div>
         )}
 
-        {(connectionStatus !== 'idle' || hasHistoryData) && (
+        {!connectionInterrupted && (connectionStatus !== 'idle' || hasHistoryData) && (
           <>
             <ChatMessage content={userMessage} />
 

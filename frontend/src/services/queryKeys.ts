@@ -23,3 +23,4 @@ export const queryKeys = {
     detail: (reportId: string) => ['reports', reportId] as const,
   },
 }
+//失效缓存:保存画布成功后，内存里还是旧画布，所以要主动刷新

@@ -44,22 +44,27 @@ import { readCanvasCache, writeCanvasCache, clearCanvasCache } from '@/utils/can
 import { buildServerVersion } from '@/utils/canvasCache'
 import { queryKeys } from '@/services/queryKeys'
 import { ApiError, BusinessCode } from '@/types/api'
+import type { Canvas } from '@/types/canvas'
 import { isMockEnabled } from '@/services/config'
+
+function cloneCanvas(canvas: Canvas): Canvas {
+  return structuredClone(canvas)
+}
 
 // const { Text } = Typography
 
 function buildPartialChangedNodeIds(
-  changedNodeIds: string[] | undefined,
+  changedNodeIds: string[] | undefined,//后端传递的更改的id
   canvas?: import('@/types/canvas').Canvas,
-) {
+) {//收集「业务节点」白名单
   const businessNodeIds = new Set(
     canvas?.nodes
       .filter((node) => node.type === 'factor' || node.type === 'option')
       .map((node) => node.id) ?? [],
   )
-
+// 解决页面加载时是空白的问题
   return [...new Set(changedNodeIds ?? [])].filter((nodeId) => {
-    if (!nodeId || nodeId === 'root') return false
+    if (!nodeId || nodeId === 'root') return false//可能传递的是空的需要进行过滤
     return businessNodeIds.size === 0 || businessNodeIds.has(nodeId)
   })
 }
@@ -71,24 +76,77 @@ function buildPartialChangedNodeIds(
  */
 export function WorkbenchPage() {
   const { id = '' } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [animCompleted, setAnimCompleted] = useState(false)
-  const [activeResultId, setActiveResultId] = useState<string | null>(null)
+  const navigate = useNavigate()//编程式跳转
+  const queryClient = useQueryClient()//保存、推演完成后 刷新缓存
+  const [confirmOpen, setConfirmOpen] = useState(false)//确认方案弹窗
+  const [animCompleted, setAnimCompleted] = useState(false)// 推演动画是否结束
+  const [activeResultId, setActiveResultId] = useState<string | null>(null)//当前展示的分析结果 id
 
   // ── 局部推演状态 ──────────────────────────────────────────
   /** 同步锁：防止重复发起局部重推请求 */
+  //useRef current: true:上锁 false:解锁,同步、立即
+  //局部重推锁用 ref，是因为要同步拦截连点，setState 有延迟挡不住。
   const partialAnalysisLockRef = useRef(false)
+  /** 局部重推锁对应的决策 id，避免 A 推演中误锁 B 页面 */
+  const partialAnalysisLockDecisionRef = useRef<string | null>(null)
   /** 保存成功后，后端返回的 changedNodeIds；局部重推成功后保留，失败后允许重试 */
   const [pendingChangedNodeIds, setPendingChangedNodeIds] = useState<string[]>([])
   void pendingChangedNodeIds // 保留 setter 供其他功能使用
-  /** 当前局部推演任务；结束时清空 */
+  /** 局部推演任务（含 decisionId，切换决策页时按 id 过滤） */
   const [partialAnalysisInfo, setPartialAnalysisInfo] = useState<{
+    decisionId: string
     taskId: string
     affectedNodeIds: string[]
     status: 'RUNNING'
   } | null>(null)
+  /** 当前路由正在查看的决策 id，供 SSE 回调判断是否在后台完成 */
+  const viewingDecisionIdRef = useRef(id)
+  const partialAnalysisInfoRef = useRef(partialAnalysisInfo)
+  partialAnalysisInfoRef.current = partialAnalysisInfo
+  const pendingChangedNodeIdsRef = useRef(pendingChangedNodeIds)
+  pendingChangedNodeIdsRef.current = pendingChangedNodeIds
+  const routeDecisionIdRef = useRef(id)
+  /** 切换走时中断的局部推演（回到该决策时不自动重连 SSE，并回滚画布） */
+  const [interruptedPartialByDecision, setInterruptedPartialByDecision] = useState<
+    Record<
+      string,
+      {
+        taskId: string
+        affectedNodeIds: string[]
+        changedNodeIds: string[]
+        /** 发起局部推演前的画布（用于中断后回滚展示） */
+        baselineCanvas: Canvas | null
+        /** 触发局部推演的修改后画布（用于「重试」时重新保存并推演） */
+        attemptedCanvas: Canvas | null
+      }
+    >
+  >({})
+  /** 局部推演发起前：后端已确认的画布快照 */
+  const partialBaselineCanvasRef = useRef<Map<string, Canvas>>(new Map())
+  /** 局部推演发起前：用户修改后、即将保存的画布 */
+  const partialAttemptedCanvasRef = useRef<Map<string, Canvas>>(new Map())
+  /** 正在把中断决策的画布回写后端，避免 canvas effect 用旧数据覆盖 */
+  const restoringInterruptedCanvasRef = useRef<string | null>(null)
+  /** 已完成回滚的决策 id，防止重复 PUT */
+  const revertedInterruptedCanvasRef = useRef<Set<string>>(new Set())
+
+  const capturePartialCanvasSnapshot = useCallback(
+    (decisionId: string, attemptedCanvas: Canvas) => {
+      const serverCanvas = queryClient.getQueryData<Canvas>(
+        queryKeys.decisions.canvas(decisionId),
+      )
+      if (serverCanvas) {
+        partialBaselineCanvasRef.current.set(decisionId, cloneCanvas(serverCanvas))
+      }
+      partialAttemptedCanvasRef.current.set(decisionId, attemptedCanvas)
+    },
+    [queryClient],
+  )
+
+  const clearPartialCanvasSnapshot = useCallback((decisionId: string) => {
+    partialBaselineCanvasRef.current.delete(decisionId)
+    partialAttemptedCanvasRef.current.delete(decisionId)
+  }, [])
   /** 是否有待应用的结构变更（新增节点/连线） */
   const [hasPendingStructuralChange, setHasPendingStructuralChange] = useState(false)
   /** 强制同步标识：用于局部推演完成后强制刷新画布 */
@@ -101,20 +159,27 @@ export function WorkbenchPage() {
    * - 锁或 partialAnalysisInfo 非空时拒绝请求并提示
    * - 成功后设置锁；失败/409 时释放锁
    */
+  
   const requestPartialAnalysis = useCallback(
     (changedNodeIds: string[]) => {
       if (changedNodeIds.length === 0) {
         message.info('画布已保存，无需重新推演')
         return
       }
-      if (partialAnalysisLockRef.current || partialAnalysisInfo !== null) {
+      const partialRunningOnCurrentDecision =
+        partialAnalysisInfo !== null && partialAnalysisInfo.decisionId === id
+      const lockHeldOnCurrentDecision =
+        partialAnalysisLockRef.current &&
+        partialAnalysisLockDecisionRef.current === id
+      if (lockHeldOnCurrentDecision || partialRunningOnCurrentDecision) {
         message.warning('当前局部推演正在进行，请等待完成')
         return
       }
       partialAnalysisLockRef.current = true
+      partialAnalysisLockDecisionRef.current = id
       startPartialAnalysisMutation.mutate(changedNodeIds)
     },
-    [partialAnalysisInfo],
+    [partialAnalysisInfo, id],
   )
 
   const rightCollapsed = useLayoutStore((state) => state.rightCollapsed)
@@ -161,62 +226,118 @@ export function WorkbenchPage() {
   const historyResultId = pendingResultId ?? confirmedResultId ?? null
   const effectiveResultId = activeResultId ?? historyResultId
 
+  /** 仅当前决策页生效的局部推演信息（切换决策时不串用其他决策的 task） */
+  const currentPartialInfo =
+    partialAnalysisInfo?.decisionId === id ? partialAnalysisInfo : null
+
+  const interruptedPartial = interruptedPartialByDecision[id] ?? null
+
   // ── SSE taskId 逻辑 ────────────────────────────────────────
-  /** 局部推演期间的 taskId；无局部推演时用 decision.latestTaskId */
-  const streamTaskId = partialAnalysisInfo?.taskId ?? taskId
-  // 追踪当前 SSE 连接的 taskId，防止旧事件误清除当前状态
-  const streamTaskIdRef = useRef<string | null>(null)
+  /** 局部推演期间的 taskId；切换走中断时不连 SSE，否则用 latestTaskId */
+  const streamTaskId = interruptedPartial
+    ? null
+    : currentPartialInfo?.taskId ?? taskId
+
+  const releasePartialAnalysisLock = useCallback((decisionId: string) => {
+    if (partialAnalysisLockDecisionRef.current === decisionId) {
+      partialAnalysisLockRef.current = false
+      partialAnalysisLockDecisionRef.current = null
+    }
+  }, [])
 
   const { steps, connectionStatus, toolCalls, retryable, failedStepId } = useAnalysisStream({
     taskId: streamTaskId,
     onResultReady: async (event) => {
-      // 仅处理当前局部任务的结果；忽略旧任务事件
-      if (streamTaskIdRef.current !== event.taskId) return
+      setPartialAnalysisInfo((prev) =>
+        prev?.decisionId === event.decisionId ? null : prev,
+      )
+      setInterruptedPartialByDecision((prev) => {
+        if (!prev[event.decisionId]) return prev
+        const next = { ...prev }
+        delete next[event.decisionId]
+        return next
+      })
+      clearPartialCanvasSnapshot(event.decisionId)
+      revertedInterruptedCanvasRef.current.delete(event.decisionId)
+      releasePartialAnalysisLock(event.decisionId)
+      setPendingChangedNodeIds((prev) =>
+        viewingDecisionIdRef.current === event.decisionId ? [] : prev,
+      )
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.detail(event.decisionId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.analysisResult(
+          event.decisionId,
+          event.analysisResultId,
+        ),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.canvas(event.decisionId),
+      })
+
+      // 仅当用户正在查看该决策页时更新本地 UI
+      if (viewingDecisionIdRef.current !== event.decisionId) return
 
       setActiveResultId(event.analysisResultId)
-      setPartialAnalysisInfo(null) // 局部推演结束，清除状态
-      partialAnalysisLockRef.current = false // 释放锁
-      setPendingChangedNodeIds([])
-
-      // 重置 activeCanvas，让 effect 直接用后端数据初始化
       setActiveCanvas(undefined)
-
-      // 设置 forceSyncKey，触发 DecisionCanvasPanel 强制同步（忽略本地编辑保护）
       setForceSyncKey(event.analysisResultId)
-
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.decisions.detail(id),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.decisions.analysisResult(id, event.analysisResultId),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.decisions.canvas(id),
-      });
     },
     onTaskFailed: (event) => {
-      // 仅处理当前局部任务失败；忽略旧任务事件
-      if (streamTaskIdRef.current !== event.taskId) return
+      let failedDecisionId: string | null = null
+      setPartialAnalysisInfo((prev) => {
+        if (!prev) return prev
+        if (event.taskId && prev.taskId !== event.taskId) return prev
+        failedDecisionId = prev.decisionId
+        return null
+      })
+      if (!failedDecisionId) return
 
-      if (event.retryable) {
-        message.warning(`局部推演失败: ${event.message}`);
-      } else {
-        message.error(`局部推演失败: ${event.message}`);
+      releasePartialAnalysisLock(failedDecisionId)
+      if (viewingDecisionIdRef.current === failedDecisionId) {
+        if (event.retryable) {
+          message.warning(`局部推演失败: ${event.message}`)
+        } else {
+          message.error(`局部推演失败: ${event.message}`)
+        }
       }
-      setPartialAnalysisInfo(null) // 失败也清除局部状态，但 pendingChangedNodeIds 保留
-      partialAnalysisLockRef.current = false // 释放锁，允许重试
     },
-  });
-
-  // 同步 streamTaskId 到 ref，供 SSE 回调判断
-  useEffect(() => {
-    streamTaskIdRef.current = streamTaskId
-  }, [streamTaskId])
+  })
 
   useEffect(() => {
-    setAnimCompleted(false);
-    setActiveResultId(null);
-  }, [taskId]);
+    viewingDecisionIdRef.current = id
+  }, [id])
+
+  /** 离开决策页时：若局部推演进行中，标记为「连接已断开」并主动放弃 SSE */
+  useEffect(() => {
+    const prevId = routeDecisionIdRef.current
+    if (prevId !== id) {
+      const info = partialAnalysisInfoRef.current
+      if (info?.decisionId === prevId) {
+        setInterruptedPartialByDecision((map) => ({
+          ...map,
+          [prevId]: {
+            taskId: info.taskId,
+            affectedNodeIds: info.affectedNodeIds,
+            changedNodeIds: [...pendingChangedNodeIdsRef.current],
+            baselineCanvas:
+              partialBaselineCanvasRef.current.get(prevId) ?? null,
+            attemptedCanvas:
+              partialAttemptedCanvasRef.current.get(prevId) ?? null,
+          },
+        }))
+        setPartialAnalysisInfo(null)
+        releasePartialAnalysisLock(prevId)
+      }
+      routeDecisionIdRef.current = id
+    }
+  }, [id, releasePartialAnalysisLock])
+
+  useEffect(() => {
+    setAnimCompleted(false)
+    setActiveResultId(null)
+  }, [id, taskId])
 
   const resultQuery = useQuery({
     queryKey: queryKeys.decisions.analysisResult(id, effectiveResultId),
@@ -344,6 +465,7 @@ export function WorkbenchPage() {
   useEffect(() => {
     if (!canvasQuery.data) return
     if (idRef.current !== id) return
+    if (restoringInterruptedCanvasRef.current === id) return
     // 数据更新时间早于 id 切换时间 → 旧决策的缓存数据，丢弃
     if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) {
       console.log('[WorkbenchPage] canvas effect: data is stale, skipping')
@@ -360,6 +482,9 @@ export function WorkbenchPage() {
     setActiveCanvas((prev) => {
       // 如果没有本地数据（页面切换后首次加载），直接用后端数据
       if (!prev) {
+        if (interruptedPartial?.baselineCanvas) {
+          return prev
+        }
         console.log('[WorkbenchPage] no local data, using backend data')
         lastBackendVersion.current = newVersion
         lastDataUpdatedAt.current = canvasQuery.dataUpdatedAt
@@ -384,7 +509,7 @@ export function WorkbenchPage() {
 
       return prev
     })
-  }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id])
+  }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id, interruptedPartial?.baselineCanvas])
 
   const viewModel =
     activeCanvas && decision
@@ -421,6 +546,57 @@ export function WorkbenchPage() {
       canvasRef.current = canvasQuery.data
     }
   }, [canvasQuery.data, id])
+
+  // WorkbenchPage 在 /workbench/:id 间切换时不卸载，isDirty / hasUserEdited 会跨决策残留
+  useEffect(() => {
+    setIsDirty(false)
+    hasUserEdited.current = false
+    didEvaluateCache.current = false
+    hasLocalEdit.current = false
+  }, [id])
+
+  const revertInterruptedCanvasMutation = useMutation({
+    mutationFn: ({ decisionId, canvas }: { decisionId: string; canvas: Canvas }) =>
+      saveCanvas(decisionId, canvas),
+    onSuccess: (_data, { decisionId }) => {
+      restoringInterruptedCanvasRef.current = null
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.canvas(decisionId),
+      })
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.detail(decisionId),
+      })
+    },
+    onError: (_error, { decisionId }) => {
+      restoringInterruptedCanvasRef.current = null
+      revertedInterruptedCanvasRef.current.delete(decisionId)
+      message.error('画布回滚失败，请刷新页面后重试')
+    },
+  })
+
+  /** 回到「连接已断开」的决策页时，恢复局部推演前的画布并同步后端 */
+  useEffect(() => {
+    const interrupted = interruptedPartialByDecision[id]
+    if (!interrupted?.baselineCanvas) return
+    if (revertedInterruptedCanvasRef.current.has(id)) return
+
+    revertedInterruptedCanvasRef.current.add(id)
+    restoringInterruptedCanvasRef.current = id
+    clearCanvasCache(id)
+    setActiveCanvas(interrupted.baselineCanvas)
+    canvasRef.current = interrupted.baselineCanvas
+    setIsDirty(false)
+    hasUserEdited.current = false
+    hasLocalEdit.current = false
+    setPendingChangedNodeIds([])
+    lastBackendVersion.current = buildServerVersion(interrupted.baselineCanvas)
+    lastDataUpdatedAt.current = Date.now()
+
+    revertInterruptedCanvasMutation.mutate({
+      decisionId: id,
+      canvas: interrupted.baselineCanvas,
+    })
+  }, [id, interruptedPartialByDecision])
 
   // ── 布局转换函数：检测 TB 布局 → LR 布局 → 保存到后端 ──
   const fixLayoutMutation = useMutation({
@@ -530,10 +706,16 @@ export function WorkbenchPage() {
   const saveMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
+    onMutate: (canvas) => {
+      if (hasPendingStructuralChange) {
+        capturePartialCanvasSnapshot(id, canvas)
+      }
+    },
     onSuccess: (data) => {
       message.success('画布已保存')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
+      hasUserEdited.current = false
       setActiveCanvas(undefined) // 触发重新从后端加载
       clearCanvasCache(id) // 清除旧缓存，刷新时走后端
 
@@ -626,10 +808,14 @@ export function WorkbenchPage() {
   const saveForPartialMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
+    onMutate: (canvas) => {
+      capturePartialCanvasSnapshot(id, canvas)
+    },
     onSuccess: (data) => {
       message.success('权重已保存')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
+      hasUserEdited.current = false
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
@@ -653,10 +839,14 @@ export function WorkbenchPage() {
   const saveForEdgeDeleteMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
+    onMutate: (canvas) => {
+      capturePartialCanvasSnapshot(id, canvas)
+    },
     onSuccess: (data) => {
       message.success('连线已删除')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
+      hasUserEdited.current = false
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
@@ -680,10 +870,14 @@ export function WorkbenchPage() {
   const saveForOptionEditMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
+    onMutate: (canvas) => {
+      capturePartialCanvasSnapshot(id, canvas)
+    },
     onSuccess: (data) => {
       message.success('方案已保存')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
+      hasUserEdited.current = false
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
@@ -707,10 +901,14 @@ export function WorkbenchPage() {
   const saveForOptionDeleteMutation = useMutation({
     mutationFn: ({ canvas }: { canvas: import('@/types/canvas').Canvas; deletedOptionId: string }) =>
       saveCanvas(id, canvas),
+    onMutate: ({ canvas }) => {
+      capturePartialCanvasSnapshot(id, canvas)
+    },
     onSuccess: (_data, variables) => {
       message.success('方案已删除')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
+      hasUserEdited.current = false
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
@@ -735,10 +933,14 @@ export function WorkbenchPage() {
   const saveForFactorDeleteMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
+    onMutate: (canvas) => {
+      capturePartialCanvasSnapshot(id, canvas)
+    },
     onSuccess: (data) => {
       message.success('因素已删除，权重已重新分配')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
       setIsDirty(false)
+      hasUserEdited.current = false
       setActiveCanvas(undefined)
       clearCanvasCache(id)
 
@@ -827,11 +1029,17 @@ export function WorkbenchPage() {
     onSuccess: (data) => {
       console.log('[WorkbenchPage] partial analysis started:', data)
       message.info('已发起局部重推，请等待推演完成')
-      // 设置局部推演状态：taskId + affectedNodeIds
       setPartialAnalysisInfo({
+        decisionId: id,
         taskId: data.taskId,
         affectedNodeIds: data.affectedNodeIds,
         status: 'RUNNING',
+      })
+      setInterruptedPartialByDecision((map) => {
+        if (!map[id]) return map
+        const next = { ...map }
+        delete next[id]
+        return next
       })
       // pendingChangedNodeIds 保留（失败时可重试）
       queryClient.invalidateQueries({
@@ -842,7 +1050,7 @@ export function WorkbenchPage() {
       })
     },
     onError: (error) => {
-      partialAnalysisLockRef.current = false // 释放锁
+      releasePartialAnalysisLock(id)
       if (error instanceof ApiError && error.code === BusinessCode.Conflict) {
         message.error('当前决策已有推演任务正在运行，请等待完成')
       } else {
@@ -851,6 +1059,44 @@ export function WorkbenchPage() {
       // pendingChangedNodeIds 保留，允许重试
     },
   })
+
+  const handleRetryInterruptedPartial = useCallback(() => {
+    const interrupted = interruptedPartialByDecision[id]
+    if (!interrupted) return
+
+    revertedInterruptedCanvasRef.current.delete(id)
+    restoringInterruptedCanvasRef.current = null
+
+    setInterruptedPartialByDecision((map) => {
+      const next = { ...map }
+      delete next[id]
+      return next
+    })
+
+    const changedNodeIds =
+      interrupted.changedNodeIds.length > 0
+        ? interrupted.changedNodeIds
+        : interrupted.affectedNodeIds
+
+    if (interrupted.attemptedCanvas) {
+      setPendingChangedNodeIds(changedNodeIds)
+      saveForPartialMutation.mutate(interrupted.attemptedCanvas)
+      return
+    }
+
+    if (changedNodeIds.length === 0) {
+      message.warning('缺少可重推的节点信息，请重新修改画布并保存后再试')
+      return
+    }
+
+    setPendingChangedNodeIds(changedNodeIds)
+    requestPartialAnalysis(changedNodeIds)
+  }, [
+    id,
+    interruptedPartialByDecision,
+    requestPartialAnalysis,
+    saveForPartialMutation,
+  ])
 
   if (detailQuery.isError) {
     const err = detailQuery.error
@@ -900,7 +1146,8 @@ export function WorkbenchPage() {
     decision.status === 'WAITING_CONFIRM' ||
     Boolean(decision.hasPendingResult) ||
     (animCompleted && decision.status !== 'COMPLETED')
-  const isLocalPartialAnalyzing = partialAnalysisInfo !== null
+  const isLocalPartialAnalyzing =
+    currentPartialInfo !== null && interruptedPartial === null
   const panelDecisionStatus = isLocalPartialAnalyzing
     ? 'PARTIAL_ANALYZING'
     : decision.status
@@ -1001,6 +1248,10 @@ export function WorkbenchPage() {
           viewModel={viewModel}
           onDirtyChange={(dirty) => {
             console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
+            if (!dirty) {
+              setIsDirty(false)
+              return
+            }
             if (hasUserEdited.current) setIsDirty(dirty)
           }}
           onCanvasChange={(canvasData) => {
@@ -1028,7 +1279,7 @@ export function WorkbenchPage() {
           hasPendingResult={decision.hasPendingResult}
           decisionStatus={decision.status}
           onRequestRefresh={refreshDecision}
-          partialAnalysisInfo={partialAnalysisInfo}
+          partialAnalysisInfo={currentPartialInfo}
           partialSteps={steps}
           forceSyncKey={forceSyncKey}
         />
@@ -1094,6 +1345,8 @@ export function WorkbenchPage() {
                 failedStepId={failedStepId}
                 decisionStatus={panelDecisionStatus}
                 isHistory={panelIsHistory}
+                connectionInterrupted={interruptedPartial !== null}
+                onRetryInterrupted={handleRetryInterruptedPartial}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
                 onRetryStep={(stepId) => retryMutation.mutate(stepId)}
               />
