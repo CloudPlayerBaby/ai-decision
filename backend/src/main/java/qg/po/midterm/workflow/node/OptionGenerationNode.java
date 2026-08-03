@@ -15,6 +15,7 @@ import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 import qg.po.midterm.workflow.tools.CalculatorTool;
 import qg.po.midterm.workflow.tools.ExchangeRateTool;
+import qg.po.midterm.workflow.utils.AnalysisResultValidator;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -90,7 +91,8 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
                             chatClient,
                             prompt,
                             new Object[]{calculatorTool, exchangeRateTool},
-                            OptionGenerationResult.class
+                            OptionGenerationResult.class,
+                            result -> AnalysisResultValidator.validateOptions(result.options())
                     );
             OptionGenerationResult result = execution.value();
 
