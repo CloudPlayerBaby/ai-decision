@@ -136,9 +136,20 @@ export function useAnalysisStream({
       setSteps(task.steps);
       setProgress(task.progress);
 
-      if (task.error) {
-        setRetryable(task.error.retryable);
-        setFailedStepId(task.error.failedStepId ?? null);
+      if (task.status === 'FAILED') {
+        const failedEvent: TaskFailedEvent = {
+          taskId: task.id,
+          errorCode: task.error?.code ?? 50000,
+          message: task.error?.message ?? '推演执行失败，请稍后重试',
+          failedStepId: task.error?.failedStepId,
+          retryable: task.error?.retryable ?? false,
+        };
+        setTaskFailed(failedEvent);
+        setRetryable(failedEvent.retryable);
+        setFailedStepId(failedEvent.failedStepId ?? null);
+        setConnectionStatus('idle');
+        onTaskFailedRef.current?.(failedEvent);
+        return;
       }
 
       let sseUrl: string;
