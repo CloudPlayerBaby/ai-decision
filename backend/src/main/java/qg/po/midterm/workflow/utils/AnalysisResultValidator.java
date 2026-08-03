@@ -20,7 +20,7 @@ public final class AnalysisResultValidator {
 
     private static final Set<String> SCORE_KEYS = Set.of("cost", "time", "benefit", "risk", "feasibility");
     // AI 初始生成保持 2-3 个；用户在画布手动新增后，最终结果最多允许 5 个方案。
-    private static final int OPTION_COUNT_MAX = 5;
+    public static final int OPTION_COUNT_MAX = 5;
     private static final int OPTION_NAME_MAX = 80;
     private static final int LIST_ITEM_MAX = 8;
     private static final int LIST_ITEM_LENGTH_MAX = 200;
