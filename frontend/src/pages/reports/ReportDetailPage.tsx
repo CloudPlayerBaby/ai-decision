@@ -139,7 +139,7 @@ export function ReportDetailPage() {
           />
           <Card>
             <Descriptions column={1} size="small">
-              <Descriptions.Item label="状态">{report.status}</Descriptions.Item>
+              <Descriptions.Item label="状态">finish</Descriptions.Item>
               <Descriptions.Item label="生成时间">
                 {formatDateTime(report.generatedAt)}
               </Descriptions.Item>

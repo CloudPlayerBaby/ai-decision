@@ -40,7 +40,7 @@ export function ReportCenterPage() {
             title: '状态',
             dataIndex: 'status',
             width: 100,
-            render: (status: string) => <Tag color="success">{status}</Tag>,
+            render: () => <Tag color="success">finish</Tag>,
           },
           {
             title: '生成时间',
