@@ -438,7 +438,7 @@ export function WorkbenchPage() {
   const idRef = useRef(id)
   const idSwitchTimeRef = useRef(0)
   const [activeCanvas, setActiveCanvas] = useState<import('@/types/canvas').Canvas | undefined>(
-    () => readCanvasCache(id)?.canvas ?? undefined,
+    undefined,
   )
 
   // id 变化 = 页面切换（非刷新）：丢弃前端缓存，从后端重新拉取
@@ -511,9 +511,10 @@ export function WorkbenchPage() {
     })
   }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id, interruptedPartial?.baselineCanvas])
 
+  const canvasForView = activeCanvas ?? canvasQuery.data
   const viewModel =
-    activeCanvas && decision
-      ? buildCanvasViewModel(decision, activeCanvas, resultQuery.data ?? undefined)
+    canvasForView && decision
+      ? buildCanvasViewModel(decision, canvasForView, resultQuery.data ?? undefined)
       : undefined
 
   // isDirty 初始为 false，等 canvasQuery 数据回来后对比缓存和服务器内容再决定
@@ -1240,7 +1241,11 @@ export function WorkbenchPage() {
                 saveMutation.mutate(canvasRef.current)
               }}
               loading={saveMutation.isPending || startPartialAnalysisMutation.isPending}
-              disabled={!isDirty || saveMutation.isPending || saveForPartialMutation.isPending || saveForEdgeDeleteMutation.isPending || saveForOptionDeleteMutation.isPending || saveForFactorDeleteMutation.isPending || saveForOptionEditMutation.isPending || startPartialAnalysisMutation.isPending}
+              disabled={(() => {
+                const disabled = !isDirty || saveMutation.isPending || saveForPartialMutation.isPending || saveForEdgeDeleteMutation.isPending || saveForOptionDeleteMutation.isPending || saveForFactorDeleteMutation.isPending || saveForOptionEditMutation.isPending || startPartialAnalysisMutation.isPending
+                console.log('[save-button]', { isDirty, savePending: saveMutation.isPending, disabled })
+                return disabled
+              })()}
             >
               {saveMutation.isPending ? '保存中…' : '保存画布'}
             </Button>

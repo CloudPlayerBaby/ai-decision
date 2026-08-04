@@ -16,6 +16,8 @@ import qg.po.midterm.dto.result.Canvas;
 import qg.po.midterm.service.DecisionService;
 import qg.po.midterm.vo.*;
 
+import java.util.List;
+
 /**
  * 决策问题接口：CRUD、结果与确认、画布与局部重推（PRD 第 6、9、10 节）
  */
@@ -134,6 +136,15 @@ public class DecisionController {
             @Valid @RequestBody SaveCanvasRequest request) {
         SaveCanvasVO vo = decisionService.saveCanvas(decisionId, request);
         return Result.success(vo);
+    }
+
+    /**
+     * 11.4 查询决策历史推演记录
+     * <p>按推演任务时间顺序返回所有任务及其 AI 步骤输出，供右侧对话框展示完整历史。</p>
+     */
+    @GetMapping("/{decisionId}/history")
+    public Result<List<DecisionHistoryVO>> getHistory(@PathVariable String decisionId) {
+        return Result.success(decisionService.getHistory(decisionId));
     }
 
 }
