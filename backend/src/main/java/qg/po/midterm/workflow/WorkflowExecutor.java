@@ -49,15 +49,6 @@ public interface WorkflowExecutor {
      */
     String startPartialAnalysis(String taskId, String decisionId, String startNode, DecisionState currentState);
 
-    /**
-     * 【给 A 组内部使用，未来可对外暴露】：JSON 强校验与修复钩子
-     * <p>
-     * 对应 PRD 12 节。验证 AI 吐出的非结构化文本是否符合 DTO，如果缺胳膊少腿，自动重试。
-     * 
-     * @param jsonResult 刚出炉的大模型 JSON 字符串
-     * @return 结构化校验结果，若依然失败则 B 组需将任务标记为 FAILED。
-     */
-    ValidationResult validateAndRepair(String jsonResult);
 
     /**
      * 【高度危险：给 B 同学深度集成使用】底层图调度器
