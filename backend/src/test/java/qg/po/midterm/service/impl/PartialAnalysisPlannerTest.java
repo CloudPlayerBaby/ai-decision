@@ -99,6 +99,6 @@ class PartialAnalysisPlannerTest {
     }
 
     private Canvas.CanvasNode node(String id, String type) {
-        return new Canvas.CanvasNode(id, type, id, new Canvas.Position(0, 0), null);
+        return new Canvas.CanvasNode(id, type, id, new Canvas.Position(0, 0), null, null);
     }
 }

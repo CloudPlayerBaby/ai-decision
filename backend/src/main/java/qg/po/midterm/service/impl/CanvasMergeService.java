@@ -43,8 +43,10 @@ public class CanvasMergeService {
             if (option == null || option.getId() == null) continue;
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("scores", option.getScores());
-            nodes.add(node(option.getId(), "option", option.getName(),
-                    position(oldNodes, option.getId(), spread(index, options.size()), 340), data));
+            Canvas.CanvasNode optionNode = node(option.getId(), "option", option.getName(),
+                    position(oldNodes, option.getId(), spread(index, options.size()), 340), data);
+            optionNode.setRelativeFactor(option.getRelativeFactor());
+            nodes.add(optionNode);
         }
         edges.addAll(CanvasTopologyBuilder.buildEdges(factors, options));
         return new Canvas(nodes, edges);
@@ -74,7 +76,13 @@ public class CanvasMergeService {
 
     private Canvas.CanvasNode node(String id, String type, String label,
                                    Canvas.Position position, Map<String, Object> data) {
-        return new Canvas.CanvasNode(id, type, label, position, data);
+        Canvas.CanvasNode node = new Canvas.CanvasNode();
+        node.setId(id);
+        node.setType(type);
+        node.setLabel(label);
+        node.setPosition(position);
+        node.setData(data);
+        return node;
     }
 
 }

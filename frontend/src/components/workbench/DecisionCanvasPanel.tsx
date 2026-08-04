@@ -386,7 +386,7 @@ function getEdgeRelation(
 /**
  * 生成唯一 ID。
  * 优先使用 Web Crypto API 的 randomUUID，不可用时回退为时间戳+随机数。
- * 用于前端生成节点和边的临时 ID（后端会分配最终 ID）。
+ * 用于前端生成节点和边的唯一 ID。
  */
 function genId(prefix: string): string {
   const uuid = typeof globalThis.crypto?.randomUUID === 'function'
@@ -402,7 +402,7 @@ function createNode(type: 'factor' | 'option', existingNodes: FlowNode[]): FlowN
       ? Math.max(...sameTypeNodes.map((n) => n.position.y))
       : 0
 
-  const id = genId(type)
+  const id = genId(type === 'option' ? 'opt' : type)
   const x = type === 'factor' ? 300 : 580
   const y = lastY + 120
 

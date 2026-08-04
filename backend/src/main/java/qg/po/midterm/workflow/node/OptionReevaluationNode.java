@@ -11,18 +11,20 @@ import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
+import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 import qg.po.midterm.workflow.utils.LlmRetryUtils;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Recalculates scores after factor changes without replacing option content. */
+/** Re-tunes option content and scores after factor changes while keeping ids and count stable. */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -37,8 +39,10 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
     @Value("classpath:prompts/option_reevaluation.st")
     private Resource promptResource;
 
-    public record ScoreUpdate(String id, Map<String, Integer> scores) {}
-    public record OptionReevaluationResult(String summary, String content, List<ScoreUpdate> options) {}
+    public record OptionUpdate(String id, String name, String description,
+                               List<String> pros, List<String> cons, List<String> risks,
+                               String relativeFactor, Map<String, Integer> scores) {}
+    public record OptionReevaluationResult(String summary, String content, List<OptionUpdate> options) {}
 
     @Override
     public Map<String, Object> apply(DecisionState state) throws Exception {
@@ -55,8 +59,8 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
             )).getContents();
             LlmRetryUtils.ExecutionResult<OptionReevaluationResult> execution = LlmRetryUtils.executeWithRepairResult(
                     chatClient, prompt, null, OptionReevaluationResult.class,
-                    result -> validate(result, existing));
-            List<Option> merged = mergeScores(existing, execution.value().options());
+                    result -> validate(result, existing, state.getFactors()));
+            List<Option> merged = merge(existing, execution.value().options());
             String output = objectMapper.writeValueAsString(execution.value());
             eventPublisher.publishEvent(new NodeExecutionEvent(
                     this, "OptionReevaluation", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, output));
@@ -66,30 +70,62 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
         }
     }
 
-    static List<String> validate(OptionReevaluationResult result, List<Option> existing) {
+    static List<String> validate(OptionReevaluationResult result, List<Option> existing, List<Factor> factors) {
         List<String> errors = new ArrayList<>();
         if (result == null || result.options() == null) return List.of("options (不能为空)");
         Set<String> expected = new LinkedHashSet<>();
         for (Option option : existing) if (option != null && option.getId() != null) expected.add(option.getId());
-        Map<String, ScoreUpdate> updates = new LinkedHashMap<>();
-        for (ScoreUpdate update : result.options()) {
+        Set<String> factorIds = new HashSet<>();
+        if (factors != null) {
+            for (Factor factor : factors) if (factor != null && factor.getId() != null) factorIds.add(factor.getId());
+        }
+        Map<String, OptionUpdate> updates = new LinkedHashMap<>();
+        for (OptionUpdate update : result.options()) {
             if (update == null || update.id() == null || updates.put(update.id(), update) != null) {
                 errors.add("options.id (必须唯一且非空)");
                 continue;
             }
+            String id = update.id();
+            if (isBlank(update.name())) errors.add("options[" + id + "].name (不可为空)");
+            if (isBlank(update.description())) errors.add("options[" + id + "].description (不可为空)");
+            if (isEmpty(update.pros())) errors.add("options[" + id + "].pros (至少一项)");
+            if (isEmpty(update.cons())) errors.add("options[" + id + "].cons (至少一项)");
+            if (isEmpty(update.risks())) errors.add("options[" + id + "].risks (至少一项)");
             if (update.scores() == null || !update.scores().keySet().equals(SCORE_KEYS)
                     || update.scores().values().stream().anyMatch(score -> score == null || score < 1 || score > 5)) {
-                errors.add("options[" + update.id() + "].scores (必须包含五维 1-5 整数评分)");
+                errors.add("options[" + id + "].scores (必须包含五维 1-5 整数评分)");
+            }
+            if (!isBlank(update.relativeFactor()) && !factorIds.contains(update.relativeFactor())) {
+                errors.add("options[" + id + "].relativeFactor (未指向任何关键因素)");
             }
         }
         if (!updates.keySet().equals(expected)) errors.add("options.id (必须与当前方案 ID 完全一致)");
         return errors;
     }
 
-    static List<Option> mergeScores(List<Option> existing, List<ScoreUpdate> updates) {
-        Map<String, Map<String, Integer>> scoresById = new LinkedHashMap<>();
-        for (ScoreUpdate update : updates) scoresById.put(update.id(), update.scores());
-        for (Option option : existing) option.setScores(scoresById.get(option.getId()));
+    static List<Option> merge(List<Option> existing, List<OptionUpdate> updates) {
+        Map<String, OptionUpdate> updatesById = new LinkedHashMap<>();
+        for (OptionUpdate update : updates) updatesById.put(update.id(), update);
+        for (Option option : existing) {
+            OptionUpdate update = updatesById.get(option.getId());
+            if (update == null) continue;
+            option.setName(update.name());
+            option.setDescription(update.description());
+            option.setPros(update.pros());
+            option.setCons(update.cons());
+            option.setRisks(update.risks());
+            option.setRelativeFactor(update.relativeFactor());
+            option.setScores(update.scores());
+        }
         return existing;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static boolean isEmpty(List<String> items) {
+        return items == null || items.isEmpty()
+                || items.stream().allMatch(item -> item == null || item.trim().isEmpty());
     }
 }

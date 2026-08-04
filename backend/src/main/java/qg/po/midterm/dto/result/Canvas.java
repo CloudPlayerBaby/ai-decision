@@ -50,6 +50,9 @@ public class Canvas {
 
         @Schema(description = "扩展数据（如 weight、scores）")
         private Map<String, Object> data;
+
+        @Schema(description = "方案节点关联性最强的因素ID；仅 option 节点使用，无强相关时为空")
+        private String relativeFactor;
     }
 
     @Data

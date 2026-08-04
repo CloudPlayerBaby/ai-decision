@@ -803,6 +803,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             ));
             factors.add(factor);
         }
+        FactorWeightNormalizer.applyWeightEditRules(factors);
         FactorWeightNormalizer.normalize(factors);
         return factors;
     }
@@ -860,6 +861,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                     nodeData,
                     oldOption == null ? null : oldOption.getScores()
             ));
+            option.setRelativeFactor(node.getRelativeFactor());
             options.add(option);
         }
         return options;
