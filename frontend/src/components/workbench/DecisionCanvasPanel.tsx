@@ -1238,7 +1238,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     setEdges(layoutedEdges)
     // 通知父组件画布已变化，触发脏检测和 canvasRef 更新
     onCanvasChangeRef.current?.(buildCanvasData(layoutedNodes, layoutedEdges))
-    message.info('布局已自动整理，请点击"保存画布"保存')
   }, [nodes, edges])
 
   // pros / cons / risks 只从 editingNode.data 读取（由 toFlowNode 注入）
