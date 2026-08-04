@@ -857,6 +857,74 @@ body.is-resizing .resize-handle::before {
 .canvas-node--option {
   border-color: var(--node-option-border);
   background: var(--node-option-bg);
+  cursor: default;
+}
+
+.canvas-node--factor {
+  cursor: pointer;
+}
+
+.canvas-node__delete-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid #e53935;
+  border-radius: 50%;
+  background: #fff;
+  color: #e53935;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  padding: 0;
+}
+
+.canvas-node__delete-btn:hover {
+  background: #ffebee;
+}
+
+.canvas-modal__readonly-field {
+  margin-bottom: 16px;
+}
+
+.canvas-modal__readonly-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.canvas-modal__readonly-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.canvas-modal__readonly-scores {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.canvas-modal__readonly-score-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.canvas-modal__readonly-score-item strong {
+  font-size: 16px;
+  color: var(--text-h);
 }
 
 .canvas-node--option-recommended {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Handle,
   Position,
@@ -14,7 +14,7 @@ import {
   type Connection,
   type NodeProps,
 } from '@xyflow/react'
-import { Modal, Form, Input, Slider, Rate, Button, Space, Divider, Popconfirm, Popover, Spin, Tooltip, message } from 'antd'
+import { Modal, Form, Input, Slider, Button, Space, Divider, Popconfirm, Popover, Spin, Tooltip, message } from 'antd'
 import { DeleteOutlined, CloseOutlined, PlusOutlined, LoadingOutlined, MenuOutlined } from '@ant-design/icons'
 import '@xyflow/react/dist/style.css'
 import { useLayoutStore } from '../../stores/layoutStore'
@@ -112,13 +112,13 @@ function FactorNode({ data, id }: FactorNodeProps) {
   )
 }
 
-/** 候选方案节点 */
+/** 候选方案节点（只读展示，不可点击进入编辑） */
 function OptionNode({ data, id }: OptionNodeProps) {
   const { partialAnalysisInfo } = useContext(PartialAnalysisContext)
   const { hoveredNodeId } = useContext(NodeHoverContext)
   const isAffected = partialAnalysisInfo?.affectedNodeIds.includes(id) ?? false
   const isHovered = hoveredNodeId === id
-  const { openOptionAnalysis } = useCanvasActions()
+  const { openOptionAnalysis, deleteOption } = useCanvasActions()
 
   const { scores, pros, cons, risks, isRecommended } = data
 
@@ -157,6 +157,19 @@ function OptionNode({ data, id }: OptionNodeProps) {
     <div className={`canvas-node canvas-node--option${isRecommended ? ' canvas-node--option-recommended' : ''}${isAffected ? ' canvas-node--partial-loading' : ''}${isHovered ? ' canvas-node--hovered' : ''}`}>
       {isRecommended && <span className="canvas-node__badge canvas-node__badge--corner">推荐</span>}
       {isAffected && <Spin size="small" indicator={<LoadingOutlined spin />} className="canvas-node__partial-spinner" />}
+      {isHovered && (
+        <button
+          type="button"
+          className="canvas-node__delete-btn"
+          aria-label="删除此方案"
+          onClick={(e) => {
+            e.stopPropagation()
+            deleteOption(id)
+          }}
+        >
+          <DeleteOutlined />
+        </button>
+      )}
       <Handle type="target" position={Position.Left} />
       <div className="canvas-node__label">
         <span>候选方案</span>
@@ -217,16 +230,15 @@ function OptionNode({ data, id }: OptionNodeProps) {
   )
 }
 
-// ── 方案→因素 AFFECTS 连线组件（带删除按钮）──────────────────
+// ── 方案→因素 AFFECTS 连线组件 ──────────────────────────────────
 import type { EdgeProps } from '@xyflow/react'
 import {
   BaseEdge,
-  EdgeLabelRenderer,
   getBezierPath,
   MarkerType,
 } from '@xyflow/react'
 
-/** AFFECTS 类型的连线：可删除，鼠标悬停显示删除按钮，支持边聚焦高亮 */
+/** AFFECTS 类型的连线：只读展示，支持边聚焦高亮 */
 function AffectsEdge({
   id,
   sourceX,
@@ -240,7 +252,7 @@ function AffectsEdge({
   style,
 }: EdgeProps) {
   const { hoveredNodeId, showAllEdges } = useContext(EdgeFocusContext)
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -266,58 +278,17 @@ function AffectsEdge({
     strokeWidth: strokeWidth ?? style?.strokeWidth,
   }
 
-  // AFFECTS 边不允许删除，悬停时显示禁止提示
-  const [showTooltip, setShowTooltip] = useState(false)
-
   return (
-    <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={MarkerType.ArrowClosed}
-        style={computedStyle}
-      />
-      <EdgeLabelRenderer>
-        <div
-          className="edge-delete-btn nodrag nopan"
-          onMouseEnter={() => setShowTooltip(true)}
-          onMouseLeave={() => setShowTooltip(false)}
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'all',
-            opacity: hoveredNodeId === null ? 0.7 : 0,
-            cursor: 'not-allowed',
-          }}
-        >
-          <DeleteOutlined style={{ color: '#999' }} />
-        </div>
-        {showTooltip && hoveredNodeId === null && (
-          <div
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -150%) translate(${labelX}px,${labelY}px)`,
-              background: 'rgba(0,0,0,0.8)',
-              color: '#fff',
-              padding: '4px 8px',
-              borderRadius: 4,
-              fontSize: 12,
-              whiteSpace: 'nowrap',
-              pointerEvents: 'none',
-              zIndex: 1000,
-            }}
-          >
-            因素与方案的影响关系由推演结果生成，不支持手动删除
-          </div>
-        )}
-      </EdgeLabelRenderer>
-    </>
+    <BaseEdge
+      id={id}
+      path={edgePath}
+      markerEnd={MarkerType.ArrowClosed}
+      style={computedStyle}
+    />
   )
 }
 
 // Tab key 类型
-type OptionModalTab = 'settings' | 'analysis'
-
 // ── 局部推演状态（由 WorkbenchPage 管理）────────────────────────
 interface PartialAnalysisInfo {
   taskId: string
@@ -675,7 +646,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const [isNewNode, setIsNewNode] = useState(false)
   const [form] = Form.useForm()
   const [weightValue, setWeightValue] = useState(0.1)
-  const [activeTabKey, setActiveTabKey] = useState<OptionModalTab>('settings')
 
   // 边聚焦状态（仅影响渲染样式，不触发持久化）
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
@@ -687,16 +657,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       if (!node || node.type !== 'option') return
       setEditingNode(node)
       setIsNewNode(false)
-      setActiveTabKey('analysis')
       setModalOpen(true)
     },
     [nodes],
   )
 
-  // Context value（不含 pros/cons/risks，仅传回调）
-  const canvasActions = useRef({ openOptionAnalysis }).current
-
-  // 打开 Modal
+  // Context value 在 deleteOption 定义后组装（见下方 canvasActions）
   const openModal = useCallback(
     (node: FlowNode | null, isNew: boolean) => {
       setEditingNode(node)
@@ -715,12 +681,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             description: factorData.description ?? '',
           })
         } else if (node.type === 'option') {
-          const optionData = node.data as OptionFlowData
           isEditingFactorRef.current = false
-          form.setFieldsValue({
-            label: optionData.label,
-            ...optionData.scores,
-          })
         }
       } else {
         isEditingFactorRef.current = false
@@ -897,21 +858,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     })
   }, [editingNode, isNewNode, form, handleSaveFactor, handleSaveNormal])
 
-  const deleteNode = useCallback(
-    (nodeId: string) => {
-      if (nodeId === 'root') return
-      setNodes((prev) => prev.filter((n) => n.id !== nodeId))
-      setEdges((prev) =>
-        prev.filter((e) => e.source !== nodeId && e.target !== nodeId),
-      )
-      if (editingNode?.id === nodeId) {
-        setModalOpen(false)
-        setEditingNode(null)
-      }
-    },
-    [editingNode, setNodes, setEdges],
-  )
-
   // 仅允许删除 option 节点；弹出确认框而非直接删除
   const handleOptionDeleteClick = useCallback(
     (nodeId: string) => {
@@ -974,6 +920,23 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     }
     setPendingOptionDelete(null)
   }, [setNodes, setEdges])
+
+  const deleteOption = useCallback(
+    (nodeId: string) => {
+      const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
+      if (optionCount <= 2) {
+        message.warning('至少保留两个候选方案用于对比')
+        return
+      }
+      handleOptionDeleteClick(nodeId)
+    },
+    [handleOptionDeleteClick],
+  )
+
+  const canvasActions = useMemo(
+    () => ({ openOptionAnalysis, deleteOption }),
+    [openOptionAnalysis, deleteOption],
+  )
 
   // ── 删除因素节点 ─────────────────────────────────────────────
 
@@ -1062,8 +1025,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: FlowNode) => {
-      if (node.type === 'decision') return
-      if (node.type === 'option') setActiveTabKey('settings')
+      if (node.type === 'decision' || node.type === 'option') return
       openModal(node, false)
     },
     [openModal],
@@ -1209,9 +1171,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       return
     }
     const node = createNode('option', nodes)
-    setActiveTabKey('settings')
-    openModal(node, true)
-  }, [nodes, openModal])
+    setNodes((prev) => [...prev, node])
+    onStructuralChangePendingRef.current?.('OPTION_ADDED')
+  }, [nodes, setNodes])
 
   // "自动整理布局"：对当前完整 nodes + edges 调用 applyDagreLayout，
   // setNodes 后通过 onCanvasChange 更新 canvasRef，标记 dirty，提示用户保存。
@@ -1429,9 +1391,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           <span className={`canvas-modal__type-badge canvas-modal__type-badge--${editingNode.type}`} />
                           <div className="canvas-modal__header-text">
                             <span className="canvas-modal__title">
-                              {editingNode.type === 'factor' ? '编辑影响因素' : '编辑候选方案'}
+                              {editingNode.type === 'factor' ? '编辑影响因素' : '查看方案分析'}
                             </span>
-                            <span className="canvas-modal__subtitle">调整后将标记画布为"未保存"</span>
+                            <span className="canvas-modal__subtitle">
+                              {editingNode.type === 'factor'
+                                ? '调整后将标记画布为"未保存"'
+                                : '内容由 AI 推演生成，不可手动编辑'}
+                            </span>
                           </div>
                         </div>
                         <Button type="text" icon={<CloseOutlined />} onClick={closeModal} className="canvas-modal__close" />
@@ -1439,14 +1405,123 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
                       <Divider className="canvas-modal__divider" />
 
-                      {/* 表单内容 */}
+                      {editingNode.type === 'option' ? (
+                        <>
+                          <div className="canvas-modal__readonly-field">
+                            <div className="canvas-modal__readonly-label">名称</div>
+                            <div className="canvas-modal__readonly-value">
+                              {analysisDetail?.label || '（待 AI 生成）'}
+                            </div>
+                          </div>
+
+                          {analysisDetail && (
+                            <div className="canvas-modal__readonly-scores">
+                              {([
+                                ['成本', analysisDetail.scores.cost],
+                                ['时间', analysisDetail.scores.time],
+                                ['收益', analysisDetail.scores.benefit],
+                                ['风险', analysisDetail.scores.risk],
+                                ['可行', analysisDetail.scores.feasibility],
+                              ] as const).map(([label, value]) => (
+                                <div key={label} className="canvas-modal__readonly-score-item">
+                                  <span>{label}</span>
+                                  <strong>{value}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="canvas-modal-analysis">
+                            <div className="canvas-modal-analysis__hint">
+                              推演生成 · 保存画布不会直接修改以下内容
+                            </div>
+                            {analysisDetail && (analysisDetail.pros.length > 0 || analysisDetail.cons.length > 0 || analysisDetail.risks.length > 0) ? (
+                              <>
+                                <div className="canvas-modal-analysis__section">
+                                  <div className="canvas-modal-analysis__section-title">优势</div>
+                                  {analysisDetail.pros.length > 0 ? (
+                                    <ul className="canvas-modal-analysis__list">
+                                      {analysisDetail.pros.map((p: string, i: number) => (
+                                        <li key={i}>{p}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <span className="canvas-modal-analysis__empty">暂无</span>
+                                  )}
+                                </div>
+                                <div className="canvas-modal-analysis__section">
+                                  <div className="canvas-modal-analysis__section-title">局限</div>
+                                  {analysisDetail.cons.length > 0 ? (
+                                    <ul className="canvas-modal-analysis__list">
+                                      {analysisDetail.cons.map((c: string, i: number) => (
+                                        <li key={i}>{c}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <span className="canvas-modal-analysis__empty">暂无</span>
+                                  )}
+                                </div>
+                                <div className="canvas-modal-analysis__section">
+                                  <div className="canvas-modal-analysis__section-title">风险</div>
+                                  {analysisDetail.risks.length > 0 ? (
+                                    <ul className="canvas-modal-analysis__list">
+                                      {analysisDetail.risks.map((r: string, i: number) => (
+                                        <li key={i}>{r}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <span className="canvas-modal-analysis__empty">暂无</span>
+                                  )}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="canvas-modal-analysis__empty-state">
+                                <div className="canvas-modal-analysis__empty-title">尚未生成方案分析</div>
+                                <div className="canvas-modal-analysis__empty-hint">
+                                  保存画布并发起局部重推后，系统将补充该方案的优势、局限与风险。
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="canvas-modal__footer">
+                            {(() => {
+                              const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
+                              const canDelete = optionCount > 2
+                              return (
+                                <Popconfirm
+                                  title={canDelete
+                                    ? `删除后，该方案及其关联关系将不再参与方案对比。是否继续？`
+                                    : '至少保留两个候选方案用于对比'}
+                                  disabled={!canDelete}
+                                  onConfirm={() => handleOptionDeleteClick(editingNode.id)}
+                                  okText="删除"
+                                  cancelText="取消"
+                                >
+                                  <Button
+                                    danger
+                                    type="text"
+                                    icon={<DeleteOutlined />}
+                                    disabled={!canDelete}
+                                  >
+                                    删除此方案
+                                  </Button>
+                                </Popconfirm>
+                              )
+                            })()}
+                            <Space>
+                              <Button onClick={closeModal}>关闭</Button>
+                            </Space>
+                          </div>
+                        </>
+                      ) : (
                       <Form form={form} layout="vertical" onFinish={submitForm}>
                         <Form.Item
                           name="label"
-                          label={editingNode.type === 'factor' ? '名称' : '名称'}
+                          label="名称"
                           rules={[{ required: true, message: '请输入名称' }]}
                         >
-                          <Input placeholder={editingNode.type === 'factor' ? '如：时间成本' : '如：方案 A：优先 Docker'} />
+                          <Input placeholder="如：时间成本" />
                         </Form.Item>
 
                         {editingNode.type === 'factor' && (
@@ -1475,7 +1550,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                 )}
                               </div>
                             </Form.Item>
-                            {/* description 为只读展示，不进 Form，不在 submitForm 中更新 */}
                             {(editingNode.data as FactorFlowData).description && (
                               <Form.Item name="description" label="描述（只读）">
                                 <Input.TextArea rows={3} value={(editingNode.data as FactorFlowData).description} disabled />
@@ -1484,169 +1558,26 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           </>
                         )}
 
-                        {editingNode.type === 'option' && (
-                          <>
-                            {/* 自定义 Tab 切换 */}
-                            <div className="canvas-option-tabs">
-                              <button
-                                type="button"
-                                className={`canvas-option-tabs__btn ${activeTabKey === 'settings' ? 'canvas-option-tabs__btn--active' : ''}`}
-                                onClick={() => setActiveTabKey('settings')}
-                              >
-                                方案设置
-                              </button>
-                              <button
-                                type="button"
-                                className={`canvas-option-tabs__btn ${activeTabKey === 'analysis' ? 'canvas-option-tabs__btn--active' : ''}`}
-                                onClick={() => setActiveTabKey('analysis')}
-                              >
-                                方案分析
-                              </button>
-                            </div>
-
-                            {activeTabKey === 'settings' && (
-                              <>
-                                <Form.Item name="cost" label="成本（1=高成本，5=低成本）">
-                                  <Rate count={5} />
-                                </Form.Item>
-                                <Form.Item name="time" label="时间（1=耗时久，5=耗时短）">
-                                  <Rate count={5} />
-                                </Form.Item>
-                                <Form.Item name="benefit" label="收益（1=收益低，5=收益高）">
-                                  <Rate count={5} />
-                                </Form.Item>
-                                <Form.Item name="risk" label="风险（1=高风险，5=低风险）">
-                                  <Rate count={5} />
-                                </Form.Item>
-                                <Form.Item name="feasibility" label="可行性（1=难实现，5=易实现）">
-                                  <Rate count={5} />
-                                </Form.Item>
-                              </>
-                            )}
-
-                            {activeTabKey === 'analysis' && (
-                              <div className="canvas-modal-analysis">
-                                <div className="canvas-modal-analysis__hint">
-                                  推演生成 · 保存画布不会直接修改以下内容
-                                </div>
-                                {analysisDetail && (analysisDetail.pros.length > 0 || analysisDetail.cons.length > 0 || analysisDetail.risks.length > 0) ? (
-                                  <>
-                                    <div className="canvas-modal-analysis__section">
-                                      <div className="canvas-modal-analysis__section-title">优势</div>
-                                      {analysisDetail.pros.length > 0 ? (
-                                        <ul className="canvas-modal-analysis__list">
-                                          {analysisDetail.pros.map((p: string, i: number) => (
-                                            <li key={i}>{p}</li>
-                                          ))}
-                                        </ul>
-                                      ) : (
-                                        <span className="canvas-modal-analysis__empty">暂无</span>
-                                      )}
-                                    </div>
-                                    <div className="canvas-modal-analysis__section">
-                                      <div className="canvas-modal-analysis__section-title">局限</div>
-                                      {analysisDetail.cons.length > 0 ? (
-                                        <ul className="canvas-modal-analysis__list">
-                                          {analysisDetail.cons.map((c: string, i: number) => (
-                                            <li key={i}>{c}</li>
-                                          ))}
-                                        </ul>
-                                      ) : (
-                                        <span className="canvas-modal-analysis__empty">暂无</span>
-                                      )}
-                                    </div>
-                                    <div className="canvas-modal-analysis__section">
-                                      <div className="canvas-modal-analysis__section-title">风险</div>
-                                      {analysisDetail.risks.length > 0 ? (
-                                        <ul className="canvas-modal-analysis__list">
-                                          {analysisDetail.risks.map((r: string, i: number) => (
-                                            <li key={i}>{r}</li>
-                                          ))}
-                                        </ul>
-                                      ) : (
-                                        <span className="canvas-modal-analysis__empty">暂无</span>
-                                      )}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <div className="canvas-modal-analysis__empty-state">
-                                    <div className="canvas-modal-analysis__empty-title">尚未生成方案分析</div>
-                                    <div className="canvas-modal-analysis__empty-hint">
-                                      保存画布并发起局部重推后，系统将补充该方案的优势、局限与风险。
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
-
-                        {/* 底部操作栏 */}
                         <div className="canvas-modal__footer">
-                          {editingNode.type === 'option' ? (
-                            <>
-                              {(() => {
-                                const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
-                                const canDelete = optionCount > 2
-                                return (
-                                  <Popconfirm
-                                    title={canDelete
-                                      ? `删除后，该方案及其关联关系将不再参与方案对比。是否继续？`
-                                      : '至少保留两个候选方案用于对比'}
-                                    disabled={!canDelete}
-                                    onConfirm={() => handleOptionDeleteClick(editingNode.id)}
-                                    okText="删除"
-                                    cancelText="取消"
-                                  >
-                                    <Button
-                                      danger
-                                      type="text"
-                                      icon={<DeleteOutlined />}
-                                      disabled={!canDelete}
-                                    >
-                                      删除此方案
-                                    </Button>
-                                  </Popconfirm>
-                                )
-                              })()}
-                            </>
-                          ) : (
-                            <>
-                              {editingNode.type === 'factor' ? (
-                                (() => {
-                                  const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
-                                  const canDelete = factorCount > 1
-                                  return (
-                                    <Popconfirm
-                                      title={canDelete
-                                        ? `删除后，该因素的权重将按比例分配给其余因素，并重新评估受影响方案。是否继续？`
-                                        : '至少保留一个关键影响因素'}
-                                      onConfirm={() => handleFactorDeleteClick(editingNode.id)}
-                                      okText="删除"
-                                      cancelText="取消"
-                                      disabled={!canDelete}
-                                    >
-                                      <Button danger type="text" icon={<DeleteOutlined />} disabled={!canDelete}>
-                                        删除此因素
-                                      </Button>
-                                    </Popconfirm>
-                                  )
-                                })()
-                              ) : (
-                                <Popconfirm
-                                  title={`删除此方案？`}
-                                  onConfirm={() => deleteNode(editingNode.id)}
-                                  okText="删除"
-                                  cancelText="取消"
-                                  disabled={editingNode.id === 'root'}
-                                >
-                                  <Button danger type="text" icon={<DeleteOutlined />} disabled={editingNode.id === 'root'}>
-                                    删除此方案
-                                  </Button>
-                                </Popconfirm>
-                              )}
-                            </>
-                          )}
+                          {(() => {
+                            const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
+                            const canDelete = factorCount > 1
+                            return (
+                              <Popconfirm
+                                title={canDelete
+                                  ? `删除后，该因素的权重将按比例分配给其余因素，并重新评估受影响方案。是否继续？`
+                                  : '至少保留一个关键影响因素'}
+                                onConfirm={() => handleFactorDeleteClick(editingNode.id)}
+                                okText="删除"
+                                cancelText="取消"
+                                disabled={!canDelete}
+                              >
+                                <Button danger type="text" icon={<DeleteOutlined />} disabled={!canDelete}>
+                                  删除此因素
+                                </Button>
+                              </Popconfirm>
+                            )
+                          })()}
                           <Space>
                             <Button onClick={closeModal}>取消</Button>
                             <Button type="primary" onClick={submitForm}>
@@ -1655,6 +1586,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           </Space>
                         </div>
                       </Form>
+                      )}
                     </>
                   )}
                 </Modal>
