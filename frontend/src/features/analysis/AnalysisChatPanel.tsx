@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { Button, Empty, Result, Space, Spin, Typography } from 'antd'
+import { useEffect, useMemo, useRef } from 'react'
+import { Button, Divider, Empty, Result, Space, Spin, Typography } from 'antd'
 import { CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type {
   AnalysisStep,
@@ -7,7 +7,7 @@ import type {
   Recommendation,
   ToolCallEvent,
 } from '../../types/analysis'
-import type { ConnectionStatus } from '../../hooks/useAnalysisStream'
+import type { ConnectionStatus, StepGroupInfo } from '../../hooks/useAnalysisStream'
 import { ChatMessage } from './ChatMessage'
 import { StepLogCard } from './StepLogCard'
 import { ToolCallCard } from './ToolCallCard'
@@ -15,6 +15,12 @@ import { OptionComparison } from './OptionComparison'
 import '../../styles/AnalysisChatPanel.css'
 
 const { Text } = Typography
+
+interface RenderedGroup {
+  label: string
+  isCurrent: boolean
+  steps: AnalysisStep[]
+}
 
 interface Props {
   userMessage: string
@@ -26,24 +32,15 @@ interface Props {
   analysisResultId: string
   selectedOptionId?: string | null
   isHistory?: boolean
-  /** 当前任务失败是否可重试 */
   retryable?: boolean
-  /** 失败的步骤 ID */
   failedStepId?: string | null
-  /** 决策状态，用于区分整轮推演 / 局部推演 */
   decisionStatus?: string
-  /** 切换页面导致 SSE 主动断开（需用户手动重试） */
+  /** 步骤分组信息（从 useAnalysisStream 传入），含轮次标签 */
+  stepGroups?: StepGroupInfo[]
   connectionInterrupted?: boolean
   onRetryInterrupted?: () => void
   onAllStepsCompleted?: () => void
   onRetryStep?: (stepId: string) => void
-}
-
-function isReusedPartialStep(step: AnalysisStep) {
-  if (step.status !== 'SUCCEEDED') return false
-
-  const text = `${step.summary ?? ''}${step.content ?? ''}`
-  return text.includes('复用') || text.includes('沿用')
 }
 
 export function AnalysisChatPanel({
@@ -58,19 +55,64 @@ export function AnalysisChatPanel({
   retryable = false,
   failedStepId = null,
   decisionStatus,
+  stepGroups: stepGroupsProp = [],
   connectionInterrupted = false,
   onRetryInterrupted,
   onAllStepsCompleted,
   onRetryStep,
 }: Props) {
-  const analysisCompleted =
-    steps.length > 0 && steps.every((step) => step.status === 'SUCCEEDED')
   const hasResultData = options.length > 0 && recommendation !== null
   const hasHistoryData = isHistory && hasResultData
   const isPartial = decisionStatus === 'PARTIAL_ANALYZING'
-  const visibleSteps = isPartial
-    ? steps.filter((step) => !isReusedPartialStep(step))
-    : steps
+  const hasMultipleRuns = stepGroupsProp.length > 1
+
+  // 自动滚动到当前 task 区域
+  const currentGroupRef = useRef<HTMLDivElement>(null)
+
+  // 将 stepGroups 映射到实际步骤列表
+  const renderedGroups = useMemo<RenderedGroup[]>(() => {
+    if (stepGroupsProp.length === 0) {
+      // 无分组信息：所有步骤打平为一组
+      const visibleSteps = steps.filter((s) => s.status !== 'WAITING')
+      return visibleSteps.length > 0
+        ? [{ label: '', isCurrent: false, steps: visibleSteps }]
+        : []
+    }
+
+    return stepGroupsProp
+      .map((group) => {
+        const groupSteps = group.stepIds
+          .map((id) => steps.find((s) => s.id === id))
+          .filter((s): s is AnalysisStep => s !== undefined)
+          .filter((s) => s.status !== 'WAITING')
+        return {
+          label: group.label,
+          isCurrent: group.isCurrent,
+          steps: groupSteps,
+        }
+      })
+      .filter((g) => g.steps.length > 0)
+  }, [steps, stepGroupsProp])
+
+  // analysisCompleted 只看当前 task 的步骤
+  const currentSteps = useMemo(
+    () => renderedGroups.filter((g) => g.isCurrent).flatMap((g) => g.steps),
+    [renderedGroups],
+  )
+  const analysisCompleted =
+    currentSteps.length > 0 && currentSteps.every((step) => step.status === 'SUCCEEDED')
+
+  const lastNewRunningCountRef = useRef(0)
+  const newRunningCount = currentSteps.filter((s) => s.status === 'RUNNING').length
+
+  useEffect(() => {
+    if (newRunningCount > 0 && lastNewRunningCountRef.current === 0) {
+      requestAnimationFrame(() => {
+        currentGroupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+    lastNewRunningCountRef.current = newRunningCount
+  }, [newRunningCount])
 
   const onCompletedRef = useRef(onAllStepsCompleted)
   onCompletedRef.current = onAllStepsCompleted
@@ -141,41 +183,62 @@ export function AnalysisChatPanel({
           <>
             <ChatMessage content={userMessage} />
 
-            {!analysisCompleted && !isHistory && (
+            {/* 首次推演 / 无历史时的加载提示 */}
+            {!analysisCompleted && !isHistory && !hasMultipleRuns && (
               <div className="analysis-panel__loading">
                 <Spin size="small" />
-                <span>{isPartial ? '正在局部推演...' : '正在推演...'}</span>
-                {isPartial && (
-                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                    仅重新推演受影响的部分，其余结果保持不变
-                  </Text>
-                )}
+                <span>正在推演...</span>
               </div>
             )}
 
-            {visibleSteps
-              .filter((step) => step.status !== 'WAITING')
-              .map((step) => (
-                <div key={step.id}>
-                  <StepLogCard
-                    step={step}
-                    animate={!isHistory && step.status !== 'FAILED'}
-                    onRetry={
-                      retryable && step.id === failedStepId
-                        ? onRetryStep
-                        : undefined
-                    }
-                  />
-                  {toolCalls
-                    .filter((toolCall) => toolCall.stepId === step.id)
-                    .map((toolCall) => (
-                      <ToolCallCard
-                        key={`${step.id}-${toolCall.toolName}`}
-                        toolCall={toolCall}
-                      />
-                    ))}
-                </div>
-              ))}
+            {renderedGroups.map((group, groupIndex) => (
+              <div
+                key={group.isCurrent ? 'current-group' : `history-group-${groupIndex}`}
+                ref={group.isCurrent ? currentGroupRef : undefined}
+              >
+                {/* 多轮推演时每组显示标签，首组也显示 */}
+                {hasMultipleRuns && group.label && (
+                  <Divider plain style={{ fontSize: 12, color: group.isCurrent ? '#1677ff' : '#999', margin: groupIndex === 0 ? '0 0 8px' : '16px 0 8px' }}>
+                    {group.label}
+                  </Divider>
+                )}
+
+                {group.steps.map((step) => (
+                  <div key={step.id}>
+                    <StepLogCard
+                      step={step}
+                      animate={!isHistory && group.isCurrent && step.status !== 'FAILED'}
+                      onRetry={
+                        retryable && step.id === failedStepId
+                          ? onRetryStep
+                          : undefined
+                      }
+                    />
+                    {toolCalls
+                      .filter((toolCall) => toolCall.stepId === step.id)
+                      .map((toolCall) => (
+                        <ToolCallCard
+                          key={`${step.id}-${toolCall.toolName}`}
+                          toolCall={toolCall}
+                        />
+                      ))}
+                  </div>
+                ))}
+
+                {/* 当前组末尾：进行中提示 / 完成提示 */}
+                {group.isCurrent && hasMultipleRuns && !analysisCompleted && (
+                  <div className="analysis-panel__loading" style={{ marginBottom: 8 }}>
+                    <Spin size="small" />
+                    <span>{isPartial ? '正在局部推演，生成新结果...' : '正在重新推演...'}</span>
+                  </div>
+                )}
+                {group.isCurrent && hasMultipleRuns && analysisCompleted && (
+                  <Divider plain style={{ fontSize: 12, color: '#52c41a', margin: '8px 0 12px' }}>
+                    本轮推演完成
+                  </Divider>
+                )}
+              </div>
+            ))}
 
             {/* 没有 stepId 的工具调用：单独渲染 */}
             {toolCalls

@@ -1,4 +1,4 @@
-import type { AnalysisTask, SseTicketResponse } from '@/types/analysis'
+import type { AnalysisTask, SseTicketResponse, TaskHistoryItem } from '@/types/analysis'
 
 export const MOCK_ANALYSIS_TASK: AnalysisTask = {
   id: 't_30001',
@@ -63,4 +63,52 @@ export function mockCreateSseTicket(taskId: string): SseTicketResponse {
     sseUrl: `/api/v1/analysis-tasks/${taskId}/events?ticket=sse_tk_mock`,
     expiresIn: 60,
   }
+}
+
+export const MOCK_TASK_HISTORY: TaskHistoryItem[] = [
+  {
+    taskId: 't_30001',
+    runType: 'FULL',
+    taskStatus: 'SUCCEEDED',
+    startedAt: '2026-07-31T09:00:00+08:00',
+    finishedAt: '2026-07-31T09:02:34+08:00',
+    steps: [
+      {
+        id: 's_1',
+        name: 'UNDERSTAND',
+        displayName: '理解问题',
+        status: 'SUCCEEDED',
+        summary: '根据背景信息，理解决策目标',
+        content: '你正在面临一个关于…的决策，核心目标是…',
+      },
+      {
+        id: 's_2',
+        name: 'EXTRACT_FACTORS',
+        displayName: '提取关键因素',
+        status: 'SUCCEEDED',
+        summary: '已提取 4 个关键因素',
+        content: '提取了以下关键决策因素：成本、时间、风险、可行性…',
+      },
+      {
+        id: 's_3',
+        name: 'GENERATE_OPTIONS',
+        displayName: '生成候选方案',
+        status: 'SUCCEEDED',
+        summary: '生成了 3 个候选方案',
+        content: '基于决策目标，生成了以下候选方案…',
+      },
+      {
+        id: 's_4',
+        name: 'COMPARE_OPTIONS',
+        displayName: '比较候选方案',
+        status: 'SUCCEEDED',
+        summary: '评估与对比完成',
+        content: '综合五维评分，推荐方案 A，理由是…',
+      },
+    ],
+  },
+]
+
+export function mockGetTaskHistory(_decisionId: string): TaskHistoryItem[] {
+  return MOCK_TASK_HISTORY
 }

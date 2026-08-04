@@ -245,8 +245,10 @@ export function WorkbenchPage() {
     }
   }, [])
 
-  const { steps, connectionStatus, toolCalls, retryable, failedStepId } = useAnalysisStream({
+  const { steps, connectionStatus, toolCalls, retryable, failedStepId, stepGroups } = useAnalysisStream({
     taskId: streamTaskId,
+    decisionId: id,
+    runType: partialAnalysisInfo ? 'PARTIAL' : 'FULL',
     onResultReady: async (event) => {
       setPartialAnalysisInfo((prev) =>
         prev?.decisionId === event.decisionId ? null : prev,
@@ -1392,6 +1394,7 @@ export function WorkbenchPage() {
                 failedStepId={failedStepId}
                 decisionStatus={panelDecisionStatus}
                 isHistory={panelIsHistory}
+                stepGroups={stepGroups}
                 connectionInterrupted={interruptedPartial !== null}
                 onRetryInterrupted={handleRetryInterruptedPartial}
                 onAllStepsCompleted={() => setAnimCompleted(true)}

@@ -179,3 +179,15 @@ export interface TaskFailedEvent {
   failedStepId?: string
   retryable: boolean
 }
+
+/** 历史推演记录（GET /decisions/{id}/history） */
+export type TaskRunType = 'FULL' | 'PARTIAL'
+
+export interface TaskHistoryItem {
+  taskId: string
+  runType: TaskRunType
+  taskStatus: TaskRunStatus
+  startedAt: string | null
+  finishedAt: string | null
+  steps: AnalysisStep[]
+}
