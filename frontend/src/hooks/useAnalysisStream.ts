@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getAnalysisTask, createSseTicket } from '@/services/analysis.service';
+import { getAnalysisTask, createSseTicket, getTaskHistory } from '@/services/analysis.service';
 import type {
   AnalysisStep,
   ToolCallEvent,
@@ -7,12 +7,27 @@ import type {
   TaskFailedEvent,
   StepUpdateEvent,
   StepStatus,
+  TaskRunType,
 } from '@/types/analysis';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting';
 
+/** 步骤分组信息，用于 AnalysisChatPanel 渲染分隔和标签 */
+export interface StepGroupInfo {
+  /** 展示标签：首次推演 / 重新推演结果 / 局部推演结果 */
+  label: string
+  /** 该组步骤的 ID 集合 */
+  stepIds: string[]
+  /** 是否是当前正在运行的 task */
+  isCurrent: boolean
+}
+
 interface UseAnalysisStreamOptions {
   taskId: string | null;
+  /** 决策 ID，用于加载历史推演记录（刷新页面不丢失历史步骤） */
+  decisionId?: string;
+  /** 当前 task 的推演类型（WorkbenchPage 传入），用于确定分隔标签 */
+  runType?: TaskRunType;
   onResultReady?: (event: ResultReadyEvent) => void;
   onTaskFailed?: (event: TaskFailedEvent) => void;
 }
@@ -24,35 +39,65 @@ export interface UseAnalysisStreamReturn {
   taskFailed: TaskFailedEvent | null;
   connectionStatus: ConnectionStatus;
   progress: number;
-  /** 当前任务失败是否可重试（来自 REST 恢复或 SSE task_failed 事件） */
   retryable: boolean;
-  /** 当前任务失败的步骤 ID，仅当 retryable 为 true 时有意义 */
   failedStepId: string | null;
+  /** 步骤分组信息（按推演轮次），含展示标签 */
+  stepGroups: StepGroupInfo[];
 }
 
 function mergeStepContent(
   previousContent: string | undefined,
   nextContent: string | undefined,
-  nextStatus: StepStatus,
 ): string | undefined {
   if (nextContent === undefined) return previousContent;
-  if (!previousContent) return nextContent;
+  return nextContent;
+}
 
-  const placeholders = new Set(['思考中...', '即将开始...']);
-  if (
-    nextStatus === 'SUCCEEDED' ||
-    nextStatus === 'FAILED' ||
-    placeholders.has(previousContent)
-  ) {
-    return nextContent;
-  }
+/** 标准步骤顺序，用于新步骤内部排序 */
+const STEP_ORDER: Record<string, number> = {
+  UNDERSTAND: 0,
+  EXTRACT_FACTORS: 1,
+  TOOL_CALL: 2,
+  GENERATE_OPTIONS: 3,
+  COMPARE_OPTIONS: 4,
+  GENERATE_REPORT: 5,
+};
 
-  if (nextContent.startsWith(previousContent)) return nextContent;
-  return `${previousContent}${nextContent}`;
+/**
+ * 根据已有历史和新 task 信息，计算本轮 label。
+ * 首次 FULL → "首次推演"，后续 FULL → "重新推演结果"，PARTIAL → "局部推演结果"
+ */
+function deriveRunLabel(runType: TaskRunType, existingFullCount: number): string {
+  if (runType === 'PARTIAL') return '局部推演结果'
+  // FULL
+  if (existingFullCount === 0) return '首次推演'
+  return '重新推演结果'
+}
+
+/**
+ * 将新任务的步骤追加到历史步骤末尾。
+ * 旧步骤保持原有顺序不动；新步骤内部按标准顺序排列。
+ */
+function mergeSteps(
+  prevSteps: AnalysisStep[],
+  newSteps: AnalysisStep[],
+): AnalysisStep[] {
+  const existingIds = new Set(prevSteps.map((s) => s.id));
+  const added = newSteps.filter((s) => !existingIds.has(s.id));
+
+  const sortedNew = [...added].sort((a, b) => {
+    const orderA = STEP_ORDER[a.name] ?? 999;
+    const orderB = STEP_ORDER[b.name] ?? 999;
+    return orderA - orderB;
+  });
+
+  return [...prevSteps, ...sortedNew];
 }
 
 export function useAnalysisStream({
   taskId,
+  decisionId,
+  runType,
   onResultReady,
   onTaskFailed,
 }: UseAnalysisStreamOptions): UseAnalysisStreamReturn {
@@ -65,6 +110,13 @@ export function useAnalysisStream({
   const [retryable, setRetryable] = useState(false);
   const [failedStepId, setFailedStepId] = useState<string | null>(null);
   const retryCountRef=useRef(0);
+  const prevStepsRef = useRef<AnalysisStep[]>([]);
+  /** 步骤分组信息：每轮推演的标签 + 步骤 ID 集合 */
+  const [stepGroups, setStepGroups] = useState<StepGroupInfo[]>([]);
+  /** 当前 SSE 连接的 taskId，用于标记 isCurrent */
+  const currentTaskIdRef = useRef<string | null>(null);
+  /** 历史记录是否已加载 */
+  const historyLoadedRef = useRef(false);
 
   const mountedRef = useRef(true);
   const esRef = useRef<EventSource | null>(null);
@@ -89,11 +141,72 @@ export function useAnalysisStream({
     }
   }, []);
 
+  // ── 加载历史推演记录（刷新恢复） ────────────────────────────
+  useEffect(() => {
+    if (!decisionId) {
+      prevStepsRef.current = [];
+      setSteps([]);
+      setStepGroups([]);
+      historyLoadedRef.current = false;
+      return;
+    }
+
+    let cancelled = false;
+
+    getTaskHistory(decisionId).then((historyItems) => {
+      if (cancelled) return;
+
+      // 拼接历史步骤 + 构建分组标签
+      const allHistorySteps: AnalysisStep[] = [];
+      const groups: StepGroupInfo[] = [];
+      let fullCount = 0;
+
+      for (const item of historyItems) {
+        const label = deriveRunLabel(item.runType, fullCount);
+        if (item.runType === 'FULL') fullCount++;
+        allHistorySteps.push(...item.steps);
+        groups.push({
+          label,
+          stepIds: item.steps.map((s) => s.id),
+          isCurrent: false,
+        });
+      }
+      const historyIds = new Set(allHistorySteps.map((s) => s.id));
+
+      // merge：保留 taskId effect 已写入的当前 task 步骤
+      setSteps((prev) => {
+        const currentOnly = prev.filter((s) => !historyIds.has(s.id));
+        return [...allHistorySteps, ...currentOnly];
+      });
+      setStepGroups((prev) => {
+        // 保留已有当前 task group
+        const currentGroups = prev.filter((g) => g.isCurrent);
+        return [...groups, ...currentGroups];
+      });
+      prevStepsRef.current = allHistorySteps;
+      historyLoadedRef.current = true;
+    }).catch(() => {
+      if (!cancelled) {
+        historyLoadedRef.current = true;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      historyLoadedRef.current = false;
+    };
+  }, [decisionId]);
+
+  // ── SSE 连接 ──────────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
 
     if (!taskId) {
-      setSteps([]);
+      if (!decisionId) {
+        setSteps([]);
+        prevStepsRef.current = [];
+        setStepGroups([]);
+      }
       setToolCalls([]);
       setResultReady(null);
       setTaskFailed(null);
@@ -104,8 +217,11 @@ export function useAnalysisStream({
       return;
     }
 
-    // taskId 变化：重置步骤和结果，等待新连接
-    setSteps([]);
+    // taskId 变化：保存旧步骤快照，标记旧 group 为历史
+    prevStepsRef.current = steps;
+    currentTaskIdRef.current = taskId;
+    // 新 task 的 label 先记为占位，等 REST 拿到 runType 后修正
+    setStepGroups((prev) => prev.map((g) => ({ ...g, isCurrent: false })));
     setToolCalls([]);
     setResultReady(null);
     setTaskFailed(null);
@@ -133,8 +249,27 @@ export function useAnalysisStream({
 
       if (cancelled || !mountedRef.current) return;
 
-      setSteps(task.steps);
+      // 合并历史步骤
+      const merged = mergeSteps(prevStepsRef.current, task.steps);
+      setSteps(merged);
       setProgress(task.progress);
+
+      // 添加本轮 group（标签从当前分组状态实时计算，不用 ref 避免不同步）
+      if (task.steps.length > 0) {
+        setStepGroups((prev) => {
+          const withoutCurrent = prev.filter((g) => !g.isCurrent);
+          const fullCount = withoutCurrent.filter((g) => g.label !== '局部推演结果').length;
+          const label = deriveRunLabel(runType ?? 'FULL', fullCount);
+          return [
+            ...withoutCurrent,
+            {
+              label,
+              stepIds: task.steps.map((s) => s.id),
+              isCurrent: true,
+            },
+          ];
+        });
+      }
 
       if (task.status === 'FAILED') {
         const failedEvent: TaskFailedEvent = {
@@ -194,7 +329,6 @@ export function useAnalysisStream({
                 content: mergeStepContent(
                   prev[idx].content,
                   data.content,
-                  data.status as StepStatus,
                 ),
               }
             : {
@@ -308,5 +442,6 @@ export function useAnalysisStream({
     progress,
     retryable,
     failedStepId,
+    stepGroups,
   };
 }
