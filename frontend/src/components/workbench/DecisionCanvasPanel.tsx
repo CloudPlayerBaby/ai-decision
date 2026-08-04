@@ -664,9 +664,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const factorDeleteNodesSnapshotRef = useRef<FlowNode[]>([])
   const factorDeleteEdgesSnapshotRef = useRef<FlowEdge[]>([])
 
-  // 跟踪 factor 节点的初始权重（用于判断用户是否真的修改了权重）
+  // 跟踪 factor 节点的初始权重（用于判断用户是否修改了权重）
   const initialWeightRef = useRef<number>(0.1)
-  // 跟踪当前是否正在编辑 factor（用于区分"保存权重"和"保存修改"按钮）
+  // 跟踪当前是否正在编辑已有 factor（区别于新建因素）
   const isEditingFactorRef = useRef(false)
 
   // Modal 状态
@@ -743,34 +743,56 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     isEditingFactorRef.current = false
   }, [])
 
-  // 处理"保存权重"：比例重分配 + 保存画布 + 自动局部重推
-  const handleSaveWithWeightRebalance = useCallback(
-    (_label: string, newWeight: number) => {
-      if (!editingNode || editingNode.type !== 'factor') return
+  // 确认保存因素：同时应用名称与权重，按变更类型选择保存路径
+  const handleSaveFactor = useCallback(
+    (values: Record<string, unknown>) => {
+      if (!editingNode || editingNode.type !== 'factor' || isNewNode) return
 
-      const allFactorNodes = nodesRef.current.filter((n) => n.type === 'factor')
-      const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, newWeight)
+      const label = String(values.label ?? '')
+      const factorData = editingNode.data as FactorFlowData
+      const labelChanged = label !== factorData.label
+      const weightChanged = Math.abs(weightValue - initialWeightRef.current) > 1e-6
 
-      // 将重分配后的 factors 按 id 合并回完整 nodes 数组
-      const nextNodes = nodesRef.current.map((n) => {
-        if (n.type !== 'factor') return n
-        const updated = rebalanced.find((r) => r.id === n.id)
-        return updated ?? n
-      })
+      if (!labelChanged && !weightChanged) {
+        closeModal()
+        return
+      }
+
+      let nextNodes = nodesRef.current.map((n) =>
+        n.id === editingNode.id
+          ? ({
+              ...n,
+              data: {
+                ...n.data,
+                label,
+              },
+            } as FactorFlowNode)
+          : n,
+      )
+
+      if (weightChanged) {
+        const allFactorNodes = nextNodes.filter((n) => n.type === 'factor')
+        const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, weightValue)
+        nextNodes = nextNodes.map((n) => {
+          if (n.type !== 'factor') return n
+          const updated = rebalanced.find((r) => r.id === n.id)
+          return updated ?? n
+        })
+      }
 
       setNodes(nextNodes)
       setModalOpen(false)
       setEditingNode(null)
       isEditingFactorRef.current = false
 
-      // 使用完整 nodes 构建保存 payload：包含 root + 全部 factor + 全部 option
-      const updatedCanvas = buildCanvasData(
-        nextNodes,
-        edgesRef.current,
-      )
-      onWeightSaveRef.current?.(updatedCanvas)
+      const updatedCanvas = buildCanvasData(nextNodes, edgesRef.current)
+      if (weightChanged) {
+        onWeightSaveRef.current?.(updatedCanvas)
+      } else {
+        onFactorLabelSaveRef.current?.(updatedCanvas)
+      }
     },
-    [editingNode, setNodes],
+    [editingNode, isNewNode, weightValue, setNodes, closeModal],
   )
 
   // 处理普通保存：仅更新当前节点（label / scores）
@@ -861,52 +883,19 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     [editingNode, isNewNode, setNodes],
   )
 
-  // 仅保存因素名称：构造 nextNodes 后直接调用 onFactorLabelSave，不触发 effect 链路
-  const handleSaveFactorLabel = useCallback(
-    (values: Record<string, unknown>) => {
-      if (!editingNode || editingNode.type !== 'factor' || isNewNode) return
-      const label = String(values.label ?? '')
-
-      // 先构造 nextNodes，避免依赖 setNodes 回调
-      const nextNodes = nodesRef.current.map((n) =>
-        n.id === editingNode.id
-          ? ({
-              ...n,
-              data: {
-                ...n.data,
-                label,
-              },
-            } as FactorFlowNode)
-          : n,
-      )
-
-      setNodes(nextNodes)
-      setModalOpen(false)
-      setEditingNode(null)
-      isEditingFactorRef.current = false
-
-      // 使用完整的 nextNodes 构建 Canvas，直接触发保存（不经过 effect）
-      const updatedCanvas = buildCanvasData(nextNodes, edgesRef.current)
-      onFactorLabelSaveRef.current?.(updatedCanvas)
-    },
-    [editingNode, isNewNode, setNodes],
-  )
-
-  // 提交表单：根据是否编辑 factor 权重选择不同处理逻辑
+  // 提交表单：新建节点走普通保存；编辑已有因素走统一确认保存
   const submitForm = useCallback(() => {
     form.validateFields().then((values) => {
       if (!editingNode) return
 
-      // 正在编辑已有 factor → 使用权重重分配路径
       if (editingNode.type === 'factor' && !isNewNode) {
-        handleSaveWithWeightRebalance(values.label as string, weightValue)
+        handleSaveFactor(values)
         return
       }
 
-      // 其他情况：普通保存（仅 label / scores）
       handleSaveNormal(values)
     })
-  }, [editingNode, isNewNode, weightValue, form, handleSaveWithWeightRebalance, handleSaveNormal])
+  }, [editingNode, isNewNode, form, handleSaveFactor, handleSaveNormal])
 
   const deleteNode = useCallback(
     (nodeId: string) => {
@@ -1660,20 +1649,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           )}
                           <Space>
                             <Button onClick={closeModal}>取消</Button>
-                            {editingNode.type === 'factor' && !isNewNode ? (
-                              <>
-                                <Button onClick={() => { form.validateFields().then(handleSaveFactorLabel) }}>
-                                  仅保存名称
-                                </Button>
-                                <Button type="primary" onClick={submitForm}>
-                                  保存权重
-                                </Button>
-                              </>
-                            ) : (
-                              <Button type="primary" onClick={submitForm}>
-                                保存修改
-                              </Button>
-                            )}
+                            <Button type="primary" onClick={submitForm}>
+                              {editingNode.type === 'factor' && !isNewNode ? '确认保存' : '保存修改'}
+                            </Button>
                           </Space>
                         </div>
                       </Form>
