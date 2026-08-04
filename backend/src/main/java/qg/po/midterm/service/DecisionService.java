@@ -58,4 +58,10 @@ public interface DecisionService {
      * 10.2 保存画布编辑，返回变更节点ID列表
      */
     SaveCanvasVO saveCanvas(String decisionId, SaveCanvasRequest request);
+
+    /**
+     * 11.1 查询决策历史推演记录
+     * <p>按任务时间顺序返回该决策下所有推演任务及其 AI 步骤输出，用于右侧对话框历史展示。</p>
+     */
+    java.util.List<qg.po.midterm.vo.DecisionHistoryVO> getHistory(String decisionId);
 }
