@@ -12,22 +12,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OptionReevaluationNodeTest {
 
     @Test
-    void mergesOnlyScoresAndPreservesOptionContent() {
+    void mergesUpdatedContentAndScores() {
         Option option = new Option();
         option.setId("opt_1");
-        option.setName("用户方案");
-        option.setDescription("用户描述");
-        option.setPros(List.of("优点"));
+        option.setName("旧名称");
+        option.setDescription("旧描述");
+        option.setPros(List.of("旧优点"));
+        option.setCons(List.of("旧缺点"));
+        option.setRisks(List.of("旧风险"));
+        option.setRelativeFactor("f_1");
         option.setScores(Map.of("cost", 1));
-        Map<String, Integer> scores = Map.of("cost", 5, "time", 4, "benefit", 3, "risk", 2, "feasibility", 1);
 
-        List<Option> merged = OptionReevaluationNode.mergeScores(List.of(option),
-                List.of(new OptionReevaluationNode.ScoreUpdate("opt_1", scores)));
+        OptionReevaluationNode.OptionUpdate update = new OptionReevaluationNode.OptionUpdate(
+                "opt_1",
+                "新名称",
+                "新描述",
+                List.of("新优点"),
+                List.of("新缺点"),
+                List.of("新风险"),
+                "f_2",
+                Map.of("cost", 5, "time", 4, "benefit", 3, "risk", 2, "feasibility", 1));
 
-        assertEquals("用户方案", merged.getFirst().getName());
-        assertEquals("用户描述", merged.getFirst().getDescription());
-        assertEquals(List.of("优点"), merged.getFirst().getPros());
-        assertEquals(scores, merged.getFirst().getScores());
+        List<Option> merged = OptionReevaluationNode.merge(List.of(option), List.of(update));
+
+        assertEquals("新名称", merged.getFirst().getName());
+        assertEquals("新描述", merged.getFirst().getDescription());
+        assertEquals(List.of("新优点"), merged.getFirst().getPros());
+        assertEquals(List.of("新缺点"), merged.getFirst().getCons());
+        assertEquals(List.of("新风险"), merged.getFirst().getRisks());
+        assertEquals("f_2", merged.getFirst().getRelativeFactor());
+        assertEquals(update.scores(), merged.getFirst().getScores());
     }
 
     @Test
@@ -36,7 +50,10 @@ class OptionReevaluationNodeTest {
         option.setId("opt_1");
         List<String> errors = OptionReevaluationNode.validate(
                 new OptionReevaluationNode.OptionReevaluationResult("", "", List.of(
-                        new OptionReevaluationNode.ScoreUpdate("opt_2", Map.of()))), List.of(option));
+                        new OptionReevaluationNode.OptionUpdate("opt_2", "名称", "描述",
+                                List.of("优点"), List.of("缺点"), List.of("风险"), "", Map.of()))),
+                List.of(option),
+                List.of());
 
         assertTrue(errors.stream().anyMatch(error -> error.contains("完全一致")));
     }

@@ -71,7 +71,7 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
             List<Factor> factors = state.getFactors();
 
             String factorStr = factors == null ? "无" : factors.stream()
-                    .map(f -> String.format("- %s (权重: %.2f): %s", f.getName(), f.getWeight(), f.getDescription()))
+                    .map(f -> String.format("- [%s] %s (权重: %.2f): %s", f.getId(), f.getName(), f.getWeight(), f.getDescription()))
                     .collect(Collectors.joining("\n"));
 
             String title = state.data().containsKey("title") ? state.data().get("title").toString() : "未命名决策";

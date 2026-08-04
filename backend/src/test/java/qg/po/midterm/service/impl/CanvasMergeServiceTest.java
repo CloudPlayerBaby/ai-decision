@@ -20,9 +20,9 @@ class CanvasMergeServiceTest {
     @Test
     void keepsPositionsButReplacesBusinessDataAndRemovesStaleNodes() {
         Canvas existing = new Canvas(List.of(
-                new Canvas.CanvasNode("root", "decision", "old", new Canvas.Position(1, 2), Map.of()),
-                new Canvas.CanvasNode("factor_custom", "factor", "old factor", new Canvas.Position(3, 4), Map.of()),
-                new Canvas.CanvasNode("stale", "option", "stale", new Canvas.Position(5, 6), Map.of())
+                new Canvas.CanvasNode("root", "decision", "old", new Canvas.Position(1, 2), Map.of(), null),
+                new Canvas.CanvasNode("factor_custom", "factor", "old factor", new Canvas.Position(3, 4), Map.of(), null),
+                new Canvas.CanvasNode("stale", "option", "stale", new Canvas.Position(5, 6), Map.of(), null)
         ), List.of());
         Factor factor = new Factor("factor_custom", "new factor", "description", 0.7);
         Option option = new Option();
@@ -63,10 +63,10 @@ class CanvasMergeServiceTest {
     @Test
     void retainsExistingAndNewlyEnrichedOptionsAfterPartialAnalysis() {
         Canvas existing = new Canvas(List.of(
-                new Canvas.CanvasNode("root", "decision", "decision", new Canvas.Position(0, 0), Map.of()),
-                new Canvas.CanvasNode("a", "option", "A", new Canvas.Position(1, 1), Map.of()),
-                new Canvas.CanvasNode("b", "option", "B", new Canvas.Position(2, 2), Map.of()),
-                new Canvas.CanvasNode("c", "option", "C", new Canvas.Position(3, 3), Map.of())
+                new Canvas.CanvasNode("root", "decision", "decision", new Canvas.Position(0, 0), Map.of(), null),
+                new Canvas.CanvasNode("a", "option", "A", new Canvas.Position(1, 1), Map.of(), null),
+                new Canvas.CanvasNode("b", "option", "B", new Canvas.Position(2, 2), Map.of(), null),
+                new Canvas.CanvasNode("c", "option", "C", new Canvas.Position(3, 3), Map.of(), null)
         ), List.of());
         AnalysisResultDto result = new AnalysisResultDto();
         result.setFactors(List.of());

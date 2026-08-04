@@ -49,6 +49,7 @@ public final class AnalysisResultValidator {
 
         List<Option> options = dto.getOptions();
         validateOptions(options, errors);
+        validateRelativeFactorReferences(dto.getFactors(), options, errors);
 
         validateRecommendation(dto.getRecommendation(), options, errors);
 
@@ -166,6 +167,30 @@ public final class AnalysisResultValidator {
         for (int i = 0; i < items.size(); i++) {
             if (items.get(i) != null && items.get(i).length() > LIST_ITEM_LENGTH_MAX) {
                 errors.add(path + "[" + i + "] (单项超出" + LIST_ITEM_LENGTH_MAX + "字)");
+            }
+        }
+    }
+
+    private static void validateRelativeFactorReferences(
+            List<Factor> factors, List<Option> options, List<String> errors) {
+        if (options == null) {
+            return;
+        }
+        Set<String> factorIds = new HashSet<>();
+        if (factors != null) {
+            for (Factor factor : factors) {
+                if (factor != null && factor.getId() != null) {
+                    factorIds.add(factor.getId());
+                }
+            }
+        }
+        for (int i = 0; i < options.size(); i++) {
+            Option option = options.get(i);
+            if (option == null || isBlank(option.getRelativeFactor())) {
+                continue;
+            }
+            if (!factorIds.contains(option.getRelativeFactor())) {
+                errors.add("options[" + i + "].relativeFactor (未指向任何关键因素)");
             }
         }
     }

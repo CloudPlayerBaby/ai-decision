@@ -861,6 +861,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                     nodeData,
                     oldOption == null ? null : oldOption.getScores()
             ));
+            option.setRelativeFactor(node.getRelativeFactor());
             options.add(option);
         }
         return options;
