@@ -80,34 +80,6 @@ public class WorkflowExecutorImpl implements WorkflowExecutor {
         return taskId;
     }
 
-    @Override
-    public ValidationResult validateAndRepair(String jsonResult) {
-        // 对应 PRD 12 节：先解析为 JSON，再做强校验；不合格则带原 JSON 交给 AI 修复一次后二次校验。
-        AnalysisResultDto dto;
-        try {
-            dto = objectMapper.readValue(jsonResult, AnalysisResultDto.class);
-        } catch (Exception e) {
-            log.error("AI 结果 JSON 解析失败", e);
-            return new ValidationResult(false, false, List.of("result (JSON 解析失败)"), List.of(e.getMessage()));
-        }
-
-        List<String> missingFields = AnalysisResultValidator.validate(dto);
-        if (missingFields.isEmpty()) {
-            return new ValidationResult(true, false, List.of(), null);
-        }
-
-        try {
-            AnalysisResultDto repaired = resultRepairer.repair(
-                    "校验失败，以下字段缺失或非法:\n- " + String.join("\n- ", missingFields),
-                    dto
-            );
-            List<String> repairedMissing = AnalysisResultValidator.validate(repaired);
-            return new ValidationResult(repairedMissing.isEmpty(), true, repairedMissing, null);
-        } catch (Exception e) {
-            log.error("AI 修复调用失败", e);
-            return new ValidationResult(false, true, missingFields, List.of("AI 修复调用失败: " + e.getMessage()));
-        }
-    }
 
     @Override
     public void runGraph(String taskId, DecisionState initialState) {
