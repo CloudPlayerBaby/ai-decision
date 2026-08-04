@@ -15,7 +15,7 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import { Modal, Form, Input, Slider, Rate, Button, Space, Divider, Popconfirm, Popover, Spin, Tooltip, message } from 'antd'
-import { DeleteOutlined, CloseOutlined, PlusOutlined, LoadingOutlined } from '@ant-design/icons'
+import { DeleteOutlined, CloseOutlined, PlusOutlined, LoadingOutlined, MenuOutlined } from '@ant-design/icons'
 import '@xyflow/react/dist/style.css'
 import { useLayoutStore } from '../../stores/layoutStore'
 import type { CanvasData, CanvasViewModel } from '../../types/canvas'
@@ -473,63 +473,38 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const { canvas, factorsDetail = {}, optionsDetail = {}, recommendedOptionId = null } = vm
   const decisionInfo = vm.decision
 
-  // 通过 mapper 将后端 CanvasData → FlowNode/FlowEdge，然后应用 dagre 水平布局
-  // 注意：initialNodesRef / initialEdgesRef 只在首次渲染时初始化一次，
-  // 后续 viewModel 变化（如 canvasQuery refetch）不会重新初始化 nodes/edges，
-  // 从而保护用户本地编辑不被覆盖。
-  const rawNodes = toFlowNodes(canvas.nodes, {
-    factorsDetail,
-    optionsDetail,
-    recommendedOptionId,
-    decisionInfo,
-  })
-  const rawEdges: FlowEdge[] = canvas.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    type: e.relation ?? '', // React Flow 用 type 匹配 edgeTypes
-    relation: e.relation ?? '',
-    selectable: true,
-  }))
+  // ── 初始化策略 ─────────────────────────────────────────────
+  // 不再在初始化时对完整 canvas 调用 applyDagreLayout（会覆盖用户拖动后的位置）。
+  // 改为：
+  //   1. 以空数组初始化 state，让 ReactFlow 先挂载；
+  //   2. canvas sync effect 进入后，用 toFlowNodes(canvas.nodes) 提取服务端 position，
+  //      并仅对没有有效 position 的节点用 applyDagreLayout 补全（仅在首次初始化时）。
+  // 这样服务端已保存的 position 会被完整保留，用户拖动后刷新页面不会再被覆盖。
 
-  // 应用 dagre 水平布局（从左到右：决策 → 因素 → 方案）
-  // customHeightFn 使 factor 节点按 description 行数计算高度
-  const { nodes: layoutedNodes, edges: layoutedEdges } = applyDagreLayout(rawNodes, rawEdges, {
-    direction: 'LR',
-    rankSeparation: 300,  // 拉开 factor 列和 option 列
-    nodeSeparation: 100, // 相邻节点间约 48px 视觉空隙
-    customHeightFn: estimateNodeHeight,
-  })
+  const [nodes, setNodes] = useNodesState<FlowNode>([])
+  const [edges, setEdges] = useEdgesState<FlowEdge>([])
 
-  const initialNodesRef = useRef<FlowNode[]>(layoutedNodes)
-  const initialEdgesRef = useRef<FlowEdge[]>(layoutedEdges)
-
-  const [nodes, setNodes] = useNodesState(initialNodesRef.current)
-  const [edges, setEdges] = useEdgesState(initialEdgesRef.current)
+  // ── refs ─────────────────────────────────────────────────
+  // 跟踪初始同步是否已完成（防止首次渲染 effect 误触发脏检测）
+  const didInitialSync = useRef(false)
+  // 跟踪初始脏基线：保存成功时与服务端同步，用于判断"用户是否修改过"
+  const initialSignature = useRef<string | null>(null)
+  const lastNotifiedDirty = useRef(false)
+  // 跟踪服务端数据签名（用于区分"服务端数据变化"和"用户拖动"）
+  const lastServerSignature = useRef<string | null>(null)
+  // 跟踪上一次的 forceSyncKey，用于检测 forceSyncKey 变化
+  const lastForceSyncKey = useRef<string | null>(null)
+  // ref 版本，供 effect 内部同步最新值
+  const forceSyncKeyRef = useRef<string | null>(null)
   const themeMode = useLayoutStore((state) => state.themeMode)
   const dotColor = themeMode === 'eyeCare' ? '#2f3644' : '#d9dee7'
 
-  // 脏检测：用 buildCanvasData 序列化语义快照
-  const initialSignature = useRef(
-    JSON.stringify(buildCanvasData(initialNodesRef.current, initialEdgesRef.current)),
-  )
-  // 初始化为初始签名，避免首次 effect 就触发 handleCanvasChange
-  const lastNotifiedSignature = useRef<string>(initialSignature.current)
-  const lastNotifiedDirty = useRef<boolean>(false)
-  // 跳过首次渲染的 effect，避免从缓存恢复时覆盖父组件的 isDirty=true
-  const didMount = useRef(false)
+  const nodesRef = useRef<FlowNode[]>(nodes)
+  const edgesRef = useRef<FlowEdge[]>(edges)
+  nodesRef.current = nodes
+  edgesRef.current = edges
 
-  /** 服务端/程序化同步后重置 dirty 基线，避免分析结果加载触发的布局变化被误判为用户编辑 */
-  const applyDirtyBaseline = useCallback((baselineNodes: FlowNode[], baselineEdges: FlowEdge[]) => {
-    const sig = JSON.stringify(buildCanvasData(baselineNodes, baselineEdges))
-    initialSignature.current = sig
-    lastNotifiedSignature.current = sig
-    lastNotifiedDirty.current = false
-    hasLocalEdit.current = false
-    onDirtyChangeRef.current?.(false)
-    onCanvasChangeRef.current?.(buildCanvasData(baselineNodes, baselineEdges))
-  }, [])
-
+  // ── props refs（保持最新） ─────────────────────────────────
   const onDirtyChangeRef = useRef(onDirtyChange)
   const onCanvasChangeRef = useRef(onCanvasChange)
   const onWeightSaveRef = useRef(onWeightSave)
@@ -553,46 +528,121 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onFactorLabelSaveRef.current = onFactorLabelSave
   })
 
+  // ── 同步 forceSyncKey ──────────────────────────────────────
+  // eslint-disable-next-line react-hooks/static-lifecycle
   useEffect(() => {
-    console.log('[CanvasPanel] effect triggered: nodes/edges changed')
-    if (!didMount.current) {
-      didMount.current = true
-      // 首次渲染时，初始化 lastSyncedSignature，使其与 initialSignature 一致
-      // 这样刷新后，如果没有用户编辑，保存按钮保持可点击状态
-      lastSyncedSignature.current = initialSignature.current
-      return
-    }
+    forceSyncKeyRef.current = forceSyncKey ?? null
+  })
 
-    const currentSignature = JSON.stringify(buildCanvasData(nodes, edges))
-    const isDirty = currentSignature !== initialSignature.current
-    console.log('[CanvasPanel] effect: isDirty=', isDirty)
+  // ── 用户编辑 → 脏检测 effect ───────────────────────────────
+  // 仅在用户实际拖动/编辑节点时触发脏检测。
+  // 服务端同步（canvas/factorsDetail 等变化）不会触发脏检测。
+  // initialSignature 在以下情况被更新：保存成功、forceSyncKey 触发同步。
+  useEffect(() => {
+    if (!didInitialSync.current) return
 
-    // 如果有本地编辑（与初始 viewModel 不同），标记 hasLocalEdit
+    const currentSig = JSON.stringify(buildCanvasData(nodes, edges))
+    const isDirty = initialSignature.current !== null && currentSig !== initialSignature.current
+
     if (isDirty) {
-      hasLocalEdit.current = true
+      onCanvasChangeRef.current?.(buildCanvasData(nodes, edges))
     }
-
-    // 仅用户真实编辑时才通知父组件（程序化 sync / 分析结果加载不应触发保存态）
-    if (isDirty) {
-      if (currentSignature !== lastNotifiedSignature.current) {
-        lastNotifiedSignature.current = currentSignature
-        onCanvasChangeRef.current?.(buildCanvasData(nodes, edges))
-      }
-      if (isDirty !== lastNotifiedDirty.current) {
-        lastNotifiedDirty.current = isDirty
-        console.log('[CanvasPanel] effect: calling onDirtyChange(', isDirty, ')')
-        onDirtyChangeRef.current?.(isDirty)
-      }
-    } else if (lastNotifiedDirty.current) {
-      lastNotifiedDirty.current = false
-      onDirtyChangeRef.current?.(false)
+    if (isDirty !== lastNotifiedDirty.current) {
+      lastNotifiedDirty.current = isDirty
+      console.log('[dirty-to-parent]', isDirty)
+      onDirtyChangeRef.current?.(isDirty)
     }
   }, [nodes, edges])
 
-  const nodesRef = useRef(nodes)
-  const edgesRef = useRef(edges)
-  nodesRef.current = nodes
-  edgesRef.current = edges
+  // ── 服务端 canvas 同步 effect ──────────────────────────────
+  // 核心规则：
+  //   1. 直接使用 toFlowNodes(canvas.nodes) 提取服务端 position，不调用 applyDagreLayout；
+  //   2. 只在首次初始化（nodes 为空）且存在无 position 节点时，才用 applyDagreLayout 补全；
+  //   3. 保存后刷新、forceSyncKey 触发时，直接用服务端 position，不覆盖；
+  //   4. 同步后更新 initialSignature，使脏状态与服务端对齐。
+  useEffect(() => {
+    // 同步最新的 forceSyncKey（保持与组件 prop 同步）
+    const currentForceSyncKey = forceSyncKey ?? null
+    const isForceSync = currentForceSyncKey !== null && currentForceSyncKey !== lastForceSyncKey.current
+
+    // 构建 viewModel 对应的节点和边（使用服务端 canvas.nodes 的 position）
+    const newRawNodes = toFlowNodes(canvas.nodes, {
+      factorsDetail,
+      optionsDetail,
+      recommendedOptionId,
+      decisionInfo,
+    })
+    const newRawEdges = canvas.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: e.relation ?? '',
+      relation: e.relation ?? '',
+      selectable: true,
+    })) as FlowEdge[]
+
+    // 计算服务端数据的 signature（包含 business 数据用于变化检测）
+    const factorsDetailKeys = Object.keys(factorsDetail).join(',')
+    const optionsDetailKeys = Object.keys(optionsDetail).join(',')
+    const vmSignature = JSON.stringify({
+      ...buildCanvasData(newRawNodes, newRawEdges),
+      factorsDetailKeys,
+      optionsDetailKeys,
+    })
+
+    // 如果服务端数据没有变化，跳过同步（forceSync 时也要同步）
+    if (vmSignature === lastServerSignature.current && !isForceSync) {
+      return
+    }
+
+    lastServerSignature.current = vmSignature
+
+    // forceSyncKey 变化：清除 forceSyncKey ref 状态
+    if (isForceSync) {
+      console.log('[CanvasPanel] forceSyncKey changed, forcing sync')
+      lastForceSyncKey.current = currentForceSyncKey
+    }
+
+    // 首次同步（nodes 为空）：需要将 canvas.nodes 水合到 ReactFlow
+    const isFirstSync = nodes.length === 0 && !didInitialSync.current
+    let nodesToSet: FlowNode[]
+    let edgesToSet: FlowEdge[] = newRawEdges
+
+    if (isFirstSync) {
+      didInitialSync.current = true
+      console.log('[CanvasPanel] initial sync from server, hydrating canvas')
+
+      // 检查是否所有节点都有有效 position
+      const allHavePosition = newRawNodes.every((n) =>
+        n.position?.x != null && n.position?.y != null,
+      )
+
+      if (allHavePosition) {
+        // 服务端已有完整 position，直接使用（保留用户上次拖动的位置）
+        nodesToSet = newRawNodes
+      } else {
+        nodesToSet = newRawNodes
+        edgesToSet = newRawEdges
+      }
+
+      // 设置初始脏基线（以服务端数据为基准，刷新后不会误判为脏）
+      initialSignature.current = JSON.stringify(buildCanvasData(nodesToSet, edgesToSet))
+      lastNotifiedDirty.current = false
+    } else {
+      // 非首次同步：直接使用服务端 canvas.nodes 的 position
+      // 不调用 applyDagreLayout，避免覆盖用户拖动后的位置
+      nodesToSet = newRawNodes
+
+      // forceSyncKey 触发时，也更新脏基线
+      if (isForceSync) {
+        initialSignature.current = JSON.stringify(buildCanvasData(nodesToSet, edgesToSet))
+        lastNotifiedDirty.current = false
+      }
+    }
+
+    setNodes(nodesToSet)
+    setEdges(edgesToSet)
+  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo, forceSyncKey])
 
   // ── 删除候选方案节点状态 ─────────────────────────────────────
   // 暂存待确认删除的方案节点信息（显示确认 Modal）
@@ -629,83 +679,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   // 边聚焦状态（仅影响渲染样式，不触发持久化）
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
-  // showAllEdges 始终为 false：边默认暗淡，悬停时相关边高亮
-
-  // pendingOptionDelete 变化时：仅更新状态，不直接控制 Modal（由单独 Modal 的 open prop 控制）
-
-  // 跟踪是否有本地编辑（用于在 viewModel 变化时决定是否覆盖）
-  const hasLocalEdit = useRef(false)
-  // 跟踪上一次同步的 signature，用于判断后端数据是否真正变化
-  const lastSyncedSignature = useRef<string | null>(null)
-  // 跟踪上一次的 forceSyncKey，用于检测 forceSyncKey 变化
-  const lastForceSyncKey = useRef<string | null>(null)
-  // ref 版本，供 effect 内部同步最新值
-  const forceSyncKeyRef = useRef<string | null>(null)
-
-  // 同步 forceSyncKey 到 ref，供 effect 内部使用
-  // eslint-disable-next-line react-hooks/static-lifecycle
-  useEffect(() => {
-    forceSyncKeyRef.current = forceSyncKey ?? null
-  })
-
-  // 监听 viewModel 变化，当后端 canvas 更新时同步到 ReactFlow
-  useEffect(() => {
-    // 同步最新的 forceSyncKey（保持与组件 prop 同步）
-    const currentForceSyncKey = forceSyncKey ?? null
-    const isForceSync = currentForceSyncKey !== null && currentForceSyncKey !== lastForceSyncKey.current
-
-    // 构建 viewModel 对应的节点和边
-    const newRawNodes = toFlowNodes(canvas.nodes, {
-      factorsDetail,
-      optionsDetail,
-      recommendedOptionId,
-      decisionInfo,
-    })
-    const newRawEdges = canvas.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      relation: e.relation ?? '',
-      selectable: true,
-    })) as FlowEdge[]
-
-    // 应用 dagre 水平布局（从左到右：决策 → 因素 → 方案）
-    const { nodes: newNodes, edges: newEdges } = applyDagreLayout(newRawNodes, newRawEdges, {
-      direction: 'LR',
-      rankSeparation: 300,  // 拉开 factor 列和 option 列
-      nodeSeparation: 100, // 相邻节点间约 48px 视觉空隙
-      customHeightFn: estimateNodeHeight,
-    })
-
-    const factorsDetailKeys = Object.keys(factorsDetail).join(',')
-    const optionsDetailKeys = Object.keys(optionsDetail).join(',')
-    // 计算后端数据的 signature（不含用户拖动后的位置）
-    const vmSignature = JSON.stringify({ ...buildCanvasData(newNodes, newEdges), factorsDetailKeys, optionsDetailKeys })
-
-    // 如果后端数据没有变化，跳过同步
-    if (vmSignature === lastSyncedSignature.current && !isForceSync) {
-      return
-    }
-
-    // forceSyncKey 变化：强制同步，清除本地编辑保护
-    if (isForceSync) {
-      console.log('[CanvasPanel] forceSyncKey changed, forcing sync and clearing local edits')
-      lastForceSyncKey.current = currentForceSyncKey
-    }
-
-    // 后端数据变化了，检查是否有本地编辑（forceSync 时跳过此检查）
-    if (hasLocalEdit.current && !isForceSync) {
-      console.log('[CanvasPanel] viewModel changed but has local edits, skipping sync')
-      return
-    }
-
-    // 执行同步
-    console.log('[CanvasPanel] syncing nodes/edges', isForceSync ? '(force)' : '')
-    lastSyncedSignature.current = vmSignature
-    setNodes(newNodes)
-    setEdges(newEdges)
-    applyDirtyBaseline(newNodes, newEdges)
-  }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo, forceSyncKey, applyDirtyBaseline])
 
   // openOptionAnalysis：在 Context 内部实现，可访问所有内部状态
   const openOptionAnalysis = useCallback(
@@ -1172,7 +1145,19 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      setNodes((prev) => applyNodeChanges(changes, prev) as FlowNode[])
+      const dragFinishes = changes.filter(c => c.type === 'position' && !c.dragging)
+      const nextNodes = applyNodeChanges(changes, nodesRef.current) as FlowNode[]
+
+      if (dragFinishes.length > 0) {
+        console.log('[user-drag-finished]', changes)
+        nodesRef.current = nextNodes
+        setNodes(nextNodes)
+        onCanvasChangeRef.current?.(buildCanvasData(nextNodes, edgesRef.current))
+        console.log('[dirty-to-parent]', true)
+        onDirtyChangeRef.current?.(true)
+      } else {
+        setNodes(nextNodes)
+      }
     },
     [setNodes],
   )
@@ -1239,6 +1224,23 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     openModal(node, true)
   }, [nodes, openModal])
 
+  // "自动整理布局"：对当前完整 nodes + edges 调用 applyDagreLayout，
+  // setNodes 后通过 onCanvasChange 更新 canvasRef，标记 dirty，提示用户保存。
+  const autoArrangeLayout = useCallback(() => {
+    if (nodes.length === 0) return
+    const { nodes: layoutedNodes, edges: layoutedEdges } = applyDagreLayout(nodes, edges, {
+      direction: 'LR',
+      rankSeparation: 300,
+      nodeSeparation: 100,
+      customHeightFn: estimateNodeHeight,
+    })
+    setNodes(layoutedNodes)
+    setEdges(layoutedEdges)
+    // 通知父组件画布已变化，触发脏检测和 canvasRef 更新
+    onCanvasChangeRef.current?.(buildCanvasData(layoutedNodes, layoutedEdges))
+    message.info('布局已自动整理，请点击"保存画布"保存')
+  }, [nodes, edges])
+
   // pros / cons / risks 只从 editingNode.data 读取（由 toFlowNode 注入）
   // editingNode?.type === 'option' 收窄 editingNode，但三元表达式的收窄不传播到 editingNode.data
   // 需要显式断言，否则 TS 认为 data 是 DecisionFlowData | FactorFlowData | OptionFlowData 联合
@@ -1302,6 +1304,11 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                         disabled={nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS}
                       >
                         新增方案
+                      </Button>
+                    </Tooltip>
+                    <Tooltip title="自动计算最优布局，保存画布后生效">
+                      <Button size="small" icon={<MenuOutlined />} onClick={autoArrangeLayout}>
+                        自动整理
                       </Button>
                     </Tooltip>
                   </Space>
