@@ -37,15 +37,15 @@ class CanvasNodeComparatorTest {
     void ignoresFactorDescriptionButDetectsWeightChange() {
         Canvas.CanvasNode oldNode = new Canvas.CanvasNode(
                 "factor_1", "factor", "时间", new Canvas.Position(0, 0),
-                Map.of("weight", 0.3, "description", "AI 描述")
+                Map.of("weight", 0.3, "description", "AI 描述"), null
         );
         Canvas.CanvasNode sameWeight = new Canvas.CanvasNode(
                 "factor_1", "factor", "时间", new Canvas.Position(9, 9),
-                Map.of("weight", 0.3)
+                Map.of("weight", 0.3), null
         );
         Canvas.CanvasNode changedWeight = new Canvas.CanvasNode(
                 "factor_1", "factor", "时间", new Canvas.Position(9, 9),
-                Map.of("weight", 0.4)
+                Map.of("weight", 0.4), null
         );
 
         assertTrue(CanvasNodeComparator.businessEquals(oldNode, sameWeight));
@@ -53,7 +53,7 @@ class CanvasNodeComparatorTest {
     }
 
     private Canvas.CanvasNode optionNode(Map<String, Object> data, Canvas.Position position) {
-        return new Canvas.CanvasNode("option_1", "option", "方案一", position, data);
+        return new Canvas.CanvasNode("option_1", "option", "方案一", position, data, null);
     }
 
     private Map<String, Integer> scores(int benefit) {

@@ -361,7 +361,11 @@ public class DecisionServiceImpl implements DecisionService {
 
         if (savedCanvas != null && savedCanvas.getCanvasData() != null && !canvasStale) {
             try {
-                return objectMapper.readValue(savedCanvas.getCanvasData(), Canvas.class);
+                Canvas canvas = objectMapper.readValue(savedCanvas.getCanvasData(), Canvas.class);
+                if (!isLegacyFormat(canvas)) {
+                    return canvas;
+                }
+                // 旧格式，回退到自动生成
             } catch (Exception e) {
                 // 解析失败则回退到自动生成
             }
@@ -450,6 +454,16 @@ public class DecisionServiceImpl implements DecisionService {
     /**
      * 查找用于生成画布的最新分析结果（优先 CONFIRMED，其次 PENDING_CONFIRM）
      */
+    /**
+     * 检测旧格式画布：option 的 data 里如果没有 scores 嵌套，就是旧格式
+     */
+    private boolean isLegacyFormat(Canvas canvas) {
+        if (canvas.getNodes() == null) return false;
+        return canvas.getNodes().stream()
+                .filter(n -> "option".equals(n.getType()))
+                .anyMatch(n -> n.getData() != null && !n.getData().containsKey("scores"));
+    }
+
     private AnalysisResult findLatestResultForCanvas(Long decisionId) {
         LambdaQueryWrapper<AnalysisResult> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AnalysisResult::getDecisionId, decisionId)
@@ -465,11 +479,11 @@ public class DecisionServiceImpl implements DecisionService {
         List<Canvas.CanvasNode> nodes = new ArrayList<>();
         List<Canvas.CanvasEdge> edges = new ArrayList<>();
 
-        // 根节点 — 决策问题
+        // 根节点 — 决策问题（上中）
         nodes.add(createNode("root", "decision", decisionTitle,
                 new Canvas.Position(360, 40), Collections.emptyMap()));
 
-        // Factor 节点 + edge
+        // Factor 节点 + edge（水平排列，y=180）
         List<Factor> factors = dto.getFactors() != null
                 ? dto.getFactors() : Collections.emptyList();
         int factorCount = factors.size();
@@ -483,7 +497,7 @@ public class DecisionServiceImpl implements DecisionService {
                     new Canvas.Position(x, 180), factorData));
         }
 
-        // Option 节点
+        // Option 节点（水平排列，y=340）
         List<Option> options = dto.getOptions() != null
                 ? dto.getOptions() : Collections.emptyList();
         int optionCount = options.size();
