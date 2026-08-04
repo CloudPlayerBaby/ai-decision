@@ -803,6 +803,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             ));
             factors.add(factor);
         }
+        FactorWeightNormalizer.applyWeightEditRules(factors);
         FactorWeightNormalizer.normalize(factors);
         return factors;
     }
