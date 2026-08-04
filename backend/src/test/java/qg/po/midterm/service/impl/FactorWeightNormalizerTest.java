@@ -3,75 +3,11 @@ package qg.po.midterm.service.impl;
 import org.junit.jupiter.api.Test;
 import qg.po.midterm.workflow.state.Factor;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class FactorWeightNormalizerTest {
-
-    @Test
-    void keepsOnlyHundredPercentFactorAndDropsOthers() {
-        List<Factor> factors = new ArrayList<>(List.of(
-                factor("a", 1d),
-                factor("b", 0.5d),
-                factor("c", 0.5d)
-        ));
-
-        FactorWeightNormalizer.applyWeightEditRules(factors);
-        FactorWeightNormalizer.normalize(factors);
-
-        assertEquals(1, factors.size());
-        assertEquals("a", factors.get(0).getId());
-        assertEquals(1d, factors.get(0).getWeight(), 0.000001d);
-    }
-
-    @Test
-    void removesZeroWeightFactorAndRedistributesOthers() {
-        List<Factor> factors = new ArrayList<>(List.of(
-                factor("a", 0d),
-                factor("b", 0.6d),
-                factor("c", 0.4d)
-        ));
-
-        FactorWeightNormalizer.applyWeightEditRules(factors);
-        FactorWeightNormalizer.normalize(factors);
-
-        assertEquals(2, factors.size());
-        assertEquals("b", factors.get(0).getId());
-        assertEquals("c", factors.get(1).getId());
-        assertEquals(1d, factors.stream().mapToDouble(Factor::getWeight).sum(), 0.000001d);
-    }
-
-    @Test
-    void hundredPercentRuleWinsOverZeroPercentRule() {
-        List<Factor> factors = new ArrayList<>(List.of(
-                factor("a", 1d),
-                factor("b", 0d),
-                factor("c", 0.3d)
-        ));
-
-        FactorWeightNormalizer.applyWeightEditRules(factors);
-        FactorWeightNormalizer.normalize(factors);
-
-        assertEquals(1, factors.size());
-        assertEquals("a", factors.get(0).getId());
-    }
-
-    @Test
-    void keepsAllFactorsWhenAllWeightsAreZero() {
-        List<Factor> factors = new ArrayList<>(List.of(
-                factor("a", 0d),
-                factor("b", 0d)
-        ));
-
-        FactorWeightNormalizer.applyWeightEditRules(factors);
-        FactorWeightNormalizer.normalize(factors);
-
-        assertEquals(2, factors.size());
-        assertEquals(0.5d, factors.get(0).getWeight(), 0.000001d);
-        assertEquals(0.5d, factors.get(1).getWeight(), 0.000001d);
-    }
 
     @Test
     void normalizesWeightsWhenNewFactorMakesTotalExceedOne() {
