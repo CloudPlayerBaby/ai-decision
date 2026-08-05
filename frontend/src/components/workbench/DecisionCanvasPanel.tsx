@@ -710,6 +710,15 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           })
         } else if (node.type === 'option') {
           isEditingFactorRef.current = false
+          const optionData = node.data as OptionFlowData
+          form.setFieldsValue({
+            label: optionData.label,
+            cost: optionData.scores?.cost ?? 3,
+            time: optionData.scores?.time ?? 3,
+            benefit: optionData.scores?.benefit ?? 3,
+            risk: optionData.scores?.risk ?? 3,
+            feasibility: optionData.scores?.feasibility ?? 3,
+          })
         }
       } else {
         isEditingFactorRef.current = false
@@ -855,6 +864,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         }
       } else if (editingNode.type === 'option') {
         if (isNewNode) {
+          if (!label) {
+            message.warning('请输入方案名称')
+            return
+          }
           const newNode: FlowNode = {
             ...editingNode,
             data: {
@@ -869,8 +882,16 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
               },
             },
           }
-          setNodes((prev) => [...prev, newNode])
-          onStructuralChangePendingRef.current?.('OPTION_ADDED')
+          const nextNodes = [...nodesRef.current, newNode]
+          nodesRef.current = nextNodes
+          setNodes(nextNodes)
+          const completeCanvas = buildCanvasData(nextNodes, edgesRef.current)
+          onCanvasChangeRef.current?.(completeCanvas)
+          setModalOpen(false)
+          setEditingNode(null)
+          isEditingFactorRef.current = false
+          onOptionEditSaveRef.current?.(completeCanvas)
+          return
         } else {
           // 先构造 nextNodes，避免在 setNodes 回调之外使用 nodesRef
           const nextNodes = nodesRef.current.map((n) =>
@@ -1236,9 +1257,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       return
     }
     const node = createNode('option', nodes)
-    setNodes((prev) => [...prev, node])
-    onStructuralChangePendingRef.current?.('OPTION_ADDED')
-  }, [nodes, setNodes])
+    openModal(node, true)
+  }, [nodes, openModal])
 
   // "自动整理布局"：对当前完整 nodes + edges 调用 applyDagreLayout，
   // setNodes 后通过 onCanvasChange 更新 canvasRef，标记 dirty，提示用户保存。
@@ -1461,13 +1481,15 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                 if (editingNode.type === 'factor') {
                                   return isNewNode ? '新增影响因素' : '编辑影响因素'
                                 }
-                                return '编辑候选方案'
+                                return isNewNode ? '新增候选方案' : '编辑候选方案'
                               })()}
                             </span>
                             <span className="canvas-modal__subtitle">
                               {isNewNode && editingNode.type === 'factor'
                                 ? '确认后将添加到画布，其余影响因素将按比例自动调整'
-                                : '调整后将标记画布为"未保存"'}
+                                : isNewNode && editingNode.type === 'option'
+                                  ? '确认后将添加到画布并自动发起局部重推'
+                                  : '调整后将标记画布为"未保存"'}
 
                             </span>
                           </div>
@@ -1477,7 +1499,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
                       <Divider className="canvas-modal__divider" />
 
-                      {editingNode.type === 'option' ? (
+                      {editingNode.type === 'option' && !isNewNode ? (
                         <>
                           <div className="canvas-modal__readonly-field">
                             <div className="canvas-modal__readonly-label">名称</div>
@@ -1713,7 +1735,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           </>
                         )}
 
-                        {editingNode.type === 'option' && (
+                        {editingNode.type === 'option' && isNewNode && (
+                          <div className="canvas-modal__weight-hint" style={{ marginBottom: 16 }}>
+                            保存后系统将自动补充该方案的优势、局限与风险分析。
+                          </div>
+                        )}
+
+                        {editingNode.type === 'option' && !isNewNode && (
                           <>
                             {/* 自定义 Tab 切换 */}
                             <div className="canvas-option-tabs">
@@ -1812,7 +1840,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
                         {/* 底部操作栏 */}
                         <div className="canvas-modal__footer">
-                          {editingNode.type === 'option' ? (
+                          {editingNode.type === 'option' && !isNewNode ? (
                             <>
                               {(() => {
                                 const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
@@ -1876,7 +1904,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               >
                                 保存权重
                               </Button>
-                            ) : editingNode.type === 'factor' && isNewNode ? (
+                            ) : (editingNode.type === 'factor' || editingNode.type === 'option') && isNewNode ? (
                               <Button type="primary" onClick={submitForm}>
                                 确认添加
                               </Button>

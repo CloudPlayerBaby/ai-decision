@@ -2,20 +2,30 @@ import { getData, postData } from '@/services/http'
 import { isMockEnabled } from '@/services/config'
 import { useAuthStore } from '@/stores/authStore'
 import { ApiError, BusinessCode } from '@/types/api'
+import { encryptPassword } from '@/utils/rsaEncrypt'
 import type {
   AuthUser,
-  LoginRequest,
+  LoginPayload,
   LoginResponse,
-  RegisterRequest,
+  RegisterPayload,
 } from '@/types/auth'
 
 function delay<T>(value: T, ms = 280): Promise<T> {
   return new Promise((resolve) => {
     window.setTimeout(() => resolve(value), ms)
   })
-} 
+}
 
-export async function register(body: RegisterRequest): Promise<AuthUser> {
+/** 用内置公钥加密，密文仍放在契约字段 password 中提交（后端需私钥解密） */
+function toWirePassword(plainPassword: string): string {
+  const encrypted = encryptPassword(plainPassword)
+  if (!encrypted) {
+    throw new Error('密码加密失败，请刷新页面后重试')
+  }
+  return encrypted
+}
+
+export async function register(body: RegisterPayload): Promise<AuthUser> {
   if (isMockEnabled()) {
     return delay({
       id: `u_${Date.now()}`,
@@ -24,10 +34,14 @@ export async function register(body: RegisterRequest): Promise<AuthUser> {
       createdAt: new Date().toISOString(),
     })
   }
-  return postData<AuthUser>('/auth/register', body)
+  return postData<AuthUser>('/auth/register', {
+    username: body.username,
+    email: body.email,
+    password: toWirePassword(body.password),
+  })
 }
 
-export async function login(body: LoginRequest): Promise<LoginResponse> {
+export async function login(body: LoginPayload): Promise<LoginResponse> {
   if (isMockEnabled()) {
     return delay({
       accessToken: `mock-token-${Date.now()}`,
@@ -44,13 +58,15 @@ export async function login(body: LoginRequest): Promise<LoginResponse> {
       },
     })
   }
-  return postData<LoginResponse>('/auth/login', body)
+  return postData<LoginResponse>('/auth/login', {
+    account: body.account,
+    password: toWirePassword(body.password),
+  })
 }
 
 export async function fetchCurrentUser(): Promise<AuthUser> {
   if (isMockEnabled()) {
     const token = useAuthStore.getState().hydrateFromStorage()
-    // Mock 登录签发 mock-token-*；改坏后应视为未登录
     if (!token?.startsWith('mock-token-')) {
       throw new ApiError('未登录或 Token 失效', {
         code: BusinessCode.Unauthorized,
