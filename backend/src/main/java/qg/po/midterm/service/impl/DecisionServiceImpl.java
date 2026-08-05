@@ -891,10 +891,26 @@ public class DecisionServiceImpl implements DecisionService {
                 ));
             }
 
+            // 4. 查询该任务对应的分析结果
+            String resultId = null;
+            String resultStatus = null;
+            if ("SUCCEEDED".equals(task.getStatus())) {
+                AnalysisResult result = analysisResultMapper.selectOne(
+                        new LambdaQueryWrapper<AnalysisResult>()
+                                .eq(AnalysisResult::getTaskId, task.getId())
+                                .last("LIMIT 1"));
+                if (result != null) {
+                    resultId = "ar_" + result.getId();
+                    resultStatus = result.getStatus();
+                }
+            }
+
             history.add(DecisionHistoryVO.builder()
                     .taskId("t_" + task.getId())
                     .runType(task.getRunType())
                     .taskStatus(task.getStatus())
+                    .analysisResultId(resultId)
+                    .resultStatus(resultStatus)
                     .startedAt(toOffsetDateTime(task.getStartedAt()))
                     .finishedAt(toOffsetDateTime(task.getFinishedAt()))
                     .steps(stepVOs)

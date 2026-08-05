@@ -32,6 +32,12 @@ public class DecisionHistoryVO {
     /** 任务结束时间 */
     private OffsetDateTime finishedAt;
 
+    /** 关联的分析结果 ID，格式 ar_{id}（仅 SUCCEEDED 的任务有值） */
+    private String analysisResultId;
+
+    /** 该结果的状态：PENDING_CONFIRM / CONFIRMED */
+    private String resultStatus;
+
     /** 本次推演的步骤列表（仅含 SUCCEEDED 的步骤，复用历史的步骤不展示） */
     private List<NodeProgressVO> steps;
 }
