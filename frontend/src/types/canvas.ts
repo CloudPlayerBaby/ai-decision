@@ -64,6 +64,14 @@ export type OptionCanvasNode = {
   label: string
   position: Position
   data: OptionCanvasData
+  /**
+   * AI 推演生成的最相关 factor 节点 id。
+   * - 位于 option 节点顶层（不在 data 内），与 API 契约保持一致
+   * - 类型：string | null | undefined
+   * - 字段由后端/AI 写入，前端只读展示，不通过画布保存接口回写或修改
+   * - 用于在画布上高亮「最相关因素连线」
+   */
+  relativeFactor?: string | null
 }
 
 export type CanvasNode = DecisionCanvasNode | FactorCanvasNode | OptionCanvasNode

@@ -56,6 +56,8 @@ function optionToCanvas(node: OptionFlowNode): OptionCanvasNode {
     label: node.data.label,
     position: node.position,
     data: { scores: node.data.scores },
+    // 透传 AI 生成的最相关 factor id；undefined/null/string 均原样保留
+    relativeFactor: node.data.relativeFactor,
   }
 }
 
@@ -140,6 +142,8 @@ function optionToFlow(
       cons: detail?.cons ?? [],
       risks: detail?.risks ?? [],
       isRecommended: isRecommended ?? false,
+      // 透传后端返回的 relativeFactor 到 Flow data，供 AffectsEdge 读取
+      relativeFactor: node.relativeFactor,
     },
   }
 }

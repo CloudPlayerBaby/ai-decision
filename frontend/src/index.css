@@ -1291,6 +1291,34 @@ body.is-resizing .resize-handle::before {
   padding: 12px 0 4px;
 }
 
+.canvas-modal__readonly-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.canvas-modal__readonly-row:last-child {
+  border-bottom: none;
+}
+
+.canvas-modal__readonly-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  min-width: 80px;
+}
+
+.canvas-modal__readonly-value {
+  font-size: 13px;
+  color: var(--text-h);
+  font-weight: 500;
+  flex: 1;
+  text-align: right;
+}
+
 .canvas-modal__readonly-group {
   display: flex;
   flex-direction: column;

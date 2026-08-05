@@ -39,6 +39,11 @@ export interface OptionFlowData extends Record<string, unknown> {
   cons: string[]
   risks: string[]
   isRecommended: boolean
+  /**
+   * AI 推演生成的最相关 factor 节点 id（与 Canvas 顶层 relativeFactor 互为透传）。
+   * 前端只读展示，不通过画布保存接口回写或修改。
+   */
+  relativeFactor?: string | null
 }
 
 /** Flow 节点联合 — 以 type 为判别字段 */
