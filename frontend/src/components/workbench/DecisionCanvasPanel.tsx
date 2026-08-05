@@ -29,7 +29,7 @@ import type {
   OptionFlowData,
 } from '../../types/flow'
 import type { AnalysisStep } from '../../types/analysis'
-import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete } from '../../utils/canvasMapper'
+import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete, rebalanceWithNewFactor } from '../../utils/canvasMapper'
 import { applyDagreLayout, estimateNodeHeight } from '../../utils/canvasLayout'
 import { CanvasActionsContext, useCanvasActions } from '../../contexts/CanvasActionsContext'
 import { createContext, useContext } from 'react'
@@ -310,10 +310,10 @@ export interface DecisionCanvasPanelProps {
   onWeightSave?: (canvas: CanvasData) => void
   /** 编辑已有 option 节点并保存：触发保存画布 + 自动局部重推 */
   onOptionEditSave?: (canvas: CanvasData) => void
+  /** 保存画布（不触发局部重推）。用于新增因素等仅修改节点内容的场景 */
+  onCanvasSave?: (canvas: CanvasData) => void
   /** 删除因素→方案连线后保存并自动局部重推 */
   onEdgeDelete?: (canvas: CanvasData) => void
-  /** 仅保存因素名称：触发保存画布，不触发局部重推 */
-  onFactorLabelSave?: (canvas: CanvasData) => void
   /** 删除候选方案节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
   onOptionDelete?: (canvas: CanvasData, deletedOptionId: string, rollback: () => void) => Promise<void>
   /** 删除因素节点后保存并自动局部重推；失败时返回 Promise reject 供调用方回滚 */
@@ -434,7 +434,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onFactorDelete,
     onStructuralChangePending,
     onOptionEditSave,
-    onFactorLabelSave,
+    onCanvasSave,
     partialAnalysisInfo,
     partialSteps,
     forceSyncKey,
@@ -485,7 +485,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const onFactorDeleteRef = useRef<((canvas: CanvasData, rollback: () => void) => Promise<void>) | undefined>(undefined)
   const onStructuralChangePendingRef = useRef<((reason: 'OPTION_ADDED' | 'FACTOR_ADDED' | 'FACTOR_OPTION_EDGE_ADDED') => void) | undefined>(undefined)
   const onOptionEditSaveRef = useRef<((canvas: CanvasData) => void) | undefined>(undefined)
-  const onFactorLabelSaveRef = useRef<((canvas: CanvasData) => void) | undefined>(undefined)
+  const onCanvasSaveRef = useRef<((canvas: CanvasData) => void) | undefined>(undefined)
   // eslint-disable-next-line react-hooks/static-lifecycle
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
@@ -496,7 +496,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onFactorDeleteRef.current = onFactorDelete
     onStructuralChangePendingRef.current = onStructuralChangePending
     onOptionEditSaveRef.current = onOptionEditSave
-    onFactorLabelSaveRef.current = onFactorLabelSave
+    onCanvasSaveRef.current = onCanvasSave
   })
 
   // ── 同步 forceSyncKey ──────────────────────────────────────
@@ -537,7 +537,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     const isForceSync = currentForceSyncKey !== null && currentForceSyncKey !== lastForceSyncKey.current
 
     // 构建 viewModel 对应的节点和边（使用服务端 canvas.nodes 的 position）
-    const newRawNodes = toFlowNodes(canvas.nodes, {
+    const newRawNodes: FlowNode[] = toFlowNodes(canvas.nodes, {
       factorsDetail,
       optionsDetail,
       recommendedOptionId,
@@ -647,6 +647,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const [form] = Form.useForm()
   const [weightValue, setWeightValue] = useState(0.1)
 
+
+  const [sliderMin, setSliderMin] = useState(5)
+  const [sliderMax, setSliderMax] = useState(80)
+  const [activeTabKey, setActiveTabKey] = useState<OptionModalTab>('settings')
+
+
   // 边聚焦状态（仅影响渲染样式，不触发持久化）
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
 
@@ -672,12 +678,34 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       if (node) {
         if (node.type === 'factor') {
           const factorData = node.data as FactorFlowData
-          setWeightValue(factorData.weight)
-          initialWeightRef.current = factorData.weight
+          const w = factorData.weight
+          setWeightValue(w)
+          initialWeightRef.current = w
           isEditingFactorRef.current = !isNew
+          // 新增因素：固定 5%~80% 范围；已有因素：使用越界恢复逻辑
+          if (isNew) {
+            // 新增时默认权重 = 平均权重（1 / (已有因素数 + 1)）
+            const existingFactorCount = nodes.filter((n) => n.type === 'factor').length
+            const avgWeight = 1 / (existingFactorCount + 1)
+            setWeightValue(avgWeight)
+            setSliderMin(5)
+            setSliderMax(80)
+          } else {
+            // 已有因素越界时设置单向拖动范围
+            if (w < 0.05) {
+              setSliderMin(Math.round(w * 100))
+              setSliderMax(80)
+            } else if (w > 0.80) {
+              setSliderMin(5)
+              setSliderMax(Math.round(w * 100))
+            } else {
+              setSliderMin(5)
+              setSliderMax(80)
+            }
+          }
           form.setFieldsValue({
             label: factorData.label,
-            weight: factorData.weight,
+            weight: isNew ? (1 / (nodes.filter((n) => n.type === 'factor').length + 1)) : factorData.weight,
             description: factorData.description ?? '',
           })
         } else if (node.type === 'option') {
@@ -704,42 +732,39 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     isEditingFactorRef.current = false
   }, [])
 
-  // 确认保存因素：同时应用名称与权重，按变更类型选择保存路径
+  // 确认保存因素：仅更新权重，名称保留为节点原 label
   const handleSaveFactor = useCallback(
-    (values: Record<string, unknown>) => {
+    () => {
       if (!editingNode || editingNode.type !== 'factor' || isNewNode) return
 
-      const label = String(values.label ?? '')
-      const factorData = editingNode.data as FactorFlowData
-      const labelChanged = label !== factorData.label
       const weightChanged = Math.abs(weightValue - initialWeightRef.current) > 1e-6
+      const factorData = editingNode.data as FactorFlowData
 
-      if (!labelChanged && !weightChanged) {
+      if (!weightChanged) {
         closeModal()
         return
       }
 
-      let nextNodes = nodesRef.current.map((n) =>
+      // 名称必须保留为节点原 label，禁止从表单覆盖已有 factor 的 label
+      const labelPreservedNodes = nodesRef.current.map((n) =>
         n.id === editingNode.id
           ? ({
               ...n,
               data: {
                 ...n.data,
-                label,
+                label: factorData.label,
               },
             } as FactorFlowNode)
           : n,
       )
 
-      if (weightChanged) {
-        const allFactorNodes = nextNodes.filter((n) => n.type === 'factor')
-        const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, weightValue)
-        nextNodes = nextNodes.map((n) => {
-          if (n.type !== 'factor') return n
-          const updated = rebalanced.find((r) => r.id === n.id)
-          return updated ?? n
-        })
-      }
+      const allFactorNodes = labelPreservedNodes.filter((n) => n.type === 'factor')
+      const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, weightValue)
+      const nextNodes = labelPreservedNodes.map((n) => {
+        if (n.type !== 'factor') return n
+        const updated = rebalanced.find((r: FlowNode) => r.id === n.id)
+        return updated ?? n
+      })
 
       setNodes(nextNodes)
       setModalOpen(false)
@@ -747,11 +772,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       isEditingFactorRef.current = false
 
       const updatedCanvas = buildCanvasData(nextNodes, edgesRef.current)
-      if (weightChanged) {
-        onWeightSaveRef.current?.(updatedCanvas)
-      } else {
-        onFactorLabelSaveRef.current?.(updatedCanvas)
-      }
+      onWeightSaveRef.current?.(updatedCanvas)
     },
     [editingNode, isNewNode, weightValue, setNodes, closeModal],
   )
@@ -760,21 +781,63 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const handleSaveNormal = useCallback(
     (values: Record<string, unknown>) => {
       if (!editingNode) return
-      const label = String(values.label ?? '')
+      const label = String(values.label ?? '').trim()
 
       if (editingNode.type === 'factor') {
         if (isNewNode) {
-          const newNode: FlowNode = {
+          if (!label) {
+            message.warning('请输入因素名称')
+            return
+          }
+
+          // 已有因素
+          const existingFactors = nodesRef.current.filter((n) => n.type === 'factor')
+          const newWeight = weightValue
+
+          // 其余已有因素按比例配平（带 5%-80% 边界约束）
+          const rebalancedExisting = rebalanceWithNewFactor(existingFactors, newWeight)
+
+          // 构造新 factor：保留 id / position，仅覆盖 label / weight
+          const newFactorNode: FlowNode = {
             ...editingNode,
             data: {
               ...editingNode.data,
               label,
-              weight: weightValue,
+              weight: newWeight,
             },
-          }
-          setNodes((prev) => [...prev, newNode])
+          } as FactorFlowNode
+
+          // 完整 nextNodes：root 原样 + options 原样 + 重新配平的旧 factors + 新 factor
+          const idToRebalanced = new Map<FlowNode['id'], FlowNode>(rebalancedExisting.map((n: FlowNode) => [n.id, n]))
+          const nextNodes: FlowNode[] = nodesRef.current.map((n) => {
+            if (n.type !== 'factor') return n
+            const updated = idToRebalanced.get(n.id)
+            return updated ?? n
+          })
+          nextNodes.push(newFactorNode)
+
+          // 2) 先更新 nodesRef，保证后续 onCanvasChange 看到的是最新值
+          nodesRef.current = nextNodes
+          // 3) setNodes
+          setNodes(nextNodes)
+
+          // 4) 用完整 nextNodes + edgesRef.current 调用 buildCanvasData
+          const completeCanvas = buildCanvasData(nextNodes, edgesRef.current)
+          // 5) onCanvasChange
+          onCanvasChangeRef.current?.(completeCanvas)
+          // 6) 标记 dirty
+          onDirtyChangeRef.current?.(true)
+          // 7) FACTOR_ADDED 结构变更通知（由父组件决定后续 partial-analysis）
           onStructuralChangePendingRef.current?.('FACTOR_ADDED')
+
+          // 8) 关闭 Modal
+          setModalOpen(false)
+          setEditingNode(null)
+          isEditingFactorRef.current = false
+          return
         } else {
+          // 编辑已有 factor：仅更新权重，必须保留节点原 label，禁止从表单读取并覆盖
+          const factorData = editingNode.data as FactorFlowData
           setNodes((prev) =>
             prev.map((n) =>
               n.id === editingNode.id
@@ -782,7 +845,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                   ...n,
                   data: {
                     ...n.data,
-                    label,
+                    label: factorData.label,
                     weight: weightValue,
                   },
                 } as FactorFlowNode)
@@ -841,7 +904,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       setEditingNode(null)
       isEditingFactorRef.current = false
     },
-    [editingNode, isNewNode, setNodes],
+    [editingNode, isNewNode, weightValue, setNodes],
   )
 
   // 提交表单：新建节点走普通保存；编辑已有因素走统一确认保存
@@ -850,7 +913,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       if (!editingNode) return
 
       if (editingNode.type === 'factor' && !isNewNode) {
-        handleSaveFactor(values)
+        handleSaveFactor()
         return
       }
 
@@ -944,8 +1007,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const initiateFactorDelete = useCallback(
     (nodeId: string, nodeLabel: string) => {
       const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
-      // 至少保留 1 个因素
-      if (factorCount <= 1) return
+      // 至少保留 2 个因素
+      if (factorCount <= 2) return
 
       // 保存快照，用于失败时回滚
       factorDeleteNodesSnapshotRef.current = nodesRef.current
@@ -982,7 +1045,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       const newNodes = prev
         .filter((n) => n.id !== nodeId)
         .map((n) => {
-          const updated = rebalanced.find((r) => r.id === n.id)
+          const updated = rebalanced.find((r: FlowNode) => r.id === n.id)
           return updated ?? n
         })
 
@@ -1158,6 +1221,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   )
 
   const addFactor = useCallback(() => {
+    const currentFactors = nodes.filter((n) => n.type === 'factor')
+    if (currentFactors.length >= 5) return  // 达到 5 个时静默拦截
     const node = createNode('factor', nodes)
     openModal(node, true)
   }, [nodes, openModal])
@@ -1243,7 +1308,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
               <div className="canvas-panel">
                 <div className="canvas-panel__toolbar">
                   <Space>
-                    <Button size="small" icon={<PlusOutlined />} onClick={addFactor}>
+                    <Button size="small" icon={<PlusOutlined />} onClick={addFactor} disabled={factorCount >= 5}>
                       新增因素
                     </Button>
                     <Tooltip title={nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS ? `候选方案最多 ${MAX_OPTIONS} 个` : ''}>
@@ -1391,12 +1456,19 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           <span className={`canvas-modal__type-badge canvas-modal__type-badge--${editingNode.type}`} />
                           <div className="canvas-modal__header-text">
                             <span className="canvas-modal__title">
-                              {editingNode.type === 'factor' ? '编辑影响因素' : '查看方案分析'}
+
+                              {(() => {
+                                if (editingNode.type === 'factor') {
+                                  return isNewNode ? '新增影响因素' : '编辑影响因素'
+                                }
+                                return '编辑候选方案'
+                              })()}
                             </span>
                             <span className="canvas-modal__subtitle">
-                              {editingNode.type === 'factor'
-                                ? '调整后将标记画布为"未保存"'
-                                : '内容由 AI 推演生成，不可手动编辑'}
+                              {isNewNode && editingNode.type === 'factor'
+                                ? '确认后将添加到画布，其余影响因素将按比例自动调整'
+                                : '调整后将标记画布为"未保存"'}
+
                             </span>
                           </div>
                         </div>
@@ -1518,23 +1590,64 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                       <Form form={form} layout="vertical" onFinish={submitForm}>
                         <Form.Item
                           name="label"
-                          label="名称"
-                          rules={[{ required: true, message: '请输入名称' }]}
+
+                          label={editingNode.type === 'factor' ? '名称' : '名称'}
+                          rules={[
+                            { required: true, message: '请输入名称' },
+                            {
+                              validator: (_rule, value) => {
+                                const trimmed = typeof value === 'string' ? value.trim() : ''
+                                if (!trimmed) {
+                                  return Promise.reject(new Error('请输入名称'))
+                                }
+                                return Promise.resolve()
+                              },
+                            },
+                          ]}
+                          normalize={(value: unknown) => (typeof value === 'string' ? value.trim() : value)}
                         >
-                          <Input placeholder="如：时间成本" />
+                          {editingNode.type === 'factor' && !isNewNode ? (
+                            <Input
+                              readOnly
+                              placeholder="如：时间成本"
+                            />
+                          ) : (
+                            <Input placeholder={editingNode.type === 'factor' ? '如：时间成本' : '如：方案 A：优先 Docker'} />
+                          )}
+
                         </Form.Item>
 
-                        {editingNode.type === 'factor' && (
+                        {editingNode.type === 'factor' && !isNewNode && (
                           <>
                             <Form.Item name="weight" label="影响权重">
                               <div className="canvas-modal__weight-card">
                                 <Slider
-                                  min={0}
-                                  max={1}
-                                  step={0.01}
-                                  value={weightValue}
-                                  onChange={setWeightValue}
-                                  tooltip={{ formatter: (v) => `${Math.round((v ?? 0) * 100)}%` }}
+                                  min={sliderMin}
+                                  max={sliderMax}
+                                  step={1}
+                                  value={Math.round(weightValue * 100)}
+                                  onChange={(val) => {
+                                    const w = val / 100
+                                    setWeightValue(w)
+                                    // 越界恢复：每次拖动后 min/max 跟随当前值
+                                    if (w < 0.05) {
+                                      setSliderMin(Math.round(w * 100))
+                                      setSliderMax(80)
+                                    } else if (w > 0.80) {
+                                      setSliderMin(5)
+                                      setSliderMax(Math.round(w * 100))
+                                    } else {
+                                      setSliderMin(5)
+                                      setSliderMax(80)
+                                    }
+                                  }}
+                                  tooltip={{ formatter: (v) => `${v}%` }}
+                                  marks={{
+                                    5: '5%',
+                                    10: '10%',
+                                    60: '60%',
+                                    80: '80%',
+                                  }}
                                 />
                                 <span className="canvas-modal__weight-value">
                                   {Math.round(weightValue * 100)}%
@@ -1542,11 +1655,17 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               </div>
                               <div className="canvas-modal__weight-hint">
                                 当前总权重：100%
-                                {!isNewNode && (
-                                  <span> · 修改后其余因素将按比例自动调整</span>
+                                {weightValue < 0.05 && (
+                                  <span className="canvas-modal__weight-error"> · 权重不能低于 5%</span>
                                 )}
-                                {isNewNode && (
-                                  <span> · 新增因素将参与权重比例分配</span>
+                                {weightValue > 0.80 && (
+                                  <span className="canvas-modal__weight-error"> · 权重不能超过 80%</span>
+                                )}
+                                {weightValue >= 0.05 && weightValue <= 0.80 && weightValue > 0.60 && (
+                                  <span className="canvas-modal__weight-warning"> · 推荐范围为 10%~60%</span>
+                                )}
+                                {weightValue >= 0.05 && weightValue <= 0.80 && (
+                                  <span> · 修改后其余因素将按比例自动调整</span>
                                 )}
                               </div>
                             </Form.Item>
@@ -1558,31 +1677,214 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           </>
                         )}
 
-                        <div className="canvas-modal__footer">
-                          {(() => {
-                            const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
-                            const canDelete = factorCount > 1
-                            return (
-                              <Popconfirm
-                                title={canDelete
-                                  ? `删除后，该因素的权重将按比例分配给其余因素，并重新评估受影响方案。是否继续？`
-                                  : '至少保留一个关键影响因素'}
-                                onConfirm={() => handleFactorDeleteClick(editingNode.id)}
-                                okText="删除"
-                                cancelText="取消"
-                                disabled={!canDelete}
+
+                        {editingNode.type === 'factor' && isNewNode && (
+                          <>
+                            <Form.Item name="weight" label="影响权重">
+                              <div className="canvas-modal__weight-card">
+                                <Slider
+                                  min={5}
+                                  max={80}
+                                  step={1}
+                                  value={Math.round(weightValue * 100)}
+                                  onChange={(val) => {
+                                    setWeightValue(val / 100)
+                                  }}
+                                  tooltip={{ formatter: (v) => `${v}%` }}
+                                  marks={{
+                                    5: '5%',
+                                    10: '10%',
+                                    60: '60%',
+                                    80: '80%',
+                                  }}
+                                />
+                                <span className="canvas-modal__weight-value">
+                                  {Math.round(weightValue * 100)}%
+                                </span>
+                              </div>
+                              <div className="canvas-modal__weight-hint">
+                                当前总权重：100%
+                                {weightValue >= 0.60 && weightValue <= 0.80 && (
+                                  <span className="canvas-modal__weight-warning"> · 权重较高，建议控制在 60% 以内</span>
+                                )}
+                                <span> · 其余因素将按比例自动调整</span>
+                              </div>
+                            </Form.Item>
+                          </>
+                        )}
+
+                        {editingNode.type === 'option' && (
+                          <>
+                            {/* 自定义 Tab 切换 */}
+                            <div className="canvas-option-tabs">
+                              <button
+                                type="button"
+                                className={`canvas-option-tabs__btn ${activeTabKey === 'settings' ? 'canvas-option-tabs__btn--active' : ''}`}
+                                onClick={() => setActiveTabKey('settings')}
                               >
-                                <Button danger type="text" icon={<DeleteOutlined />} disabled={!canDelete}>
-                                  删除此因素
-                                </Button>
-                              </Popconfirm>
-                            )
-                          })()}
+                                方案设置
+                              </button>
+                              <button
+                                type="button"
+                                className={`canvas-option-tabs__btn ${activeTabKey === 'analysis' ? 'canvas-option-tabs__btn--active' : ''}`}
+                                onClick={() => setActiveTabKey('analysis')}
+                              >
+                                方案分析
+                              </button>
+                            </div>
+
+                            {activeTabKey === 'settings' && (
+                              <>
+                                <Form.Item name="cost" label="成本（1=高成本，5=低成本）">
+                                  <Rate count={5} />
+                                </Form.Item>
+                                <Form.Item name="time" label="时间（1=耗时久，5=耗时短）">
+                                  <Rate count={5} />
+                                </Form.Item>
+                                <Form.Item name="benefit" label="收益（1=收益低，5=收益高）">
+                                  <Rate count={5} />
+                                </Form.Item>
+                                <Form.Item name="risk" label="风险（1=高风险，5=低风险）">
+                                  <Rate count={5} />
+                                </Form.Item>
+                                <Form.Item name="feasibility" label="可行性（1=难实现，5=易实现）">
+                                  <Rate count={5} />
+                                </Form.Item>
+                              </>
+                            )}
+
+                            {activeTabKey === 'analysis' && (
+                              <div className="canvas-modal-analysis">
+                                <div className="canvas-modal-analysis__hint">
+                                  推演生成 · 保存画布不会直接修改以下内容
+                                </div>
+                                {analysisDetail && (analysisDetail.pros.length > 0 || analysisDetail.cons.length > 0 || analysisDetail.risks.length > 0) ? (
+                                  <>
+                                    <div className="canvas-modal-analysis__section">
+                                      <div className="canvas-modal-analysis__section-title">优势</div>
+                                      {analysisDetail.pros.length > 0 ? (
+                                        <ul className="canvas-modal-analysis__list">
+                                          {analysisDetail.pros.map((p: string, i: number) => (
+                                            <li key={i}>{p}</li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <span className="canvas-modal-analysis__empty">暂无</span>
+                                      )}
+                                    </div>
+                                    <div className="canvas-modal-analysis__section">
+                                      <div className="canvas-modal-analysis__section-title">局限</div>
+                                      {analysisDetail.cons.length > 0 ? (
+                                        <ul className="canvas-modal-analysis__list">
+                                          {analysisDetail.cons.map((c: string, i: number) => (
+                                            <li key={i}>{c}</li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <span className="canvas-modal-analysis__empty">暂无</span>
+                                      )}
+                                    </div>
+                                    <div className="canvas-modal-analysis__section">
+                                      <div className="canvas-modal-analysis__section-title">风险</div>
+                                      {analysisDetail.risks.length > 0 ? (
+                                        <ul className="canvas-modal-analysis__list">
+                                          {analysisDetail.risks.map((r: string, i: number) => (
+                                            <li key={i}>{r}</li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <span className="canvas-modal-analysis__empty">暂无</span>
+                                      )}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="canvas-modal-analysis__empty-state">
+                                    <div className="canvas-modal-analysis__empty-title">尚未生成方案分析</div>
+                                    <div className="canvas-modal-analysis__empty-hint">
+                                      保存画布并发起局部重推后，系统将补充该方案的优势、局限与风险。
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* 底部操作栏 */}
+                        <div className="canvas-modal__footer">
+                          {editingNode.type === 'option' ? (
+                            <>
+                              {(() => {
+                                const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
+                                const canDelete = optionCount > 2
+                                return (
+                                  <Popconfirm
+                                    title={canDelete
+                                      ? `删除后，该方案及其关联关系将不再参与方案对比。是否继续？`
+                                      : '至少保留两个候选方案用于对比'}
+                                    disabled={!canDelete}
+                                    onConfirm={() => handleOptionDeleteClick(editingNode.id)}
+                                    okText="删除"
+                                    cancelText="取消"
+                                  >
+                                    <Button
+                                      danger
+                                      type="text"
+                                      icon={<DeleteOutlined />}
+                                      disabled={!canDelete}
+                                    >
+                                      删除此方案
+                                    </Button>
+                                  </Popconfirm>
+                                )
+                              })()}
+                            </>
+                          ) : editingNode.type === 'factor' && !isNewNode ? (
+                            (() => {
+                              const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
+                              const canDelete = factorCount > 2
+                              return (
+                                <Popconfirm
+                                  title={canDelete
+                                    ? `删除后，该因素的权重将按比例分配给其余因素，并重新评估受影响方案。是否继续？`
+                                    : '至少保留两个关键影响因素'}
+                                  onConfirm={() => handleFactorDeleteClick(editingNode.id)}
+                                  okText="删除"
+                                  cancelText="取消"
+                                  disabled={!canDelete}
+                                >
+                                  <Button danger type="text" icon={<DeleteOutlined />} disabled={!canDelete}>
+                                    删除此因素
+                                  </Button>
+                                </Popconfirm>
+                              )
+                            })()
+                          ) : null}
+
                           <Space>
                             <Button onClick={closeModal}>取消</Button>
-                            <Button type="primary" onClick={submitForm}>
-                              {editingNode.type === 'factor' && !isNewNode ? '确认保存' : '保存修改'}
-                            </Button>
+                            {editingNode.type === 'factor' && !isNewNode ? (
+                              <Button
+                                type="primary"
+                                onClick={() => {
+                                  if (weightValue < 0.05 || weightValue > 0.80) {
+                                    message.warning('请先将权重拖回合法范围（5%~80%）后再保存')
+                                    return
+                                  }
+                                  submitForm()
+                                }}
+                              >
+                                保存权重
+                              </Button>
+                            ) : editingNode.type === 'factor' && isNewNode ? (
+                              <Button type="primary" onClick={submitForm}>
+                                确认添加
+                              </Button>
+                            ) : (
+                              <Button type="primary" onClick={submitForm}>
+                                保存修改
+                              </Button>
+                            )}
                           </Space>
                         </div>
                       </Form>

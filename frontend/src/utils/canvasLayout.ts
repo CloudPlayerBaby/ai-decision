@@ -64,6 +64,10 @@ const DEFAULT_OPTIONS: Omit<Required<LayoutOptions>, 'customHeightFn'> & { custo
 /**
  * 使用 dagre 对节点和边进行水平布局
  * 无论节点是否有位置，都会重新计算所有节点的位置
+ *
+ * LR 布局特殊处理：
+ * - decision / factor 节点：使用 dagre 计算结果
+ * - option 节点：强制对齐为单独一列，以 decision 根节点为中心垂直居中排列
  */
 export function applyDagreLayout<T extends FlowNode>(
   nodes: T[],
@@ -76,6 +80,8 @@ export function applyDagreLayout<T extends FlowNode>(
 
   const opts = { ...DEFAULT_OPTIONS, ...options }
   const isHorizontal = opts.direction === 'LR'
+  const getNodeHeight = (node: FlowNode) =>
+    opts.customHeightFn ? opts.customHeightFn(node) : (opts.nodeHeight ?? DEFAULT_NODE_HEIGHT)
 
   const dagreGraph = new dagre.graphlib.Graph()
   dagreGraph.setDefaultEdgeLabel(() => ({}))
@@ -91,10 +97,9 @@ export function applyDagreLayout<T extends FlowNode>(
 
   // 添加所有节点到 dagre 图
   nodes.forEach((node) => {
-    const height = opts.customHeightFn ? opts.customHeightFn(node) : opts.nodeHeight
     dagreGraph.setNode(node.id, {
       width: opts.nodeWidth,
-      height,
+      height: getNodeHeight(node),
     })
   })
 
@@ -108,7 +113,7 @@ export function applyDagreLayout<T extends FlowNode>(
   // 运行 dagre 布局
   dagre.layout(dagreGraph)
 
-  // 计算位置偏移：让第一列从 x=0 开始
+  // 计算 x 偏移：让第一列从 x=0 开始
   let minX = Infinity
   nodes.forEach((node) => {
     const pos = dagreGraph.node(node.id)
@@ -118,18 +123,60 @@ export function applyDagreLayout<T extends FlowNode>(
   })
   const offsetX = minX - opts.nodeWidth / 2 - 40 // 左边距
 
-  // 更新节点位置
+  // ── LR 特殊处理：option 列对齐 ───────────────────────────────
+  // 提取 decision 根节点（id === 'root'）和 option 节点（保持原始顺序）
+  const rootNode = nodes.find((n) => n.id === 'root')
+  const rootDagrePos = rootNode ? dagreGraph.node(rootNode.id) : null
+  const rootCenterY = rootDagrePos?.y ?? 0
+
+  const optionNodes = nodes.filter((n) => n.type === 'option')
+  const totalOptionHeight =
+    optionNodes.reduce((sum, n) => sum + getNodeHeight(n), 0) +
+    Math.max(0, optionNodes.length - 1) * opts.nodeSeparation
+  const optionFirstTop = rootCenterY - totalOptionHeight / 2
+
+  // 预计算每个 option 的中心 y（从根节点垂直居中，自上而下排列）
+  const optionCenterYs: Map<string, number> = new Map()
+  let currentTop = optionFirstTop
+  optionNodes.forEach((opt) => {
+    const h = getNodeHeight(opt)
+    optionCenterYs.set(opt.id, currentTop + h / 2)
+    currentTop += h + opts.nodeSeparation
+  })
+
+  // 计算 option 列的统一 x 中心（取 dagre 计算出的各 option x 坐标均值）
+  let optionXSum = 0
+  optionNodes.forEach((opt) => {
+    const pos = dagreGraph.node(opt.id)
+    if (pos) optionXSum += pos.x
+  })
+  const optionCenterX = optionNodes.length > 0 ? optionXSum / optionNodes.length : 0
+
+  // ── 生成 layoutedNodes ────────────────────────────────────────
   const layoutedNodes = nodes.map((node) => {
     const nodePos = dagreGraph.node(node.id)
     if (!nodePos) {
       return node
     }
 
+    const h = getNodeHeight(node)
+    let centerX: number
+    let centerY: number
+
+    // LR 模式下：option 节点使用对齐后的坐标，否则使用 dagre 结果
+    if (isHorizontal && node.type === 'option') {
+      centerX = optionCenterX
+      centerY = optionCenterYs.get(node.id) ?? nodePos.y
+    } else {
+      centerX = nodePos.x
+      centerY = nodePos.y
+    }
+
     return {
       ...node,
       position: {
-        x: nodePos.x - offsetX - opts.nodeWidth / 2,
-        y: nodePos.y - opts.nodeHeight / 2,
+        x: centerX - offsetX - opts.nodeWidth / 2,
+        y: centerY - h / 2,
       },
       targetPosition: isHorizontal ? Position.Left : Position.Top,
       sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
