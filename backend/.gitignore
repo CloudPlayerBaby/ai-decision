@@ -37,6 +37,9 @@ build/
 .env.prod
 docker/mysql/data/
 
+# RSA 私钥（只留后端，勿提交；公钥 public_key.pem 可提交）
+src/main/resources/rsa/private_key.pem
+
 # AI documentation and rules
 AI_RULES.md
 AI情景推演决策系统*.md
