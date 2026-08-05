@@ -29,7 +29,7 @@ import type {
   OptionFlowData,
 } from '../../types/flow'
 import type { AnalysisStep } from '../../types/analysis'
-import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete } from '../../utils/canvasMapper'
+import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete, redistributeWeightsOnAdd } from '../../utils/canvasMapper'
 import { applyDagreLayout, estimateNodeHeight } from '../../utils/canvasLayout'
 import { CanvasActionsContext, useCanvasActions } from '../../contexts/CanvasActionsContext'
 import { createContext, useContext } from 'react'
@@ -675,6 +675,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const [isNewNode, setIsNewNode] = useState(false)
   const [form] = Form.useForm()
   const [weightValue, setWeightValue] = useState(0.1)
+  const [sliderMin, setSliderMin] = useState(5)
+  const [sliderMax, setSliderMax] = useState(80)
   const [activeTabKey, setActiveTabKey] = useState<OptionModalTab>('settings')
 
   // 边聚焦状态（仅影响渲染样式，不触发持久化）
@@ -706,9 +708,21 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       if (node) {
         if (node.type === 'factor') {
           const factorData = node.data as FactorFlowData
-          setWeightValue(factorData.weight)
-          initialWeightRef.current = factorData.weight
+          const w = factorData.weight
+          setWeightValue(w)
+          initialWeightRef.current = w
           isEditingFactorRef.current = !isNew
+          // 越界时设置单向拖动范围
+          if (w < 0.05) {
+            setSliderMin(Math.round(w * 100))
+            setSliderMax(80)
+          } else if (w > 0.80) {
+            setSliderMin(5)
+            setSliderMax(Math.round(w * 100))
+          } else {
+            setSliderMin(5)
+            setSliderMax(80)
+          }
           form.setFieldsValue({
             label: factorData.label,
             weight: factorData.weight,
@@ -781,17 +795,32 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
       if (editingNode.type === 'factor') {
         if (isNewNode) {
+          // 先以平均权重添加新因素
+          const allFactors = [...nodesRef.current.filter((n) => n.type === 'factor'), editingNode]
+          const rebalanced = redistributeWeightsOnAdd(allFactors, editingNode.id)
+          const newNodeWeight = rebalanced.find((n) => n.id === editingNode.id)?.data.weight ?? (1 / allFactors.length)
           const newNode: FlowNode = {
             ...editingNode,
             data: {
               ...editingNode.data,
               label,
-              weight: weightValue,
+              weight: newNodeWeight,
             },
-          }
-          setNodes((prev) => [...prev, newNode])
-          onStructuralChangePendingRef.current?.('FACTOR_ADDED')
+          } as FlowNode
+          // 合并回完整 nodes
+          const nextNodes = [...nodesRef.current, newNode].map((n) => {
+            if (n.type !== 'factor') return n
+            const updated = rebalanced.find((r) => r.id === n.id)
+            return updated ?? n
+          })
+          setNodes(nextNodes)
+          setModalOpen(false)
+          setEditingNode(null)
+          isEditingFactorRef.current = false
+          onFactorLabelSaveRef.current?.(buildCanvasData(nextNodes, edgesRef.current))
+          return
         } else {
+          // 编辑已有 factor：走 handleSaveWithWeightRebalance（但先更新 label）
           setNodes((prev) =>
             prev.map((n) =>
               n.id === editingNode.id
@@ -992,8 +1021,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const initiateFactorDelete = useCallback(
     (nodeId: string, nodeLabel: string) => {
       const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
-      // 至少保留 1 个因素
-      if (factorCount <= 1) return
+      // 至少保留 2 个因素
+      if (factorCount <= 2) return
 
       // 保存快照，用于失败时回滚
       factorDeleteNodesSnapshotRef.current = nodesRef.current
@@ -1207,6 +1236,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   )
 
   const addFactor = useCallback(() => {
+    const currentFactors = nodes.filter((n) => n.type === 'factor')
+    if (currentFactors.length >= 5) return  // 达到 5 个时静默拦截
     const node = createNode('factor', nodes)
     openModal(node, true)
   }, [nodes, openModal])
@@ -1293,7 +1324,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
               <div className="canvas-panel">
                 <div className="canvas-panel__toolbar">
                   <Space>
-                    <Button size="small" icon={<PlusOutlined />} onClick={addFactor}>
+                    <Button size="small" icon={<PlusOutlined />} onClick={addFactor} disabled={factorCount >= 5}>
                       新增因素
                     </Button>
                     <Tooltip title={nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS ? `候选方案最多 ${MAX_OPTIONS} 个` : ''}>
@@ -1466,12 +1497,32 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                             <Form.Item name="weight" label="影响权重">
                               <div className="canvas-modal__weight-card">
                                 <Slider
-                                  min={0}
-                                  max={1}
-                                  step={0.01}
-                                  value={weightValue}
-                                  onChange={setWeightValue}
-                                  tooltip={{ formatter: (v) => `${Math.round((v ?? 0) * 100)}%` }}
+                                  min={sliderMin}
+                                  max={sliderMax}
+                                  step={1}
+                                  value={Math.round(weightValue * 100)}
+                                  onChange={(val) => {
+                                    const w = val / 100
+                                    setWeightValue(w)
+                                    // 越界恢复：每次拖动后 min/max 跟随当前值
+                                    if (w < 0.05) {
+                                      setSliderMin(Math.round(w * 100))
+                                      setSliderMax(80)
+                                    } else if (w > 0.80) {
+                                      setSliderMin(5)
+                                      setSliderMax(Math.round(w * 100))
+                                    } else {
+                                      setSliderMin(5)
+                                      setSliderMax(80)
+                                    }
+                                  }}
+                                  tooltip={{ formatter: (v) => `${v}%` }}
+                                  marks={{
+                                    5: '5%',
+                                    10: '10%',
+                                    60: '60%',
+                                    80: '80%',
+                                  }}
                                 />
                                 <span className="canvas-modal__weight-value">
                                   {Math.round(weightValue * 100)}%
@@ -1479,11 +1530,20 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               </div>
                               <div className="canvas-modal__weight-hint">
                                 当前总权重：100%
-                                {!isNewNode && (
+                                {weightValue < 0.05 && (
+                                  <span className="canvas-modal__weight-error"> · 权重不能低于 5%</span>
+                                )}
+                                {weightValue > 0.80 && (
+                                  <span className="canvas-modal__weight-error"> · 权重不能超过 80%</span>
+                                )}
+                                {weightValue >= 0.05 && weightValue <= 0.80 && weightValue > 0.60 && (
+                                  <span className="canvas-modal__weight-warning"> · 推荐范围为 10%~60%</span>
+                                )}
+                                {!isNewNode && weightValue >= 0.05 && weightValue <= 0.80 && (
                                   <span> · 修改后其余因素将按比例自动调整</span>
                                 )}
                                 {isNewNode && (
-                                  <span> · 新增因素将参与权重比例分配</span>
+                                  <span> · 新增成功后所有因素将平均分配权重</span>
                                 )}
                               </div>
                             </Form.Item>
@@ -1627,12 +1687,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               {editingNode.type === 'factor' ? (
                                 (() => {
                                   const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
-                                  const canDelete = factorCount > 1
+                                  const canDelete = factorCount > 2
                                   return (
                                     <Popconfirm
                                       title={canDelete
                                         ? `删除后，该因素的权重将按比例分配给其余因素，并重新评估受影响方案。是否继续？`
-                                        : '至少保留一个关键影响因素'}
+                                        : '至少保留两个关键影响因素'}
                                       onConfirm={() => handleFactorDeleteClick(editingNode.id)}
                                       okText="删除"
                                       cancelText="取消"
@@ -1666,7 +1726,16 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                 <Button onClick={() => { form.validateFields().then(handleSaveFactorLabel) }}>
                                   仅保存名称
                                 </Button>
-                                <Button type="primary" onClick={submitForm}>
+                                <Button
+                                  type="primary"
+                                  onClick={() => {
+                                    if (weightValue < 0.05 || weightValue > 0.80) {
+                                      message.warning('请先将权重拖回合法范围（5%~80%）后再保存')
+                                      return
+                                    }
+                                    submitForm()
+                                  }}
+                                >
                                   保存权重
                                 </Button>
                               </>

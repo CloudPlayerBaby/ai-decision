@@ -1268,6 +1268,16 @@ body.is-resizing .resize-handle::before {
   -webkit-user-select: none;
 }
 
+.canvas-modal__weight-error {
+  color: var(--ant-red-6, #ff4d4f);
+  font-weight: 500;
+}
+
+.canvas-modal__weight-warning {
+  color: var(--ant-orange-6, #fa8c16);
+  font-weight: 500;
+}
+
 /* 五维评分 */
 .canvas-modal .ant-rate {
   font-size: 18px;
