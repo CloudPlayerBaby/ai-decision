@@ -221,7 +221,6 @@ function OptionNode({ data, id }: OptionNodeProps) {
 import type { EdgeProps } from '@xyflow/react'
 import {
   BaseEdge,
-  EdgeLabelRenderer,
   getBezierPath,
   MarkerType,
 } from '@xyflow/react'
@@ -243,7 +242,7 @@ function AffectsEdge({
   data,
 }: EdgeProps) {
   const { hoveredNodeId, showAllEdges } = useContext(EdgeFocusContext)
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -292,9 +291,7 @@ function AffectsEdge({
     zIndex: isRelativeFactorEdge ? 1 : 0,
   }
 
-  // AFFECTS 边不允许删除，悬停时显示禁止提示
-  const [showTooltip, setShowTooltip] = useState(false)
-
+  // AFFECTS 边由推演结果自动生成，不允许手动删除，因此不渲染任何按钮
   return (
     <>
       <BaseEdge
@@ -303,40 +300,6 @@ function AffectsEdge({
         markerEnd={MarkerType.ArrowClosed}
         style={computedStyle}
       />
-      <EdgeLabelRenderer>
-        <div
-          className="edge-delete-btn nodrag nopan"
-          onMouseEnter={() => setShowTooltip(true)}
-          onMouseLeave={() => setShowTooltip(false)}
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'all',
-            opacity: hoveredNodeId === null ? 0.7 : 0,
-            cursor: 'not-allowed',
-          }}
-        >
-          <DeleteOutlined style={{ color: '#999' }} />
-        </div>
-        {showTooltip && hoveredNodeId === null && (
-          <div
-            style={{
-              position: 'absolute',
-              transform: `translate(-50%, -150%) translate(${labelX}px,${labelY}px)`,
-              background: 'rgba(0,0,0,0.8)',
-              color: '#fff',
-              padding: '4px 8px',
-              borderRadius: 4,
-              fontSize: 12,
-              whiteSpace: 'nowrap',
-              pointerEvents: 'none',
-              zIndex: 1000,
-            }}
-          >
-            因素与方案的影响关系由推演结果生成，不支持手动删除
-          </div>
-        )}
-      </EdgeLabelRenderer>
     </>
   )
 }
@@ -608,7 +571,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     }
     if (isDirty !== lastNotifiedDirty.current) {
       lastNotifiedDirty.current = isDirty
-      console.log('[dirty-to-parent]', isDirty)
+      console.log('[dirty-to-parent]', isDirty, { currentSig: currentSig.length, baseSig: initialSignature.current?.length })
       onDirtyChangeRef.current?.(isDirty)
     }
   }, [nodes, edges])
@@ -921,12 +884,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       const labelPreservedNodes = nodesRef.current.map((n) =>
         n.id === editingNode.id
           ? ({
-              ...n,
-              data: {
-                ...n.data,
-                label: factorData.label,
-              },
-            } as FactorFlowNode)
+            ...n,
+            data: {
+              ...n.data,
+              label: factorData.label,
+            },
+          } as FactorFlowNode)
           : n,
       )
 
@@ -1376,8 +1339,14 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   }, [nodes, openModal])
 
   // "自动整理布局"：对当前完整 nodes + edges 调用 applyDagreLayout，
-  // setNodes 后通过 onCanvasChange 更新 canvasRef，标记 dirty，提示用户保存。
+  // setNodes 后通过 onCanvasChange 更新 canvasRef，并依赖组件内的脏检测 effect
+  // 标记画布为脏、启用「保存画布」按钮。
+  // 注意：本函数本身不会调用任何 saveMutation.mutate(...)，因此点击按钮
+  // 不会触发自动保存；画布变为脏仅意味着保存按钮变为可用、需要用户主动点击才会持久化。
+  // ⚠️ 这里绝对不要写 `initialSignature.current = ...`，否则会把脏基线
+  // 更新为新布局，让脏检测 effect 把这次点击算成「未变更」，保存按钮会被禁用。
   const autoArrangeLayout = useCallback(() => {
+    console.log('[auto-arrange] click', { nodes: nodes.length, edges: edges.length })
     if (nodes.length === 0) return
     const { nodes: layoutedNodes, edges: layoutedEdges } = applyDagreLayout(nodes, edges, {
       direction: 'LR',
@@ -1437,9 +1406,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   return (
     <PartialAnalysisContext.Provider value={{ partialAnalysisInfo, partialSteps: partialSteps ?? [] }}>
       <CanvasActionsContext.Provider value={canvasActions}>
-          <EdgeDeleteContext.Provider value={{ nodes: nodes as Node[] }}>
-            <EdgeFocusContext.Provider value={{ hoveredNodeId, showAllEdges: false }}>
-              <NodeHoverContext.Provider value={nodeHoverValue}>
+        <EdgeDeleteContext.Provider value={{ nodes: nodes as Node[] }}>
+          <EdgeFocusContext.Provider value={{ hoveredNodeId, showAllEdges: false }}>
+            <NodeHoverContext.Provider value={nodeHoverValue}>
               <div className="canvas-panel">
                 <div className="canvas-panel__toolbar">
                   <Space>
@@ -1456,7 +1425,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                         新增方案
                       </Button>
                     </Tooltip>
-                    <Tooltip title="自动计算最优布局，保存画布后生效">
+                    <Tooltip title="自动计算最优布局（不会自动保存，需点击「保存画布」持久化）">
                       <Button size="small" icon={<MenuOutlined />} onClick={autoArrangeLayout}>
                         自动整理
                       </Button>
@@ -1602,8 +1571,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               {isNewNode && editingNode.type === 'factor'
                                 ? '确认后将添加到画布，其余影响因素将按比例自动调整'
                                 : editingNode.type === 'option' && !isNewNode
-                                ? '以下信息仅供查看'
-                                : '调整后将标记画布为"未保存"'}
+                                  ? '以下信息仅供查看'
+                                  : '调整后将标记画布为"未保存"'}
                             </span>
                           </div>
                         </div>
@@ -1631,14 +1600,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           ]}
                           normalize={(value: unknown) => (typeof value === 'string' ? value.trim() : value)}
                         >
-                          {editingNode.type === 'factor' && !isNewNode ? (
-                            <Input
-                              readOnly
-                              placeholder="如：时间成本"
-                            />
-                          ) : (
-                            <Input placeholder={editingNode.type === 'factor' ? '如：时间成本' : '如：方案 A：优先 Docker'} />
-                          )}
+                          <Input
+                            readOnly
+                            placeholder={editingNode.type === 'factor' ? '如：时间成本' : '如：方案 A：优先 Docker'}
+                          />
                         </Form.Item>
 
                         {editingNode.type === 'factor' && !isNewNode && (

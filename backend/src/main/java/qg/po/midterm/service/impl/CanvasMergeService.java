@@ -23,7 +23,7 @@ public class CanvasMergeService {
         List<Canvas.CanvasEdge> edges = new ArrayList<>();
 
         nodes.add(node("root", "decision", decisionTitle,
-                position(oldNodes, "root", 360, 40), Collections.emptyMap()));
+                position(oldNodes, "root", CanvasLayoutPlanner.rootPosition()), Collections.emptyMap()));
 
         List<Factor> factors = result != null && result.getFactors() != null
                 ? result.getFactors() : List.of();
@@ -33,7 +33,9 @@ public class CanvasMergeService {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("weight", factor.getWeight());
             nodes.add(node(factor.getId(), "factor", factor.getName(),
-                    position(oldNodes, factor.getId(), spread(index, factors.size()), 180), data));
+                    position(oldNodes, factor.getId(), new Canvas.Position(
+                            CanvasLayoutPlanner.columnX("factor"),
+                            CanvasLayoutPlanner.distributeY(index, factors.size()))), data));
         }
 
         List<Option> options = result != null && result.getOptions() != null
@@ -44,7 +46,9 @@ public class CanvasMergeService {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("scores", option.getScores());
             Canvas.CanvasNode optionNode = node(option.getId(), "option", option.getName(),
-                    position(oldNodes, option.getId(), spread(index, options.size()), 340), data);
+                    position(oldNodes, option.getId(), new Canvas.Position(
+                            CanvasLayoutPlanner.columnX("option"),
+                            CanvasLayoutPlanner.distributeY(index, options.size()))), data);
             optionNode.setRelativeFactor(option.getRelativeFactor());
             nodes.add(optionNode);
         }
@@ -63,15 +67,10 @@ public class CanvasMergeService {
     }
 
     private Canvas.Position position(Map<String, Canvas.CanvasNode> oldNodes,
-                                     String id, double defaultX, double defaultY) {
+                                     String id, Canvas.Position defaultPos) {
         Canvas.CanvasNode oldNode = oldNodes.get(id);
         if (oldNode != null && oldNode.getPosition() != null) return oldNode.getPosition();
-        return new Canvas.Position(defaultX, defaultY);
-    }
-
-    private double spread(int index, int count) {
-        if (count <= 1) return 360;
-        return 140 + (double) index * (560.0 / (count - 1));
+        return defaultPos;
     }
 
     private Canvas.CanvasNode node(String id, String type, String label,

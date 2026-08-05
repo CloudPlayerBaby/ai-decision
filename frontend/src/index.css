@@ -797,32 +797,6 @@ body.is-resizing .resize-handle::before {
   filter: drop-shadow(0 0 4px var(--decision, #f97316));
 }
 
-/* AFFECTS 连线删除按钮（EdgeLabelRenderer 是 Portal，样式需全局选择器） */
-.react-flow__edgelabelrenderer .edge-delete-btn {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1.5px solid #e53935;
-  background: #fff;
-  color: #e53935;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  font-size: 12px;
-  line-height: 1;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-  z-index: 10;
-  opacity: 0.7;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
-}
-.react-flow__edgelabelrenderer .edge-delete-btn:hover {
-  opacity: 1;
-  background: #e53935;
-  color: #fff;
-}
-
 [data-theme='eye-care'] .canvas-panel__flow .react-flow__edge-path {
   filter: drop-shadow(0 0 1px rgba(186, 198, 220, 0.55));
 }
@@ -857,6 +831,51 @@ body.is-resizing .resize-handle::before {
 .canvas-node--option {
   border-color: var(--node-option-border);
   background: var(--node-option-bg);
+  cursor: default;
+}
+
+.canvas-node--factor {
+  cursor: pointer;
+}
+
+.canvas-modal__readonly-field {
+  margin-bottom: 16px;
+}
+
+.canvas-modal__readonly-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.canvas-modal__readonly-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.canvas-modal__readonly-scores {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.canvas-modal__readonly-score-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.canvas-modal__readonly-score-item strong {
+  font-size: 16px;
+  color: var(--text-h);
 }
 
 .canvas-node--option-recommended {

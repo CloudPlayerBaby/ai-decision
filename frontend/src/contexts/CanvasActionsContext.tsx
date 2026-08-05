@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react'
 
 export interface CanvasActions {
   openOptionAnalysis: (nodeId: string) => void
+  deleteOption: (nodeId: string) => void
 }
 
 export const CanvasActionsContext = createContext<CanvasActions | null>(null)
