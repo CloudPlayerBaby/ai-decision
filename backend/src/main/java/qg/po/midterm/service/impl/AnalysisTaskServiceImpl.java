@@ -722,6 +722,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         data.put("understanding", result.getUnderstanding());
 
         // 局部推演必须使用用户修改后的画布数据，不能只使用旧分析结果
+        data.put("previousFactors", result.getFactors());
         data.put("factors", buildFactors(latestCanvas, result.getFactors()));
         data.put("options", buildOptions(latestCanvas, result.getOptions()));
 

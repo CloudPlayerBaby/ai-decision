@@ -54,6 +54,7 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
             if (existing.isEmpty()) throw new IllegalStateException("没有可重评分的候选方案");
 
             String prompt = new PromptTemplate(promptResource).create(Map.of(
+                    "previousFactors", objectMapper.writeValueAsString(state.getPreviousFactors()),
                     "factors", objectMapper.writeValueAsString(state.getFactors() == null ? List.of() : state.getFactors()),
                     "options", objectMapper.writeValueAsString(existing)
             )).getContents();
@@ -86,7 +87,14 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
                 continue;
             }
             String id = update.id();
+            Option existingOption = existing.stream()
+                    .filter(option -> option != null && id.equals(option.getId()))
+                    .findFirst()
+                    .orElse(null);
             if (isBlank(update.name())) errors.add("options[" + id + "].name (不可为空)");
+            else if (existingOption != null && !update.name().equals(existingOption.getName())) {
+                errors.add("options[" + id + "].name (方案身份不可修改)");
+            }
             if (isBlank(update.description())) errors.add("options[" + id + "].description (不可为空)");
             if (isEmpty(update.pros())) errors.add("options[" + id + "].pros (至少一项)");
             if (isEmpty(update.cons())) errors.add("options[" + id + "].cons (至少一项)");
@@ -109,7 +117,6 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
         for (Option option : existing) {
             OptionUpdate update = updatesById.get(option.getId());
             if (update == null) continue;
-            option.setName(update.name());
             option.setDescription(update.description());
             option.setPros(update.pros());
             option.setCons(update.cons());

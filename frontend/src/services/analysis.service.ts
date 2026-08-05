@@ -4,6 +4,7 @@ import { mockGetAnalysisResult } from '@/mocks/analysis-result.mock'
 import {
   mockCreateSseTicket,
   mockGetAnalysisTask,
+  mockGetTaskHistory,
 } from '@/mocks/tasks.mock'
 import type {
   AnalysisResult,
@@ -15,6 +16,7 @@ import type {
   PreferredOptionRequest,
   RetryStepResponse,
   SseTicketResponse,
+  TaskHistoryItem,
 } from '@/types/analysis'
 
 function delay<T>(value: T, ms = 200): Promise<T> {
@@ -119,4 +121,13 @@ export async function startPartialAnalysis(
     `/decisions/${decisionId}/partial-analysis`,
     body,
   )
+}
+
+export async function getTaskHistory(
+  decisionId: string,
+): Promise<TaskHistoryItem[]> {
+  if (isMockEnabled()) {
+    return delay(mockGetTaskHistory(decisionId))
+  }
+  return getData<TaskHistoryItem[]>(`/decisions/${decisionId}/history`)
 }

@@ -40,6 +40,13 @@ public class DecisionState extends AgentState {
     }
 
     @SuppressWarnings("unchecked")
+    public java.util.List<Factor> getPreviousFactors() {
+        return value("previousFactors")
+                .map(v -> (java.util.List<Factor>) v)
+                .orElse(java.util.List.of());
+    }
+
+    @SuppressWarnings("unchecked")
     public java.util.List<Option> getOptions() {
         return value("options").map(v -> (java.util.List<Option>) v).orElse(null);
     }
