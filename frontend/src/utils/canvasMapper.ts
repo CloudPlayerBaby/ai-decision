@@ -16,4 +16,7 @@ export {
   redistributeWeightsOnDelete,
   redistributeWeightsOnAdd,
   rebalanceWithNewFactor,
+  redistributeExistingWeightsForNewFactor,
+  computeMaxNewFactorWeight,
+  allocateUnitsProportionally,
 } from './canvasMapperImpl.ts'

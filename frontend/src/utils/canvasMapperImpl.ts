@@ -246,6 +246,7 @@ export {
   redistributeWeightsOnDelete,
   redistributeWeightsOnAdd,
   rebalanceWithNewFactor,
+  redistributeExistingWeightsForNewFactor,
 }
 
 // ── 权重边界常量 ──────────────────────────────────────────────
@@ -462,4 +463,184 @@ function rebalanceWithNewFactor(
   }
 
   return boundedRebalanceImpl(existingFactors, targetWeights)
+}
+
+// ── 新增因素：基于整数单位的精确比例分配 ───────────────────────
+
+/** 权重单位：5%（1 单位 = 0.05，整数倍分配避免浮点误差） */
+const WEIGHT_UNIT = 0.05
+/** 1.0 = 20 个单位 */
+const TOTAL_UNITS = 20
+/** 1 单位 = 5%（下界） */
+const MIN_UNITS = 1
+/** 16 单位 = 80%（上界） */
+const MAX_UNITS = 16
+
+/**
+ * 在 [minU, maxU] 区间内，将 `budget` 个整数单位按 `existingWeights` 的相对比例
+ * 分配给 n 个已有因素。所有输出均为整数倍单位，分配后总和严格等于 `budget`。
+ *
+ * 算法核心：
+ * 1. 按 existingWeights 的相对比例计算每个因素的"理论单位数"（浮点）；
+ * 2. 若某因素理论值低于 minU，固定为 minU；若高于 maxU，固定为 maxU；
+ * 3. 未固定的"自由"因素继续按当前权重比例分配剩余单位（迭代直到收敛）；
+ * 4. 浮点收敛后，按"最大小数余数"规则取整并调整到精确等于 budget；
+ * 5. 若任一阶段判定不可行（例如 `budget < n * minU` 或 `budget > n * maxU`），返回 null。
+ *
+ * 该函数是 redistributeExistingWeightsForNewFactor 的核心单元，单独导出便于测试。
+ */
+export function allocateUnitsProportionally(
+  existingWeights: readonly number[],
+  budget: number,
+  minU: number = MIN_UNITS,
+  maxU: number = MAX_UNITS,
+): number[] | null {
+  const n = existingWeights.length
+  if (n === 0) return budget === 0 ? [] : null
+  if (!Number.isFinite(budget) || budget < n * minU || budget > n * maxU) return null
+
+  const existingTotal = existingWeights.reduce((s, w) => s + (Number.isFinite(w) ? w : 0), 0)
+
+  // 1) 计算理论分配（浮点）
+  let allocations: number[]
+  if (existingTotal > 0) {
+    allocations = existingWeights.map((w) => (budget * w) / existingTotal)
+  } else {
+    allocations = new Array<number>(n).fill(budget / n)
+  }
+
+  // 2) 迭代夹紧 + 重分配（与用户描述的"带上下限比例配平"对齐）
+  const pinned = new Array<boolean>(n).fill(false)
+  for (let iter = 0; iter < n + 5; iter++) {
+    let clipped = false
+    for (let i = 0; i < n; i++) {
+      if (pinned[i]) continue
+      if (allocations[i] < minU) {
+        allocations[i] = minU
+        pinned[i] = true
+        clipped = true
+      } else if (allocations[i] > maxU) {
+        allocations[i] = maxU
+        pinned[i] = true
+        clipped = true
+      }
+    }
+    if (!clipped) break
+
+    let pinnedSum = 0
+    let freeSum = 0
+    for (let i = 0; i < n; i++) {
+      if (pinned[i]) pinnedSum += allocations[i]
+      else freeSum += allocations[i]
+    }
+    const free = allocations.map((_, i) => i).filter((i) => !pinned[i])
+    if (free.length === 0) {
+      return pinnedSum === budget ? allocations.slice() : null
+    }
+    const freeBudget = budget - pinnedSum
+    if (freeBudget < 0) return null
+    if (freeSum > 0) {
+      const scale = freeBudget / freeSum
+      for (const i of free) {
+        allocations[i] *= scale
+      }
+    } else if (freeBudget === 0) {
+      return null
+    }
+  }
+
+  // 3) 整数化：先 floor 分配，再按"最大小数余数"补齐 remainder，
+//    确保所有权重是 5% 整数倍且总和严格等于 budget。
+  const floorAlloc = allocations.map((a) => Math.floor(a))
+  const fractions = allocations.map((a, i) => a - floorAlloc[i])
+  let remainder = budget - floorAlloc.reduce((s, a) => s + a, 0)
+
+  const order = fractions
+    .map((f, i) => ({ f, i }))
+    .sort((a, b) => b.f - a.f || a.i - b.i)
+    .map((x) => x.i)
+
+  for (const i of order) {
+    if (remainder <= 0) break
+    if (floorAlloc[i] + 1 <= maxU) {
+      floorAlloc[i] += 1
+      remainder -= 1
+    }
+  }
+
+  // 若 remainder > 0（被 maxU 限制），尝试从未达到上界的因素再补
+  if (remainder > 0) {
+    for (const i of order) {
+      if (remainder <= 0) break
+      if (floorAlloc[i] < maxU) {
+        floorAlloc[i] += 1
+        remainder -= 1
+      }
+    }
+  }
+
+  const intAlloc = floorAlloc
+  if (remainder !== 0) return null
+  if (intAlloc.some((a) => a < minU || a > maxU)) return null
+
+  return intAlloc
+}
+
+/**
+ * 计算在已有 n 个因素的情况下，新增一个因素时用户可选的最大权重（= 1 - n * 5%）。
+ * 上限 80%，以确保其余因素至少保留 5%。
+ */
+export function computeMaxNewFactorWeight(existingFactorCount: number): number {
+  if (existingFactorCount <= 0) return WEIGHT_MAX
+  return Math.min(WEIGHT_MAX, 1 - existingFactorCount * WEIGHT_MIN)
+}
+
+/**
+ * 新增因素时，按以下规则计算全部因素的最终权重：
+ *
+ * 1. 新因素的权重被强制保留（按用户输入，先 snap 到 5% 步长）；
+ * 2. 其余已有因素按其当前权重比例共同分配剩余权重；
+ * 3. 若比例分配导致某因素低于 5% 或高于 80%，固定在边界，剩余因素继续按比例分配；
+ * 4. 所有结果均为 5% 整数倍，总和严格等于 100%；
+ * 5. 理论上无法满足约束时返回 null（由调用方提示用户）。
+ *
+ * 实现要点：
+ * - 以 5% 为单位进行整数运算，避免浮点误差；
+ * - 调用方负责把 newFactorNode.data.weight 设置为返回结果中的 `newFactorWeight`；
+ * - 返回 existingFactors 已就地更新为新权重。
+ */
+function redistributeExistingWeightsForNewFactor(
+  existingFactors: FlowNode[],
+  newFactorWeight: number,
+): {
+  existingFactors: FlowNode[]
+  newFactorWeight: number
+} | null {
+  if (!Number.isFinite(newFactorWeight)) return null
+
+  // 新因素权重：按 5% 步长 snap（保证严格保留用户输入并满足 5%~80% 边界）
+  const newUnits = Math.max(MIN_UNITS, Math.min(MAX_UNITS, Math.round(newFactorWeight / WEIGHT_UNIT)))
+  // 用 Math.round 消除 6 * 0.05 = 0.30000000000000004 这类浮点尾数
+  const newFactorWeightSnapped = Math.round(newUnits * WEIGHT_UNIT * 1000) / 1000
+  const budget = TOTAL_UNITS - newUnits
+  if (budget < 0) return null
+
+  // 空列表：仅返回 snap 后的新权重（理论上 UI 已拦截 0 因素场景）
+  if (existingFactors.length === 0) {
+    return { existingFactors: [], newFactorWeight: newFactorWeightSnapped }
+  }
+
+  const existingWeights = existingFactors.map((f) => getWeight(f))
+  const allocations = allocateUnitsProportionally(existingWeights, budget, MIN_UNITS, MAX_UNITS)
+  if (!allocations) return null
+
+  const updatedExisting = existingFactors.map((f, i) => ({
+    ...f,
+    data: { ...f.data, weight: allocations[i] * WEIGHT_UNIT },
+  })) as FlowNode[]
+
+  return {
+    existingFactors: updatedExisting,
+    newFactorWeight: newFactorWeightSnapped,
+  }
 }

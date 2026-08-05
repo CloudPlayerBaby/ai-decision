@@ -29,7 +29,7 @@ import type {
   OptionFlowData,
 } from '../../types/flow'
 import type { AnalysisStep } from '../../types/analysis'
-import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete, rebalanceWithNewFactor } from '../../utils/canvasMapper'
+import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete, redistributeExistingWeightsForNewFactor, computeMaxNewFactorWeight } from '../../utils/canvasMapper'
 import { applyDagreLayout, estimateNodeHeight } from '../../utils/canvasLayout'
 import { CanvasActionsContext, useCanvasActions } from '../../contexts/CanvasActionsContext'
 import { createContext, useContext } from 'react'
@@ -432,7 +432,7 @@ function createNode(type: 'factor' | 'option', existingNodes: FlowNode[]): FlowN
       data: {
         nodeType: 'factor',
         label: '',
-        weight: 0.1,
+        weight: 0.3,
         description: '',
       },
     } as FlowNode
@@ -768,6 +768,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const initialWeightRef = useRef<number>(0.1)
   // 跟踪当前是否正在编辑已有 factor（区别于新建因素）
   const isEditingFactorRef = useRef(false)
+  // 新增因素表单的默认权重（同步保存以便 form.setFieldsValue 使用）
+  const newFactorDefaultWeightRef = useRef<number>(0.2)
 
   // Modal 状态
   const [modalOpen, setModalOpen] = useState(false)
@@ -812,14 +814,18 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           setWeightValue(w)
           initialWeightRef.current = w
           isEditingFactorRef.current = !isNew
-          // 新增因素：固定 5%~80% 范围；已有因素：使用越界恢复逻辑
+          // 新增因素：使用动态计算的最大权重，确保其余因素至少保留 5%
+          // 已有因素：使用越界恢复逻辑
           if (isNew) {
-            // 新增时默认权重 = 平均权重（1 / (已有因素数 + 1)）
             const existingFactorCount = nodes.filter((n) => n.type === 'factor').length
-            const avgWeight = 1 / (existingFactorCount + 1)
-            setWeightValue(avgWeight)
+            // 默认权重 20%，但不能超过动态计算的最大值（确保至少 n 个旧因素各 ≥ 5%）
+            const maxNewWeight = computeMaxNewFactorWeight(existingFactorCount)
+            const defaultWeight = Math.min(0.20, maxNewWeight)
+            setWeightValue(defaultWeight)
             setSliderMin(5)
-            setSliderMax(80)
+            setSliderMax(Math.round(maxNewWeight * 100))
+            // 把 defaultWeight 暴露给 form.setFieldsValue，避免 setState 异步未生效
+            newFactorDefaultWeightRef.current = defaultWeight
           } else {
             // 已有因素越界时设置单向拖动范围
             if (w < 0.05) {
@@ -835,7 +841,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           }
           form.setFieldsValue({
             label: factorData.label,
-            weight: isNew ? (1 / (nodes.filter((n) => n.type === 'factor').length + 1)) : factorData.weight,
+            weight: isNew ? newFactorDefaultWeightRef.current : factorData.weight,
             description: factorData.description ?? '',
           })
         } else if (node.type === 'option') {
@@ -929,8 +935,22 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           const existingFactors = nodesRef.current.filter((n) => n.type === 'factor')
           const newWeight = weightValue
 
-          // 其余已有因素按比例配平（带 5%-80% 边界约束）
-          const rebalancedExisting = rebalanceWithNewFactor(existingFactors, newWeight)
+          // 动态校验：新增权重不能超过可分配最大值（确保 n 个旧因素各至少 5%）
+          const maxNewWeight = computeMaxNewFactorWeight(existingFactors.length)
+          if (newWeight > maxNewWeight + 1e-6) {
+            message.warning(
+              `当前已有 ${existingFactors.length} 个因素，新增因素权重不能超过 ${Math.round(maxNewWeight * 100)}%，以保证其余因素至少保留 5%`,
+            )
+            return
+          }
+
+          // 严格按 5% 步长分配：新因素权重被强制保留，其余因素按比例配平
+          const distribution = redistributeExistingWeightsForNewFactor(existingFactors, newWeight)
+          if (!distribution) {
+            message.warning('无法为新因素分配权重，请调整新增因素权重或其他因素权重后重试')
+            return
+          }
+          const { existingFactors: rebalancedExisting, newFactorWeight: snappedNewWeight } = distribution
 
           // 构造新 factor：保留 id / position，仅覆盖 label / weight
           const newFactorNode: FlowNode = {
@@ -938,7 +958,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             data: {
               ...editingNode.data,
               label,
-              weight: newWeight,
+              weight: snappedNewWeight,
             },
           } as FactorFlowNode
 
@@ -951,13 +971,27 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           })
           nextNodes.push(newFactorNode)
 
-          // 2) 先更新 nodesRef，保证后续 onCanvasChange 看到的是最新值
-          nodesRef.current = nextNodes
-          // 3) setNodes
-          setNodes(nextNodes)
+          // 创建新因素与决策节点之间的边（HAS_FACTOR），避免画布孤立
+          const decisionIdForEdge = nextNodes.find((n) => n.type === 'decision')?.id ?? 'root'
+          const newEdge: FlowEdge = {
+            id: genId('e'),
+            source: decisionIdForEdge,
+            target: newFactorNode.id,
+            type: 'HAS_FACTOR',
+            relation: 'HAS_FACTOR',
+            selectable: true,
+          }
+          const nextEdges: FlowEdge[] = [...edgesRef.current, newEdge]
 
-          // 4) 用完整 nextNodes + edgesRef.current 调用 buildCanvasData
-          const completeCanvas = buildCanvasData(nextNodes, edgesRef.current)
+          // 2) 先更新 nodesRef / edgesRef，保证后续 onCanvasChange 看到的是最新值
+          nodesRef.current = nextNodes
+          edgesRef.current = nextEdges
+          // 3) setNodes / setEdges
+          setNodes(nextNodes)
+          setEdges(nextEdges)
+
+          // 4) 用完整 nextNodes + nextEdges 调用 buildCanvasData
+          const completeCanvas = buildCanvasData(nextNodes, nextEdges)
           // 5) onCanvasChange
           onCanvasChangeRef.current?.(completeCanvas)
           // 6) 标记 dirty
@@ -1061,30 +1095,27 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     setPendingOptionDelete(null)
 
     // 快照已在上一步保存，这里乐观删除
-    setNodes((prev) => prev.filter((n) => n.id !== nodeId))
-    setEdges((prev) => {
-      const newEdges = prev.filter((e) => e.source !== nodeId && e.target !== nodeId)
-      // 用 setTimeout 确保 nodesRef 已更新
-      setTimeout(() => {
-        const updatedCanvas = buildCanvasData(nodesRef.current, newEdges)
-        const rollback = () => {
-          const nodesSnap = optionDeleteNodesSnapshotRef.current
-          const edgesSnap = optionDeleteEdgesSnapshotRef.current
-          setNodes(nodesSnap)
-          setEdges(edgesSnap)
-        }
-        // 传给父组件，由父组件决定何时回滚
-        onOptionDeleteRef.current?.(updatedCanvas, nodeId, rollback).catch(() => {
-          rollback()
-        })
-      }, 0)
-      return newEdges
-    })
+    const newNodes = nodesRef.current.filter((n) => n.id !== nodeId)
+    const newEdges = edgesRef.current.filter(
+      (e) => e.source !== nodeId && e.target !== nodeId,
+    )
+    setNodes(newNodes)
+    setEdges(newEdges)
 
     if (editingNode?.id === nodeId) {
       setModalOpen(false)
       setEditingNode(null)
     }
+
+    const updatedCanvas = buildCanvasData(newNodes, newEdges)
+    const rollback = () => {
+      setNodes(optionDeleteNodesSnapshotRef.current)
+      setEdges(optionDeleteEdgesSnapshotRef.current)
+    }
+    // 传给父组件，由父组件决定何时回滚
+    onOptionDeleteRef.current?.(updatedCanvas, nodeId, rollback).catch(() => {
+      rollback()
+    })
   }, [pendingOptionDelete, setNodes, setEdges])
 
   // 取消删除：恢复 nodes 和 edges
@@ -1131,37 +1162,20 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     const { nodeId } = pendingFactorDelete
     setPendingFactorDelete(null)
 
-    // 快照已在上一步保存，这里执行乐观删除 + 权重重分配
-    setNodes((prev) => {
-      const allFactors = prev.filter((n) => n.type === 'factor')
+    // 计算删除后剩余因素的权重（按比例重分配）
+    const allFactors = nodesRef.current.filter((n) => n.type === 'factor')
+    const rebalanced = redistributeWeightsOnDelete(allFactors, nodeId)
 
-      // 计算删除后剩余因素的权重（按比例重分配）
-      const rebalanced = redistributeWeightsOnDelete(allFactors, nodeId)
+    // 删除 factor 节点，同时更新剩余 factor 权重
+    const newNodes = nodesRef.current
+      .filter((n) => n.id !== nodeId)
+      .map((n) => {
+        const updated = rebalanced.find((r: FlowNode) => r.id === n.id)
+        return updated ?? n
+      })
 
-      // 删除 factor 节点，同时更新剩余 factor 权重
-      const newNodes = prev
-        .filter((n) => n.id !== nodeId)
-        .map((n) => {
-          const updated = rebalanced.find((r: FlowNode) => r.id === n.id)
-          return updated ?? n
-        })
-
-      // 用 setTimeout 确保 nodesRef 已更新
-      setTimeout(() => {
-        const rollback = () => {
-          setNodes(factorDeleteNodesSnapshotRef.current)
-          setEdges(factorDeleteEdgesSnapshotRef.current)
-        }
-        const updatedCanvas = buildCanvasData(newNodes, edgesRef.current)
-        // 传给父组件，由父组件决定何时回滚
-        onFactorDeleteRef.current?.(updatedCanvas, rollback).catch(() => {
-          rollback()
-        })
-      }, 0)
-
-      return newNodes
-    })
-
+    // 乐观更新本地状态（注意 setNodes 内部再次以 prev 计算，避免 updater 不纯）
+    setNodes(newNodes)
     setEdges((prev) =>
       prev.filter((e) => e.source !== nodeId && e.target !== nodeId),
     )
@@ -1170,6 +1184,16 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       setModalOpen(false)
       setEditingNode(null)
     }
+
+    // 节点状态与 ref 已同步，触发父组件保存画布并自动局部重推
+    const rollback = () => {
+      setNodes(factorDeleteNodesSnapshotRef.current)
+      setEdges(factorDeleteEdgesSnapshotRef.current)
+    }
+    const updatedCanvas = buildCanvasData(newNodes, edgesRef.current)
+    onFactorDeleteRef.current?.(updatedCanvas, rollback).catch(() => {
+      rollback()
+    })
   }, [pendingFactorDelete, setNodes, setEdges])
 
   // 取消删除因素：恢复快照
@@ -1569,7 +1593,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                             </span>
                             <span className="canvas-modal__subtitle">
                               {isNewNode && editingNode.type === 'factor'
-                                ? '确认后将添加到画布，其余影响因素将按比例自动调整'
+                                ? '新因素将使用你设置的权重，其他因素将按当前比例自动调整，权重总和始终为 100%'
                                 : editingNode.type === 'option' && !isNewNode
                                   ? '以下信息仅供查看'
                                   : '调整后将标记画布为"未保存"'}
@@ -1588,22 +1612,17 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           label={editingNode.type === 'factor' ? '名称' : '名称'}
                           rules={[
                             { required: true, message: '请输入名称' },
-                            {
-                              validator: (_rule, value) => {
-                                const trimmed = typeof value === 'string' ? value.trim() : ''
-                                if (!trimmed) {
-                                  return Promise.reject(new Error('请输入名称'))
-                                }
-                                return Promise.resolve()
-                              },
-                            },
                           ]}
                           normalize={(value: unknown) => (typeof value === 'string' ? value.trim() : value)}
                         >
-                          <Input
-                            readOnly
-                            placeholder={editingNode.type === 'factor' ? '如：时间成本' : '如：方案 A：优先 Docker'}
-                          />
+                          {isNewNode ? (
+                            <Input placeholder={editingNode.type === 'factor' ? '如：时间成本' : '如：方案 A：优先 Docker'} />
+                          ) : (
+                            <Input
+                              readOnly
+                              placeholder={editingNode.type === 'factor' ? '如：时间成本' : '如：方案 A：优先 Docker'}
+                            />
+                          )}
                         </Form.Item>
 
                         {editingNode.type === 'factor' && !isNewNode && (
@@ -1672,8 +1691,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                             <Form.Item name="weight" label="影响权重">
                               <div className="canvas-modal__weight-card">
                                 <Slider
-                                  min={5}
-                                  max={80}
+                                  min={sliderMin}
+                                  max={sliderMax}
                                   step={1}
                                   value={Math.round(weightValue * 100)}
                                   onChange={(val) => {
@@ -1684,7 +1703,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                     5: '5%',
                                     10: '10%',
                                     60: '60%',
-                                    80: '80%',
+                                    [Math.round(sliderMax)]: `${Math.round(sliderMax)}%`,
                                   }}
                                 />
                                 <span className="canvas-modal__weight-value">
@@ -1693,10 +1712,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               </div>
                               <div className="canvas-modal__weight-hint">
                                 当前总权重：100%
-                                {weightValue >= 0.60 && weightValue <= 0.80 && (
+                                {weightValue >= 0.60 && weightValue <= sliderMax / 100 && (
                                   <span className="canvas-modal__weight-warning"> · 权重较高，建议控制在 60% 以内</span>
                                 )}
-                                <span> · 其余因素将按比例自动调整</span>
+                                <span> · 新因素将使用你设置的权重，其他因素将按当前比例自动调整，权重总和始终为 100%</span>
                               </div>
                             </Form.Item>
                           </>
