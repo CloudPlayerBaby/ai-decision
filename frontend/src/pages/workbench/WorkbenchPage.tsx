@@ -38,7 +38,8 @@ import {
   startPartialAnalysis,
 } from '@/services/analysis.service'
 import { getCanvas, saveCanvas } from '@/services/canvas.service'
-import { buildCanvasViewModel } from '@/utils/canvasMapper'
+import { buildCanvasViewModel, toFlowNodes } from '@/utils/canvasMapper'
+import { applyDagreLayout } from '@/utils/canvasLayout'
 import { readCanvasCache, writeCanvasCache, clearCanvasCache } from '@/utils/canvasCache'
 import { buildServerVersion } from '@/utils/canvasCache'
 import { queryKeys } from '@/services/queryKeys'
@@ -61,7 +62,7 @@ function buildPartialChangedNodeIds(
       .filter((node) => node.type === 'factor' || node.type === 'option')
       .map((node) => node.id) ?? [],
   )
-// 解决页面加载时是空白的问题
+  // 解决页面加载时是空白的问题
   return [...new Set(changedNodeIds ?? [])].filter((nodeId) => {
     if (!nodeId || nodeId === 'root') return false//可能传递的是空的需要进行过滤
     return businessNodeIds.size === 0 || businessNodeIds.has(nodeId)
@@ -158,7 +159,7 @@ export function WorkbenchPage() {
    * - 锁或 partialAnalysisInfo 非空时拒绝请求并提示
    * - 成功后设置锁；失败/409 时释放锁
    */
-  
+
   const requestPartialAnalysis = useCallback(
     (changedNodeIds: string[]) => {
       if (changedNodeIds.length === 0) {
@@ -281,17 +282,6 @@ export function WorkbenchPage() {
       // 仅当用户正在查看该决策页时更新本地 UI
       if (viewingDecisionIdRef.current !== event.decisionId) return
 
-      // 检查是否是预期的自动布局任务（按 taskId 精确匹配）：
-      // - 仅 INITIAL_ANALYSIS / STRUCTURAL_CHANGE 才会触发
-      // - 修改权重的 result_ready 不会匹配，保持用户已有布局不变
-      const pending = pendingAutoLayoutRef.current
-      if (pending && pending.taskId === event.taskId) {
-        setAutoLayoutRequestKey(event.taskId)
-        setAutoLayoutReason(pending.reason)
-        // 取出后立即清除，防止重复触发或循环保存
-        setPendingAutoLayout(null)
-      }
-
       setActiveResultId(event.analysisResultId)
       setActiveCanvas(undefined)
       setForceSyncKey(event.analysisResultId)
@@ -371,8 +361,6 @@ export function WorkbenchPage() {
     mutationFn: () => startFullAnalysis(id),
     onSuccess: async (data) => {
       message.success('已开始整轮推演')
-      // 记录：本次整轮推演完成时应自动应用 Dagre 布局
-      setPendingAutoLayout({ taskId: data.taskId, reason: 'INITIAL_ANALYSIS' })
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
       })
@@ -569,10 +557,6 @@ export function WorkbenchPage() {
     hasUserEdited.current = false
     didEvaluateCache.current = false
     hasLocalEdit.current = false
-    // 切换决策时清空自动布局状态，避免旧决策的 taskId 误触发新决策的布局
-    setPendingAutoLayout(null)
-    setAutoLayoutRequestKey(null)
-    setAutoLayoutReason(null)
   }, [id])
 
   const revertInterruptedCanvasMutation = useMutation({
@@ -618,54 +602,102 @@ export function WorkbenchPage() {
     })
   }, [id, interruptedPartialByDecision])
 
-  // ── 自动布局请求状态 ────────────────────────────────────────
-  /**
-   * 仅在以下场景自动应用 Dagre 布局：
-   *   - INITIAL_ANALYSIS：新建决策首次整轮推演完成
-   *   - STRUCTURAL_CHANGE：结构性局部推演完成（新增/删除因素或方案、新增连线）
-   * 其他场景（修改权重、用户拖拽、普通刷新）不应触发自动布局。
-   * 一次性消费：onResultReady 取出匹配的 taskId 后立即清除，避免重复触发。
-   */
-  type AutoLayoutReason = 'INITIAL_ANALYSIS' | 'STRUCTURAL_CHANGE'
-  const [pendingAutoLayout, setPendingAutoLayout] = useState<{
-    taskId: string
-    reason: AutoLayoutReason
-  } | null>(null)
-  /** 已发出的 autoLayoutRequestKey（用于 DecisionCanvasPanel 检测 key 变化） */
-  const [autoLayoutRequestKey, setAutoLayoutRequestKey] = useState<string | null>(null)
-  const [autoLayoutReason, setAutoLayoutReason] = useState<AutoLayoutReason | null>(null)
-  const pendingAutoLayoutRef = useRef(pendingAutoLayout)
-  pendingAutoLayoutRef.current = pendingAutoLayout
-
-  /**
-   * 「仅保存布局」mutation：PUT 完整画布后仅刷新本地缓存，
-   * 不读取 changedNodeIds，不触发 partial-analysis。
-   * 用于自动布局完成后将新 position 持久化到后端。
-   */
-  const persistLayoutOnlyMutation = useMutation({
+  // ── 布局转换函数：检测 TB 布局 → LR 布局 → 保存到后端 ──
+  const fixLayoutMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
       saveCanvas(id, canvas),
     onSuccess: () => {
-      console.log('[canvas-layout] persist layout only')
+      console.log('[WorkbenchPage] LR 布局已保存到后端')
       queryClient.invalidateQueries({ queryKey: queryKeys.decisions.canvas(id) })
-      // 保存成功后清除 pendingAutoLayout，防止重复触发或循环保存
-      setPendingAutoLayout(null)
       setIsDirty(false)
       hasUserEdited.current = false
       clearCanvasCache(id)
     },
     onError: (error) => {
-      console.error('[WorkbenchPage] 自动布局持久化失败:', error)
+      console.error('[WorkbenchPage] 布局保存失败:', error)
     },
   })
 
-  /** DecisionCanvasPanel 调用：仅保存布局，不污染下一次结构变更状态 */
-  const handlePersistLayoutOnly = useCallback(
-    (canvas: import('@/types/canvas').Canvas) => {
-      persistLayoutOnlyMutation.mutate(canvas)
-    },
-    [persistLayoutOnlyMutation],
-  )
+  const fixAndSaveLayout = useCallback((canvas: import('@/types/canvas').Canvas) => {
+    if (!canvas.nodes || canvas.nodes.length === 0) return
+    const decisionNode = canvas.nodes.find((n) => n.type === 'decision')
+    const factorNodes = canvas.nodes.filter((n) => n.type === 'factor')
+    if (!decisionNode || factorNodes.length === 0) return
+    const decisionX = decisionNode.position?.x ?? 0
+    const decisionY = decisionNode.position?.y ?? 0
+    const avgFactorY = factorNodes.reduce((sum, n) => sum + (n.position?.y ?? 0), 0) / factorNodes.length
+    // 判断条件：decision.x 小于所有 factor.x，且 y 坐标接近 → 可能是 LR
+    const allFactorX = factorNodes.map((n) => n.position?.x ?? 0)
+    const isLRLayout =
+      decisionX < Math.min(...allFactorX) + 50 &&
+      Math.abs(decisionY - avgFactorY) < 100
+    // 如果已经是 LR 布局，跳过
+    if (isLRLayout) {
+      console.log('[WorkbenchPage] 当前已是 LR 布局，跳过布局修复')
+      return
+    }
+    console.log('[WorkbenchPage] 检测到 TB 布局，开始转换为 LR 布局...')
+    // 转换为 FlowNode，应用 dagre LR 布局
+    const flowNodes = toFlowNodes(canvas.nodes, {})
+    const flowEdges = canvas.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      relation: e.relation ?? '',
+    }))
+    const { nodes: layoutedNodes } = applyDagreLayout(flowNodes, flowEdges, {
+      direction: 'LR',
+      rankSeparation: 250,
+      nodeSeparation: 80,
+    })
+    // 构建新的 canvas 数据
+    const newNodes: import('@/types/canvas').CanvasNode[] = layoutedNodes.map((n) => {
+      const base = {
+        id: n.id,
+        type: n.type as import('@/types/canvas').CanvasNode['type'],
+        label: (n.data as { label?: string }).label ?? '',
+        position: n.position,
+      }
+      if (n.type === 'factor') {
+        return { ...base, data: { weight: (n.data as { weight: number }).weight ?? 0.1 } } as import('@/types/canvas').FactorCanvasNode
+      }
+      if (n.type === 'option') {
+        return { ...base, data: { scores: (n.data as { scores: import('@/types/canvas').OptionScores }).scores ?? { cost: 3, time: 3, benefit: 3, risk: 3, feasibility: 3 } } } as import('@/types/canvas').OptionCanvasNode
+      }
+      return { ...base, data: {} } as import('@/types/canvas').DecisionCanvasNode
+    })
+    const newCanvas: import('@/types/canvas').Canvas = {
+      nodes: newNodes,
+      edges: canvas.edges,
+    }
+    fixLayoutMutation.mutate(newCanvas)
+  }, [fixLayoutMutation])
+  // ── 初始布局检测：如果是 TB 布局，自动转换为 LR 布局并保存 ──
+  const didFixLayoutOnLoadRef = useRef(false)
+  const didFixLayoutOnAnalysisRef = useRef(false)
+  useEffect(() => {
+    didFixLayoutOnLoadRef.current = false
+    didFixLayoutOnAnalysisRef.current = false
+  }, [id])
+  useEffect(() => {
+    if (!canvasQuery.data) return
+    if (didFixLayoutOnLoadRef.current) return
+    // 避免页面切换时误触发（只检查来自后端的首次数据）
+    if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) return
+    didFixLayoutOnLoadRef.current = true
+    fixAndSaveLayout(canvasQuery.data)
+  }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id, fixAndSaveLayout])
+  // ── 推演完成时自动转换布局 ──
+  useEffect(() => {
+    // 只有当推演动画完成时才触发
+    if (!animCompleted) return
+    if (didFixLayoutOnAnalysisRef.current) return
+    // 确保 canvasQuery 数据已加载
+    if (!canvasQuery.data) return
+    didFixLayoutOnAnalysisRef.current = true
+    console.log('[WorkbenchPage] 推演完成，自动转换布局')
+    fixAndSaveLayout(canvasQuery.data)
+  }, [animCompleted, canvasQuery.data, fixAndSaveLayout])
 
   const saveMutation = useMutation({
     mutationFn: (canvas: import('@/types/canvas').Canvas) =>
@@ -959,10 +991,6 @@ export function WorkbenchPage() {
     onSuccess: (data) => {
       console.log('[WorkbenchPage] partial analysis started:', data)
       message.info('已发起局部重推，请等待推演完成')
-      // 注意：所有 startPartialAnalysisMutation 调用点（来自 hasPendingStructuralChange）
-      // 都是结构性变更（新增/删除节点或连线）。仅修改权重的局部重推走
-      // saveForPartialMutation 路径，不会进入此处，因此不会触发自动布局。
-      setPendingAutoLayout({ taskId: data.taskId, reason: 'STRUCTURAL_CHANGE' })
       setPartialAnalysisInfo({
         decisionId: id,
         taskId: data.taskId,
@@ -1225,9 +1253,6 @@ export function WorkbenchPage() {
           partialAnalysisInfo={currentPartialInfo}
           partialSteps={steps}
           forceSyncKey={forceSyncKey}
-          autoLayoutRequestKey={autoLayoutRequestKey}
-          autoLayoutReason={autoLayoutReason}
-          onPersistLayoutOnly={handlePersistLayoutOnly}
         />
 
         {hasPendingStructuralChange && (
