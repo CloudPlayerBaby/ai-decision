@@ -7,13 +7,14 @@ export interface AuthUser {
   createdAt?: string
 }
 
-export interface RegisterRequest {
+/** 页面表单：用户输入明文密码 */
+export interface RegisterPayload {
   username: string
   email: string
   password: string
 }
 
-export interface LoginRequest {
+export interface LoginPayload {
   account: string
   password: string
 }

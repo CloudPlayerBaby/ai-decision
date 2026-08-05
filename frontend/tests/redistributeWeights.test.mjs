@@ -191,13 +191,19 @@ describe('用例 3：已有 4 个因素，新增最大 80%', () => {
   assertTrue(Math.abs(sum - 1) < 1e-9, `总和严格为 100%（实际 ${(sum * 100).toFixed(2)}%）`)
 })
 
-describe('用例 4：已有 5 个因素，新增超过 75% 应被限制', () => {
+describe('用例 4：已有 5 个因素，新增 80% 超过上限', () => {
   const max = computeMaxNewFactorWeight(5)
   assertEq(max, 0.75, '动态最大权重 = 75%')
-  const r = redistributeExistingWeightsForNewFactor([0.20, 0.20, 0.20, 0.20, 0.20], 0.80)
-  assertTrue(r !== null, '理论上仍可分配（80% snap 后变 75%）')
-  assertEq(r.newFactorWeight, 0.75, 'snap 后为 75%')
-  const sum = r.existing.reduce((s, w) => s + w, 0)
+  // 输入 0.80 超上限，应在调用方校验拒绝；本函数 snap 后为 0.75 但预算不足以分配，
+  // 所以正确返回 null（用户应当限制输入 ≤ 0.75 才能新增）
+  const r80 = redistributeExistingWeightsForNewFactor([0.20, 0.20, 0.20, 0.20, 0.20], 0.80)
+  assertEq(r80, null, '0.80 超出 5 个旧因素的可分配上限，返回 null')
+
+  // 输入 0.75 应可成功分配
+  const r75 = redistributeExistingWeightsForNewFactor([0.20, 0.20, 0.20, 0.20, 0.20], 0.75)
+  assertTrue(r75 !== null, '0.75 在限制内，可成功分配')
+  assertEq(r75.newFactorWeight, 0.75, 'snap 后为 75%')
+  const sum = r75.existing.reduce((s, w) => s + w, 0)
   assertTrue(Math.abs(sum - 0.25) < 1e-9, `旧因素总和 = 25%（实际 ${(sum * 100).toFixed(2)}%）`)
 })
 

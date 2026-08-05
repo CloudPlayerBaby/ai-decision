@@ -18,8 +18,7 @@ public class RegisterRequest {
     @Email(message = "邮箱格式不合法")
     private String email;
 
+    /** 前端公钥加密后的密文；密码格式校验在解密后的 service 层进行 */
     @NotBlank(message = "密码不能为空")
-    @Size(min = 8, max = 64, message = "密码长度为8-64位")
-    @Pattern(regexp = "^(?=.*[a-zA-Z])(?=.*\\d).+$", message = "密码需包含字母和数字")
     private String password;
 }

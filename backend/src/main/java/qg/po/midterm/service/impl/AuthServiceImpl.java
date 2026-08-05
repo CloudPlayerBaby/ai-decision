@@ -11,6 +11,7 @@ import qg.po.midterm.dto.request.RegisterRequest;
 import qg.po.midterm.entity.SysUser;
 import qg.po.midterm.mapper.SysUserMapper;
 import qg.po.midterm.security.JwtUtil;
+import qg.po.midterm.security.RsaUtil;
 import qg.po.midterm.service.AuthService;
 import qg.po.midterm.vo.LoginVO;
 import qg.po.midterm.vo.UserVO;
@@ -22,6 +23,10 @@ public class AuthServiceImpl implements AuthService {
     private final SysUserMapper sysUserMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final RsaUtil rsaUtil;
+
+    private static final java.util.regex.Pattern PASSWORD_RULE =
+            java.util.regex.Pattern.compile("^(?=.*[a-zA-Z])(?=.*\\d).{8,64}$");
 
     // 注册，并检查用户名和邮箱
     @Override
@@ -35,10 +40,15 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "邮箱已注册");
         }
 
+        String password = rsaUtil.decryptOrPlain(request.getPassword());
+        if (!PASSWORD_RULE.matcher(password).matches()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "密码需为8-64位且包含字母和数字");
+        }
+
         SysUser user = new SysUser();
         user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setPasswordHash(passwordEncoder.encode(password));
         sysUserMapper.insert(user);
 
         return toUserVO(user);
@@ -55,7 +65,8 @@ public class AuthServiceImpl implements AuthService {
         if (user == null) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号或密码错误");
         }
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+        String password = rsaUtil.decryptOrPlain(request.getPassword());
+        if (!passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "账号或密码错误");
         }
 
