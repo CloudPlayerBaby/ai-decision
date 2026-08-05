@@ -481,38 +481,35 @@ public class DecisionServiceImpl implements DecisionService {
         List<Canvas.CanvasNode> nodes = new ArrayList<>();
         List<Canvas.CanvasEdge> edges = new ArrayList<>();
 
-        // 根节点 — 决策问题（上中）
+        // 根节点 — 决策问题（最左列，垂直居中）
         nodes.add(createNode("root", "decision", decisionTitle,
-                new Canvas.Position(360, 40), Collections.emptyMap()));
+                CanvasLayoutPlanner.rootPosition(), Collections.emptyMap()));
 
-        // Factor 节点 + edge（水平排列，y=180）
+        // Factor 节点 + edge（中间列，列内纵向均分）
         List<Factor> factors = dto.getFactors() != null
                 ? dto.getFactors() : Collections.emptyList();
         int factorCount = factors.size();
         for (int i = 0; i < factorCount; i++) {
             Factor f = factors.get(i);
-            double x = 140 + (double) i * (560.0 / Math.max(1, factorCount - 1));
-            if (factorCount == 1) x = 360;
             Map<String, Object> factorData = new HashMap<>();
             factorData.put("weight", f.getWeight());
             nodes.add(createNode(f.getId(), "factor", f.getName(),
-                    new Canvas.Position(x, 180), factorData));
+                    new Canvas.Position(CanvasLayoutPlanner.columnX("factor"),
+                            CanvasLayoutPlanner.distributeY(i, factorCount)), factorData));
         }
 
-        // Option 节点（水平排列，y=340）
+        // Option 节点（最右列，列内纵向均分）
         List<Option> options = dto.getOptions() != null
                 ? dto.getOptions() : Collections.emptyList();
         int optionCount = options.size();
         for (int i = 0; i < optionCount; i++) {
             Option o = options.get(i);
-            double x = 140 + (double) i * (560.0 / Math.max(1, optionCount - 1));
-            if (optionCount == 1) x = 360;
             Map<String, Object> optionData = new HashMap<>();
             optionData.put("scores", o.getScores() != null
                     ? o.getScores() : Collections.emptyMap());
             nodes.add(createNode(o.getId(), "option", o.getName(),
-                    new Canvas.Position(x, 340), optionData));
-
+                    new Canvas.Position(CanvasLayoutPlanner.columnX("option"),
+                            CanvasLayoutPlanner.distributeY(i, optionCount)), optionData));
         }
 
         edges.addAll(CanvasTopologyBuilder.buildEdges(factors, options));
