@@ -38,6 +38,7 @@ import qg.po.midterm.vo.*;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 import qg.po.midterm.workflow.agent.ReportAgent;
+import qg.po.midterm.workflow.utils.StepDisplayUtils;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
@@ -64,6 +65,7 @@ public class DecisionServiceImpl implements DecisionService {
     private final DecisionSolutionMapper decisionSolutionMapper;
     private final ObjectMapper objectMapper;
     private final ReportAgent reportAgent;
+    private final StepDisplayUtils stepDisplayUtils;
 
     /** 6.4 中不可删除的状态 */
     private static final Set<String> UNDELETABLE_STATUSES =
@@ -840,6 +842,80 @@ public class DecisionServiceImpl implements DecisionService {
                 .createdAt(formatTime(entity.getCreatedAt()))
                 .updatedAt(formatTime(entity.getUpdatedAt()))
                 .build();
+    }
+
+    @Override
+    public List<DecisionHistoryVO> getHistory(String decisionId) {
+        Long id = parseId(decisionId, "d_");
+        Decision decision = decisionMapper.selectById(id);
+        if (decision == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "决策问题不存在");
+        }
+        checkOwner(decision);
+
+        // 1. 查该决策下所有任务，按开始时间正序排列
+        List<AnalysisTask> tasks = analysisTaskMapper.selectList(
+                new LambdaQueryWrapper<AnalysisTask>()
+                        .eq(AnalysisTask::getDecisionId, id)
+                        .orderByAsc(AnalysisTask::getStartedAt)
+        );
+
+        List<DecisionHistoryVO> history = new ArrayList<>();
+        for (AnalysisTask task : tasks) {
+            // 2. 查该任务下所有步骤，按 step_order 正序
+            List<AnalysisStep> steps = analysisStepMapper.selectList(
+                    new LambdaQueryWrapper<AnalysisStep>()
+                            .eq(AnalysisStep::getRunId, task.getId())
+                            .orderByAsc(AnalysisStep::getStepOrder)
+            );
+
+            // 3. 转换为 NodeProgressVO，过滤掉「复用历史」的占位步骤
+            List<NodeProgressVO> stepVOs = new ArrayList<>();
+            for (AnalysisStep step : steps) {
+                // 复用历史结果的步骤不展示（reused=true）
+                if (isReusedStep(step.getOutputData())) continue;
+
+                StepDisplayUtils.StepDisplay display = stepDisplayUtils.parseDisplay(
+                        step.getStepName(), step.getStatus(),
+                        step.getOutputData(), step.getErrorMessage());
+
+                stepVOs.add(new NodeProgressVO(
+                        "s_" + step.getId(),
+                        step.getStepName(),
+                        StepDisplayUtils.getDisplayName(step.getStepName()),
+                        step.getStatus(),
+                        toOffsetDateTime(step.getStartedAt()),
+                        toOffsetDateTime(step.getFinishedAt()),
+                        display.summary(),
+                        display.content()
+                ));
+            }
+
+            history.add(DecisionHistoryVO.builder()
+                    .taskId("t_" + task.getId())
+                    .runType(task.getRunType())
+                    .taskStatus(task.getStatus())
+                    .startedAt(toOffsetDateTime(task.getStartedAt()))
+                    .finishedAt(toOffsetDateTime(task.getFinishedAt()))
+                    .steps(stepVOs)
+                    .build());
+        }
+        return history;
+    }
+
+    /** 判断该步骤是否是「复用历史结果」的占位步骤（reused=true）。 */
+    private boolean isReusedStep(String outputData) {
+        if (outputData == null || outputData.isBlank()) return false;
+        try {
+            return objectMapper.readTree(outputData).path("reused").asBoolean(false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private java.time.OffsetDateTime toOffsetDateTime(LocalDateTime time) {
+        if (time == null) return null;
+        return time.atZone(ZoneId.systemDefault()).toOffsetDateTime();
     }
 
     /**

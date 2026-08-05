@@ -241,6 +241,7 @@ export {
   rebalanceWeights,
   redistributeWeightsOnDelete,
   redistributeWeightsOnAdd,
+  rebalanceWithNewFactor,
 }
 
 // ── 权重边界常量 ──────────────────────────────────────────────
@@ -424,4 +425,37 @@ function redistributeWeightsOnAdd(
   }
 
   return boundedRebalanceImpl(factorNodes, targetWeights)
+}
+
+/**
+ * 新增因素时，其余已有因素按比例配平剩余权重。
+ * @param existingFactors 已有因素节点（不包含新节点）
+ * @param newFactorWeight 用户选定的新因素权重（0~1）
+ * @returns 全部因素节点（新 + 旧），权重和严格为 1，无 NaN/负数
+ */
+function rebalanceWithNewFactor(
+  existingFactors: FlowNode[],
+  newFactorWeight: number,
+): FlowNode[] {
+  if (existingFactors.length === 0) return []
+
+  const clamped = Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, newFactorWeight))
+  const remaining = 1 - clamped
+
+  if (existingFactors.length === 1) {
+    return existingFactors.map((node) => ({
+      ...node,
+      data: { ...node.data, weight: remaining },
+    })) as FlowNode[]
+  }
+
+  // 已有因素按当前相对比例分配 remaining
+  const currentSum = existingFactors.reduce((s, n) => s + getWeight(n), 0)
+  const targetWeights: Partial<Record<string, number>> = {}
+  for (const node of existingFactors) {
+    const prop = currentSum > 0 ? getWeight(node) / currentSum : 1 / existingFactors.length
+    targetWeights[node.id] = clamped + remaining * prop
+  }
+
+  return boundedRebalanceImpl(existingFactors, targetWeights)
 }
