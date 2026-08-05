@@ -678,6 +678,130 @@ body.is-resizing .resize-handle::before {
   font-size: 14px;
 }
 
+.canvas-panel__generating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.canvas-panel__generating-visual {
+  position: relative;
+  width: 220px;
+  height: 120px;
+  margin-bottom: 4px;
+}
+
+.canvas-panel__generating-node {
+  position: absolute;
+  border-radius: 10px;
+  border: 2px solid;
+  opacity: 0;
+  animation: canvas-generating-node 2.4s ease-in-out infinite;
+}
+
+.canvas-panel__generating-node--decision {
+  left: 8px;
+  top: 44px;
+  width: 56px;
+  height: 32px;
+  border-color: var(--node-decision-border, #1677ff);
+  background: color-mix(in srgb, var(--node-decision-border, #1677ff) 12%, transparent);
+}
+
+.canvas-panel__generating-node--factor {
+  left: 92px;
+  top: 16px;
+  width: 48px;
+  height: 28px;
+  border-color: var(--node-factor-border, #52c41a);
+  background: color-mix(in srgb, var(--node-factor-border, #52c41a) 12%, transparent);
+  animation-delay: 0.35s;
+}
+
+.canvas-panel__generating-node--option {
+  right: 8px;
+  top: 52px;
+  width: 52px;
+  height: 28px;
+  border-color: var(--node-option-border, #722ed1);
+  background: color-mix(in srgb, var(--node-option-border, #722ed1) 12%, transparent);
+  animation-delay: 0.7s;
+}
+
+.canvas-panel__generating-line {
+  position: absolute;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text-muted) 35%, transparent),
+    transparent
+  );
+  opacity: 0;
+  animation: canvas-generating-line 2.4s ease-in-out infinite;
+}
+
+.canvas-panel__generating-line--1 {
+  left: 64px;
+  top: 58px;
+  width: 28px;
+  --line-rotate: -18deg;
+}
+
+.canvas-panel__generating-line--2 {
+  left: 140px;
+  top: 66px;
+  width: 32px;
+  --line-rotate: 12deg;
+  animation-delay: 0.35s;
+}
+
+.canvas-panel__generating-text {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.canvas-panel__generating-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+@keyframes canvas-generating-node {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.92);
+  }
+
+  40%,
+  60% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes canvas-generating-line {
+  0%,
+  100% {
+    opacity: 0;
+    transform: rotate(var(--line-rotate, 0deg)) scaleX(0.4);
+  }
+
+  45%,
+  55% {
+    opacity: 1;
+    transform: rotate(var(--line-rotate, 0deg)) scaleX(1);
+  }
+}
+
 .canvas-panel__toolbar .ant-btn {
   font-size: 12px;
 }
