@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Handle,
   Position,
@@ -29,9 +29,10 @@ import type {
   OptionFlowData,
 } from '../../types/flow'
 import type { AnalysisStep } from '../../types/analysis'
-import { toFlowNodes, buildCanvasData, rebalanceWeights, redistributeWeightsOnDelete, redistributeExistingWeightsForNewFactor, computeMaxNewFactorWeight } from '../../utils/canvasMapper'
+import { toFlowNodes, buildCanvasData, redistributeWeightsOnDelete, redistributeExistingWeightsForNewFactor, computeMaxNewFactorWeight, rebalanceEditedFactor } from '../../utils/canvasMapper'
 import { applyDagreLayout, estimateNodeHeight } from '../../utils/canvasLayout'
 import { CanvasActionsContext, useCanvasActions } from '../../contexts/CanvasActionsContext'
+import type { CanvasActions } from '../../contexts/CanvasActionsContext'
 import { createContext, useContext } from 'react'
 import type { Node } from '@xyflow/react'
 
@@ -766,6 +767,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   // 跟踪 factor 节点的初始权重（用于判断用户是否修改了权重）
   const initialWeightRef = useRef<number>(0.1)
+  // 编辑已有 factor 时，记录其余因素"编辑前"的权重快照。
+  // 在本次编辑过程中，每次 rebalance 都基于这份快照分配比例，
+  // 避免连续滑动导致其他因素之间比例因反复取整而漂移。
+  const editOtherSnapshotRef = useRef<number[]>([])
   // 跟踪当前是否正在编辑已有 factor（区别于新建因素）
   const isEditingFactorRef = useRef(false)
   // 新增因素表单的默认权重（同步保存以便 form.setFieldsValue 使用）
@@ -777,8 +782,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const [isNewNode, setIsNewNode] = useState(false)
   const [form] = Form.useForm()
   const [weightValue, setWeightValue] = useState(0.1)
-  const [sliderMin, setSliderMin] = useState(5)
-  const [sliderMax, setSliderMax] = useState(80)
   const [activeTabKey, setActiveTabKey] = useState<OptionModalTab>('settings')
 
   // 边聚焦状态（仅影响渲染样式，不触发持久化）
@@ -797,8 +800,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     [nodes],
   )
 
-  // Context value（不含 pros/cons/risks，仅传回调）
-  const canvasActions = useRef({ openOptionAnalysis }).current
+  // Context value 实际在下方 handleOptionDeleteClick 定义之后再构建，避免 TDZ。
+  // 这里仅保留占位，实际创建见 file 末尾的「canvasActions 构建」段。
 
   // 打开 Modal
   const openModal = useCallback(
@@ -814,30 +817,20 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           setWeightValue(w)
           initialWeightRef.current = w
           isEditingFactorRef.current = !isNew
-          // 新增因素：使用动态计算的最大权重，确保其余因素至少保留 5%
-          // 已有因素：使用越界恢复逻辑
+          // 新增因素：默认权重 20%，但不能超过动态最大值（确保至少 n 个旧因素各 ≥ 5%）
+          // 已有因素：使用算法层（rebalanceEditedFactor）保证 5%–80% 边界，UI 层 Slider 保持 5–80%
           if (isNew) {
             const existingFactorCount = nodes.filter((n) => n.type === 'factor').length
-            // 默认权重 20%，但不能超过动态计算的最大值（确保至少 n 个旧因素各 ≥ 5%）
             const maxNewWeight = computeMaxNewFactorWeight(existingFactorCount)
             const defaultWeight = Math.min(0.20, maxNewWeight)
             setWeightValue(defaultWeight)
-            setSliderMin(5)
-            setSliderMax(Math.round(maxNewWeight * 100))
-            // 把 defaultWeight 暴露给 form.setFieldsValue，避免 setState 异步未生效
             newFactorDefaultWeightRef.current = defaultWeight
+            editOtherSnapshotRef.current = []
           } else {
-            // 已有因素越界时设置单向拖动范围
-            if (w < 0.05) {
-              setSliderMin(Math.round(w * 100))
-              setSliderMax(80)
-            } else if (w > 0.80) {
-              setSliderMin(5)
-              setSliderMax(Math.round(w * 100))
-            } else {
-              setSliderMin(5)
-              setSliderMax(80)
-            }
+            // 在编辑开始时，记录其余因素的原始权重快照（供 handleSaveFactor 比例配平使用）
+            editOtherSnapshotRef.current = nodes
+              .filter((n) => n.type === 'factor' && n.id !== node.id)
+              .map((n) => (n.data as FactorFlowData).weight)
           }
           form.setFieldsValue({
             label: factorData.label,
@@ -847,6 +840,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         } else if (node.type === 'option') {
           const optionData = node.data as OptionFlowData
           isEditingFactorRef.current = false
+          editOtherSnapshotRef.current = []
           form.setFieldsValue({
             label: optionData.label,
             ...optionData.scores,
@@ -854,6 +848,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         }
       } else {
         isEditingFactorRef.current = false
+        editOtherSnapshotRef.current = []
         form.resetFields()
         form.setFieldsValue({
           cost: 3,
@@ -871,6 +866,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     setModalOpen(false)
     setEditingNode(null)
     isEditingFactorRef.current = false
+    editOtherSnapshotRef.current = []
   }, [])
 
   // 确认保存因素：仅更新权重，名称保留为节点原 label
@@ -900,12 +896,34 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       )
 
       const allFactorNodes = labelPreservedNodes.filter((n) => n.type === 'factor')
-      const rebalanced = rebalanceWeights(allFactorNodes, editingNode.id, weightValue)
+
+      // 使用"编辑前快照"驱动的精确配平算法：
+      // - editedFactor 权重被强制保留（snap 到 5% 步长，并与用户输入完全一致）
+      // - 其他因素按"编辑前"快照的相对比例分配剩余权重，避免连续滑动产生比例漂移
+      // - 全部以 5% 为步长，总和严格为 100%，并尊重 5%~80% 上下限
+      const snapshot = editOtherSnapshotRef.current.length > 0
+        ? editOtherSnapshotRef.current
+        : undefined
+      const distribution = rebalanceEditedFactor(
+        allFactorNodes,
+        editingNode.id,
+        weightValue,
+        snapshot,
+      )
+      if (!distribution) {
+        message.warning('无法按当前权重重新配平，请调整权重后重试')
+        return
+      }
+
+      const rebalanced = distribution.factorNodes
       const nextNodes = labelPreservedNodes.map((n) => {
         if (n.type !== 'factor') return n
         const updated = rebalanced.find((r: FlowNode) => r.id === n.id)
         return updated ?? n
       })
+
+      // 清空快照，避免下次编辑误用
+      editOtherSnapshotRef.current = []
 
       setNodes(nextNodes)
       setModalOpen(false)
@@ -1086,6 +1104,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       setPendingOptionDelete({ nodeId, nodeLabel: node.data?.label ?? '' })
     },
     [],
+  )
+
+  // Context value（不含 pros/cons/risks，仅传回调）
+  // 这里放在 handleOptionDeleteClick 之后，避免 TDZ。
+  const canvasActions = useMemo<CanvasActions>(
+    () => ({ openOptionAnalysis, deleteOption: handleOptionDeleteClick }),
+    [openOptionAnalysis, handleOptionDeleteClick],
   )
 
   // 确认删除方案：执行删除 + 保存画布 + 局部重推
@@ -1630,24 +1655,15 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                             <Form.Item name="weight" label="影响权重">
                               <div className="canvas-modal__weight-card">
                                 <Slider
-                                  min={sliderMin}
-                                  max={sliderMax}
+                                  min={5}
+                                  max={80}
                                   step={1}
                                   value={Math.round(weightValue * 100)}
                                   onChange={(val) => {
                                     const w = val / 100
                                     setWeightValue(w)
-                                    // 越界恢复：每次拖动后 min/max 跟随当前值
-                                    if (w < 0.05) {
-                                      setSliderMin(Math.round(w * 100))
-                                      setSliderMax(80)
-                                    } else if (w > 0.80) {
-                                      setSliderMin(5)
-                                      setSliderMax(Math.round(w * 100))
-                                    } else {
-                                      setSliderMin(5)
-                                      setSliderMax(80)
-                                    }
+                                    // 数据层使用小数 w；算法层（rebalanceEditedFactor）会自行 snap 到 5% 步长
+                                    // 并保证其他因素满足 5%–80% 边界，UI 层不做动态 min/max 收紧
                                   }}
                                   tooltip={{ formatter: (v) => `${v}%` }}
                                   marks={{
@@ -1673,7 +1689,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                   <span className="canvas-modal__weight-warning"> · 推荐范围为 10%~60%</span>
                                 )}
                                 {weightValue >= 0.05 && weightValue <= 0.80 && (
-                                  <span> · 修改后其余因素将按比例自动调整</span>
+                                  <span> · 修改后其余因素将按编辑前的原始比例重新分配，权重总和始终为 100%</span>
                                 )}
                               </div>
                             </Form.Item>
@@ -1691,11 +1707,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                             <Form.Item name="weight" label="影响权重">
                               <div className="canvas-modal__weight-card">
                                 <Slider
-                                  min={sliderMin}
-                                  max={sliderMax}
+                                  min={5}
+                                  max={80}
                                   step={1}
                                   value={Math.round(weightValue * 100)}
                                   onChange={(val) => {
+                                    // 数据层使用小数；算法层（redistributeExistingWeightsForNewFactor）会
+                                    // 自行 snap 到 5% 步长并保证其他因素满足 5%–80% 边界
                                     setWeightValue(val / 100)
                                   }}
                                   tooltip={{ formatter: (v) => `${v}%` }}
@@ -1703,7 +1721,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                     5: '5%',
                                     10: '10%',
                                     60: '60%',
-                                    [Math.round(sliderMax)]: `${Math.round(sliderMax)}%`,
+                                    80: '80%',
                                   }}
                                 />
                                 <span className="canvas-modal__weight-value">
@@ -1712,7 +1730,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               </div>
                               <div className="canvas-modal__weight-hint">
                                 当前总权重：100%
-                                {weightValue >= 0.60 && weightValue <= sliderMax / 100 && (
+                                {weightValue >= 0.60 && weightValue <= 0.80 && (
                                   <span className="canvas-modal__weight-warning"> · 权重较高，建议控制在 60% 以内</span>
                                 )}
                                 <span> · 新因素将使用你设置的权重，其他因素将按当前比例自动调整，权重总和始终为 100%</span>
@@ -1918,10 +1936,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                     <Button
                                       type="primary"
                                       onClick={() => {
-                                        if (weightValue < 0.05 || weightValue > 0.80) {
-                                          message.warning('请先将权重拖回合法范围（5%~80%）后再保存')
-                                          return
-                                        }
+                                        // 数据层使用小数；算法层（rebalanceEditedFactor）会自行 snap 到 5% 步长
+                                        // 并保证其他因素满足 5%–80% 边界，此处无需动态范围校验
                                         submitForm()
                                       }}
                                     >

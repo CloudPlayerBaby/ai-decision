@@ -467,14 +467,14 @@ function rebalanceWithNewFactor(
 
 // ── 新增因素：基于整数单位的精确比例分配 ───────────────────────
 
-/** 权重单位：5%（1 单位 = 0.05，整数倍分配避免浮点误差） */
-const WEIGHT_UNIT = 0.05
-/** 1.0 = 20 个单位 */
-const TOTAL_UNITS = 20
-/** 1 单位 = 5%（下界） */
-const MIN_UNITS = 1
-/** 16 单位 = 80%（上界） */
-const MAX_UNITS = 16
+/** 权重单位：1%（1 单位 = 0.01，整数倍分配避免浮点误差） */
+const WEIGHT_UNIT = 0.01
+/** 1.0 = 100 个单位 */
+const TOTAL_UNITS = 100
+/** 5 单位 = 5%（下界） */
+const MIN_UNITS = 5
+/** 80 单位 = 80%（上界） */
+const MAX_UNITS = 80
 
 /**
  * 在 [minU, maxU] 区间内，将 `budget` 个整数单位按 `existingWeights` 的相对比例
@@ -643,4 +643,118 @@ function redistributeExistingWeightsForNewFactor(
     existingFactors: updatedExisting,
     newFactorWeight: newFactorWeightSnapped,
   }
+}
+
+// ── 编辑已有因素：基于整数单位的精确比例分配 ─────────────────────
+
+/**
+ * 计算编辑某个已有因素时，该因素可设置的最小/最大权重。
+ *
+ * 规则：在其他 n-1 个因素都满足 [5%, 80%] 的前提下：
+ *   min = max(0.05, 1 - (n-1) * 0.80)  // 其余全部分到 80%，自身留出最小值
+ *   max = min(0.80, 1 - (n-1) * 0.05)  // 其余全部分到 5%，自身留下最大值
+ *
+ * 当 n=1 时返回 [1, 1]（唯一因素必须 100%）。
+ */
+export function computeEditableFactorRange(factorCount: number): {
+  min: number
+  max: number
+} {
+  if (factorCount <= 1) {
+    return { min: WEIGHT_MAX, max: WEIGHT_MAX }
+  }
+  const otherCount = factorCount - 1
+  const min = Math.max(WEIGHT_MIN, 1 - otherCount * WEIGHT_MAX)
+  const max = Math.min(WEIGHT_MAX, 1 - otherCount * WEIGHT_MIN)
+  return { min, max }
+}
+
+/**
+ * 编辑某个已有因素的权重时，按以下规则重新配平所有因素：
+ *
+ * 1. 被编辑因素的权重被强制保留（按用户输入，先 snap 到 5% 步长，且在 [min, max] 内）；
+ * 2. 其余已有因素按"编辑前各自的权重"作为相对比例分配剩余权重（避免滑动过程中反复取整产生漂移）；
+ * 3. 若比例分配导致某因素低于 5% 或高于 80%，固定在边界，剩余因素继续按比例分配；
+ * 4. 所有结果均为 5% 整数倍，总和严格等于 100%；
+ * 5. 理论上无法满足约束时返回 null（由调用方提示用户）。
+ *
+ * 实现要点：
+ * - 共用 allocateUnitsProportionally 作为新增/编辑/删除的核心算法单元；
+ * - 必须传入"编辑前的其他因素权重快照"，否则连续滑动会导致其他因素之间的比例逐渐漂移；
+ * - 返回值中的 editedNode 始终保持 newWeightSnapped（与用户输入严格一致）。
+ */
+export function rebalanceEditedFactor(
+  factorNodes: FlowNode[],
+  editedId: string,
+  newWeight: number,
+  /**
+   * 其他因素"编辑前"的权重快照（用于比例分配的基准）。
+   * 长度必须等于 factorNodes.length - 1，且按 factorNodes 中除 editedId 外的顺序排列。
+   */
+  otherSnapshotWeights?: readonly number[],
+): {
+  factorNodes: FlowNode[]
+  editedWeight: number
+} | null {
+  if (!Number.isFinite(newWeight)) return null
+  if (factorNodes.length === 0) return null
+
+  const editedNode = factorNodes.find((n) => n.id === editedId)
+  if (!editedNode) return null
+
+  // 单因素情形：必须 100%，不参与比例配平
+  if (factorNodes.length === 1) {
+    const snapped = 1
+    return {
+      factorNodes: factorNodes.map((n) => ({
+        ...n,
+        data: { ...n.data, weight: snapped },
+      })) as FlowNode[],
+      editedWeight: snapped,
+    }
+  }
+
+  // 1) snap 编辑权重到 5% 步长，并校验 [min, max] 范围
+  const { min, max } = computeEditableFactorRange(factorNodes.length)
+  const rawUnits = Math.round(newWeight / WEIGHT_UNIT)
+  const clampedUnits = Math.max(
+    Math.round(min / WEIGHT_UNIT),
+    Math.min(Math.round(max / WEIGHT_UNIT), rawUnits),
+  )
+  const editedWeightSnapped = Math.round(clampedUnits * WEIGHT_UNIT * 1000) / 1000
+
+  const editedUnits = clampedUnits
+  const budget = TOTAL_UNITS - editedUnits
+  if (budget < 0) return null
+
+  // 2) 计算其他因素的"基准权重"：优先使用调用方传入的快照（避免连续滑动漂移）
+  const otherNodes = factorNodes.filter((n) => n.id !== editedId)
+  const otherBaseline =
+    otherSnapshotWeights && otherSnapshotWeights.length === otherNodes.length
+      ? Array.from(otherSnapshotWeights)
+      : otherNodes.map((n) => getWeight(n))
+
+  // 3) 调用共享的整数单位分配函数
+  const allocations = allocateUnitsProportionally(otherBaseline, budget, MIN_UNITS, MAX_UNITS)
+  if (!allocations) return null
+
+  // 4) 组装返回结果：editedNode 严格保留 snapped，其他按 allocations 写入
+  const updatedOthers = otherNodes.map((n, i) => ({
+    ...n,
+    data: { ...n.data, weight: allocations[i] * WEIGHT_UNIT },
+  })) as FlowNode[]
+
+  const editedNodeUpdated: FlowNode = {
+    ...editedNode,
+    data: { ...editedNode.data, weight: editedWeightSnapped },
+  } as FlowNode
+
+  const idToUpdated = new Map<string, FlowNode>()
+  idToUpdated.set(editedNodeUpdated.id, editedNodeUpdated)
+  for (const n of updatedOthers) {
+    idToUpdated.set(n.id, n)
+  }
+
+  const result = factorNodes.map((n) => idToUpdated.get(n.id) ?? n)
+  return { factorNodes: result, editedWeight: editedWeightSnapped }
 }

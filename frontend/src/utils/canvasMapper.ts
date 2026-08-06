@@ -19,4 +19,6 @@ export {
   redistributeExistingWeightsForNewFactor,
   computeMaxNewFactorWeight,
   allocateUnitsProportionally,
+  rebalanceEditedFactor,
+  computeEditableFactorRange,
 } from './canvasMapperImpl.ts'
