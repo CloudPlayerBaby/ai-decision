@@ -766,22 +766,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onPersistLayoutOnlyRef.current?.(buildCanvasData(layoutedNodes, layoutedEdges))
   }, [autoLayoutRequestKey, autoLayoutReason])
 
-  // ── 删除候选方案节点状态 ─────────────────────────────────────
-  // 暂存待确认删除的方案节点信息（显示确认 Modal）
-  const [pendingOptionDelete, setPendingOptionDelete] = useState<{
-    nodeId: string
-    nodeLabel: string
-  } | null>(null)
   // 保存删除前的 nodes 和 edges 快照，用于失败时回滚
   const optionDeleteNodesSnapshotRef = useRef<FlowNode[]>([])
   const optionDeleteEdgesSnapshotRef = useRef<FlowEdge[]>([])
 
-  // ── 删除因素节点状态 ─────────────────────────────────────────
-  // 暂存待确认删除的因素节点信息（显示确认 Modal）
-  const [pendingFactorDelete, setPendingFactorDelete] = useState<{
-    nodeId: string
-    nodeLabel: string
-  } | null>(null)
   // 保存删除前的 nodes 和 edges 快照，用于失败时回滚
   const factorDeleteNodesSnapshotRef = useRef<FlowNode[]>([])
   const factorDeleteEdgesSnapshotRef = useRef<FlowEdge[]>([])
@@ -1115,16 +1103,34 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node || node.type !== 'option') return
 
-      // 至少保留 2 个方案
       const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
       if (optionCount <= 2) return
 
-      // 保存快照，用于失败时回滚
       optionDeleteNodesSnapshotRef.current = nodesRef.current
       optionDeleteEdgesSnapshotRef.current = edgesRef.current
-      setPendingOptionDelete({ nodeId, nodeLabel: node.data?.label ?? '' })
+
+      const newNodes = nodesRef.current.filter((n) => n.id !== nodeId)
+      const newEdges = edgesRef.current.filter(
+        (e) => e.source !== nodeId && e.target !== nodeId,
+      )
+      setNodes(newNodes)
+      setEdges(newEdges)
+
+      if (editingNode?.id === nodeId) {
+        setModalOpen(false)
+        setEditingNode(null)
+      }
+
+      const updatedCanvas = buildCanvasData(newNodes, newEdges)
+      const rollback = () => {
+        setNodes(optionDeleteNodesSnapshotRef.current)
+        setEdges(optionDeleteEdgesSnapshotRef.current)
+      }
+      onOptionDeleteRef.current?.(updatedCanvas, nodeId, rollback).catch(() => {
+        rollback()
+      })
     },
-    [],
+    [editingNode?.id, setNodes, setEdges],
   )
 
   // Context value（不含 pros/cons/risks，仅传回调）
@@ -1134,52 +1140,15 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     [openOptionAnalysis, handleOptionDeleteClick],
   )
 
-  // 确认删除方案：执行删除 + 保存画布 + 局部重推
-  const confirmOptionDelete = useCallback(() => {
-    if (!pendingOptionDelete) return
-    const { nodeId } = pendingOptionDelete
-    setPendingOptionDelete(null)
-
-    // 快照已在上一步保存，这里乐观删除
-    const newNodes = nodesRef.current.filter((n) => n.id !== nodeId)
-    const newEdges = edgesRef.current.filter(
-      (e) => e.source !== nodeId && e.target !== nodeId,
-    )
-    setNodes(newNodes)
-    setEdges(newEdges)
-
-    if (editingNode?.id === nodeId) {
-      setModalOpen(false)
-      setEditingNode(null)
-    }
-
-    const updatedCanvas = buildCanvasData(newNodes, newEdges)
-    const rollback = () => {
-      setNodes(optionDeleteNodesSnapshotRef.current)
-      setEdges(optionDeleteEdgesSnapshotRef.current)
-    }
-    // 传给父组件，由父组件决定何时回滚
-    onOptionDeleteRef.current?.(updatedCanvas, nodeId, rollback).catch(() => {
-      rollback()
-    })
-  }, [pendingOptionDelete, setNodes, setEdges])
-
-  // 取消删除：恢复 nodes 和 edges
-  const cancelOptionDelete = useCallback(() => {
-    const nodesSnap = optionDeleteNodesSnapshotRef.current
-    const edgesSnap = optionDeleteEdgesSnapshotRef.current
-    if (nodesSnap.length > 0 || edgesSnap.length > 0) {
-      setNodes(nodesSnap)
-      setEdges(edgesSnap)
-    }
-    setPendingOptionDelete(null)
-  }, [setNodes, setEdges])
-
   // ── 删除因素节点 ─────────────────────────────────────────────
 
   // 统一的删除因素入口：点击按钮 / 删除 HAS_FACTOR 连线共用
-  const initiateFactorDelete = useCallback(
-    (nodeId: string, nodeLabel: string) => {
+  // 点击"删除此因素"按钮：权重重分配 + 删除节点和连线 + 保存画布 + 局部重推
+  const handleFactorDeleteClick = useCallback(
+    (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId)
+      if (!node || node.type !== 'factor') return
+
       const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
       // 至少保留 2 个因素
       if (factorCount <= 2) return
@@ -1187,71 +1156,40 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       // 保存快照，用于失败时回滚
       factorDeleteNodesSnapshotRef.current = nodesRef.current
       factorDeleteEdgesSnapshotRef.current = edgesRef.current
-      setPendingFactorDelete({ nodeId, nodeLabel })
-    },
-    [],
-  )
 
-  // 点击"删除此因素"按钮
-  const handleFactorDeleteClick = useCallback(
-    (nodeId: string) => {
-      const node = nodesRef.current.find((n) => n.id === nodeId)
-      if (!node || node.type !== 'factor') return
-      initiateFactorDelete(nodeId, node.data?.label ?? '')
-    },
-    [initiateFactorDelete],
-  )
+      // 计算删除后剩余因素的权重（按比例重分配）
+      const allFactors = nodesRef.current.filter((n) => n.type === 'factor')
+      const rebalanced = redistributeWeightsOnDelete(allFactors, nodeId)
 
-  // 确认删除因素：权重重分配 + 删除节点和连线 + 保存画布 + 局部重推
-  const confirmFactorDelete = useCallback(() => {
-    if (!pendingFactorDelete) return
-    const { nodeId } = pendingFactorDelete
-    setPendingFactorDelete(null)
+      // 删除 factor 节点，同时更新剩余 factor 权重
+      const newNodes = nodesRef.current
+        .filter((n) => n.id !== nodeId)
+        .map((n) => {
+          const updated = rebalanced.find((r: FlowNode) => r.id === n.id)
+          return updated ?? n
+        })
 
-    // 计算删除后剩余因素的权重（按比例重分配）
-    const allFactors = nodesRef.current.filter((n) => n.type === 'factor')
-    const rebalanced = redistributeWeightsOnDelete(allFactors, nodeId)
+      setNodes(newNodes)
+      setEdges((prev) =>
+        prev.filter((e) => e.source !== nodeId && e.target !== nodeId),
+      )
 
-    // 删除 factor 节点，同时更新剩余 factor 权重
-    const newNodes = nodesRef.current
-      .filter((n) => n.id !== nodeId)
-      .map((n) => {
-        const updated = rebalanced.find((r: FlowNode) => r.id === n.id)
-        return updated ?? n
+      if (editingNode?.id === nodeId) {
+        setModalOpen(false)
+        setEditingNode(null)
+      }
+
+      const rollback = () => {
+        setNodes(factorDeleteNodesSnapshotRef.current)
+        setEdges(factorDeleteEdgesSnapshotRef.current)
+      }
+      const updatedCanvas = buildCanvasData(newNodes, edgesRef.current)
+      onFactorDeleteRef.current?.(updatedCanvas, rollback).catch(() => {
+        rollback()
       })
-
-    // 乐观更新本地状态（注意 setNodes 内部再次以 prev 计算，避免 updater 不纯）
-    setNodes(newNodes)
-    setEdges((prev) =>
-      prev.filter((e) => e.source !== nodeId && e.target !== nodeId),
-    )
-
-    if (editingNode?.id === nodeId) {
-      setModalOpen(false)
-      setEditingNode(null)
-    }
-
-    // 节点状态与 ref 已同步，触发父组件保存画布并自动局部重推
-    const rollback = () => {
-      setNodes(factorDeleteNodesSnapshotRef.current)
-      setEdges(factorDeleteEdgesSnapshotRef.current)
-    }
-    const updatedCanvas = buildCanvasData(newNodes, edgesRef.current)
-    onFactorDeleteRef.current?.(updatedCanvas, rollback).catch(() => {
-      rollback()
-    })
-  }, [pendingFactorDelete, editingNode?.id, setNodes, setEdges])
-
-  // 取消删除因素：恢复快照
-  const cancelFactorDelete = useCallback(() => {
-    const nodesSnap = factorDeleteNodesSnapshotRef.current
-    const edgesSnap = factorDeleteEdgesSnapshotRef.current
-    if (nodesSnap.length > 0 || edgesSnap.length > 0) {
-      setNodes(nodesSnap)
-      setEdges(edgesSnap)
-    }
-    setPendingFactorDelete(null)
-  }, [setNodes, setEdges])
+    },
+    [editingNode?.id, setNodes, setEdges],
+  )
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: FlowNode) => {
@@ -1305,7 +1243,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
             setEdges((prev) => applyEdgeChanges(otherChanges, prev) as FlowEdge[])
           }
           // 调用统一的删除因素函数
-          initiateFactorDelete(factorId, factorNode?.data?.label ?? '')
+          handleFactorDeleteClick(factorId)
         }
         return
       }
@@ -1322,7 +1260,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
       setEdges((prev) => applyEdgeChanges(changes, prev) as FlowEdge[])
     },
-    [setEdges, initiateFactorDelete],
+    [setEdges, handleFactorDeleteClick],
   )
 
   const handleNodesChange = useCallback(
@@ -1980,44 +1918,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                       </Form>
                     </>
                   )}
-                </Modal>
-
-                {/* 删除候选方案确认 */}
-                <Modal
-                  title="确认删除方案"
-                  open={pendingOptionDelete !== null}
-                  onCancel={cancelOptionDelete}
-                  footer={null}
-                  width={420}
-                >
-                  <p style={{ margin: '0 0 16px', lineHeight: 1.6 }}>
-                    删除后，该方案及其关联关系将不再参与方案对比。是否继续？
-                  </p>
-                  <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button onClick={cancelOptionDelete}>取消</Button>
-                    <Button danger type="primary" onClick={confirmOptionDelete}>
-                      确认删除
-                    </Button>
-                  </Space>
-                </Modal>
-
-                {/* 删除因素确认 */}
-                <Modal
-                  title="确认删除因素及其连线"
-                  open={pendingFactorDelete !== null}
-                  onCancel={cancelFactorDelete}
-                  footer={null}
-                  width={420}
-                >
-                  <p style={{ margin: '0 0 16px', lineHeight: 1.6 }}>
-                    删除后，该影响因素及其关联关系将从当前决策中移除，剩余因素权重将按比例重新分配。是否继续？
-                  </p>
-                  <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button onClick={cancelFactorDelete}>取消</Button>
-                    <Button danger type="primary" onClick={confirmFactorDelete}>
-                      确认删除
-                    </Button>
-                  </Space>
                 </Modal>
 
               </div>
