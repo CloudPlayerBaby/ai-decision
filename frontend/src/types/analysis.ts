@@ -187,6 +187,8 @@ export interface TaskHistoryItem {
   taskId: string
   runType: TaskRunType
   taskStatus: TaskRunStatus
+  analysisResultId: string | null
+  resultStatus: AnalysisResultStatus | null
   startedAt: string | null
   finishedAt: string | null
   steps: AnalysisStep[]
