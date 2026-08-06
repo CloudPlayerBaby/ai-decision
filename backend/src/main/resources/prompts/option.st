@@ -12,7 +12,7 @@
 2. 每个方案必须包含 id、name、description、pros、cons、risks。id 严格使用 opt_加纯数字，例如 opt_1、opt_2；不得使用 opt_focused_depth。
 3. scores 必须且只能包含 cost、time、benefit、risk、feasibility，均为 1-5 的整数；所有维度都是 5 分更优，因此 risk=5 表示风险最低，cost=5 表示成本负担最低。
 4. 每个 pros、cons、risks 至少提供一项；方案之间必须体现不同路径，不能只是改名或轻微调整参数。
-5. 每个方案必须包含 relativeFactor，值为与该方案关联性最强的关键因素 id，必须从上方 factors 列表中带 [id] 标记的因素中选择，例如 [budget_limit]、[time_cost]；即使相关性不显著，也必须选择最相关的一个因素 id，relativeFactor 不得为空。
+5. 每个方案必须包含 relativeFactor，值为与该方案关联性最强的关键因素 id（必须取因素 id 本身，不要加方括号，例如 budget_limit、time_cost），且必须与上方 factors 列表中 [id] 标记的 id 完全一致；即使相关性不显著，也必须选择最相关的一个因素 id，relativeFactor 不得为空。
 
 如果核心理解表明原问题因安全、法律或伤害风险被重构：
 1. 只生成合法、非暴力、降低伤害且与原情境直接相关的候选方案。

@@ -197,21 +197,47 @@ public final class AnalysisResultValidator {
     }
 
     /**
-     * 确保每个方案的 relativeFactor 非空：为空时默认绑定权重最高的因素。
+     * 确保每个方案的 relativeFactor 合法且非空。
      *
-     * <p>agent 的 prompt 已要求总是输出 relativeFactor，此处作为兜底，保证
-     * 前端永远能根据 relativeFactor 渲染出高亮连线。</p>
+     * <p>模型可能返回带方括号（如 {@code [gameplay_preference]}）或空白值，
+     * 前端用该值与因素 id 精确匹配。此处清洗值，若仍为空或不是有效因素 id，
+     * 则兜底绑定权重最高的因素，保证前端永远能渲染出高亮连线。</p>
      */
     public static void ensureRelativeFactor(List<Option> options, List<Factor> factors) {
         if (options == null) {
             return;
         }
-        String fallbackId = highestWeightFactorId(factors);
-        for (Option option : options) {
-            if (option != null && isBlank(option.getRelativeFactor())) {
-                option.setRelativeFactor(fallbackId);
+        Set<String> factorIds = new HashSet<>();
+        if (factors != null) {
+            for (Factor factor : factors) {
+                if (factor != null && factor.getId() != null) {
+                    factorIds.add(factor.getId());
+                }
             }
         }
+        String fallbackId = highestWeightFactorId(factors);
+        for (Option option : options) {
+            if (option == null) {
+                continue;
+            }
+            String cleaned = sanitizeRelativeFactor(option.getRelativeFactor());
+            if (cleaned == null || !factorIds.contains(cleaned)) {
+                cleaned = fallbackId;
+            }
+            option.setRelativeFactor(cleaned);
+        }
+    }
+
+    /** 清洗模型返回的 relativeFactor：去除首尾空白与方括号，只保留因素 id。 */
+    private static String sanitizeRelativeFactor(String value) {
+        if (value == null) {
+            return null;
+        }
+        String cleaned = value.trim();
+        if (cleaned.startsWith("[") && cleaned.endsWith("]")) {
+            cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
+        }
+        return cleaned.isEmpty() ? null : cleaned;
     }
 
     private static String highestWeightFactorId(List<Factor> factors) {
