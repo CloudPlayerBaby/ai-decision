@@ -368,6 +368,12 @@ export interface DecisionCanvasPanelProps {
   onPersistLayoutOnly?: (canvas: CanvasData) => void
   /** 整轮推演进行中且画布尚无业务节点时，显示「画布正在生成中」 */
   isCanvasGenerating?: boolean
+  /**
+   * 局部推演进行中：画布进入只读锁定态。
+   * WorkbenchPage 计算并传入：true 时禁用所有编辑性按钮、React Flow 只读、handler 二次拦截。
+   * 不锁定右侧聊天面板。
+   */
+  isCanvasLocked?: boolean
 }
 
 // ── 辅助函数 ─────────────────────────────────────────────────
@@ -509,6 +515,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     autoLayoutRequestKey,
     autoLayoutReason,
     onPersistLayoutOnly,
+    isCanvasLocked = false,
   } = props
 
   const vm = viewModel as import('../../types/canvas').CanvasViewModel
@@ -525,6 +532,11 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   const [nodes, setNodes] = useNodesState<FlowNode>([])
   const [edges, setEdges] = useEdgesState<FlowEdge>([])
+  // 【修复】Form.useForm() 必须在任何使用 form 的代码（包括依赖数组中引用 form 的 useEffect）
+  // 之前声明，否则会触发 TDZ: Cannot access 'form' before initialization。
+  // 之前该声明位于组件中部（第 894 行），导致 line 877 的局部推演锁定 effect 在初始化前
+  // 就把 form 写进依赖数组，从而在首次渲染时抛错。
+  const [form] = Form.useForm()
 
   // ── refs ─────────────────────────────────────────────────
   // 跟踪初始同步是否已完成（防止首次渲染 effect 误触发脏检测）
@@ -842,11 +854,48 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   // 新增因素表单的默认权重（同步保存以便 form.setFieldsValue 使用）
   const newFactorDefaultWeightRef = useRef<number>(0.2)
 
+  // 锁定提示节流：避免每次鼠标操作都连续弹 message
+  const lockMessageShownRef = useRef(false)
+  const warnIfLocked = useCallback(() => {
+    if (!isCanvasLocked) return false
+    if (lockMessageShownRef.current) return true
+    lockMessageShownRef.current = true
+    message.warning('局部推演中，画布暂时锁定，请等待推演完成')
+    window.setTimeout(() => {
+      lockMessageShownRef.current = false
+    }, 1500)
+    return true
+  }, [isCanvasLocked])
+  // 解锁后重置节流
+  useEffect(() => {
+    if (!isCanvasLocked) {
+      lockMessageShownRef.current = false
+    }
+  }, [isCanvasLocked])
+
+  /**
+   * 局部推演开始时，若 Modal 已打开（用户已开始编辑），
+   * 安全关闭 Modal 并丢弃未提交的表单数据，避免锁定期提交旧表单。
+   * （点击"确认添加"/"保存权重"/"删除此因素"等按钮时，submit handler 也会被拦截；
+   * 此处额外关闭 Modal 是为了视觉一致、避免用户误以为可以提交。）
+   */
+  useEffect(() => {
+    if (!isCanvasLocked) return
+    setModalOpen(false)
+    setEditingNode(null)
+    isEditingFactorRef.current = false
+    editOtherSnapshotRef.current = []
+    try {
+      form.resetFields()
+    } catch (_e: unknown) {
+      // form 可能尚未挂载，忽略
+    }
+  }, [isCanvasLocked, form])
+
   // Modal 状态
   const [modalOpen, setModalOpen] = useState(false)
   const [editingNode, setEditingNode] = useState<FlowNode | null>(null)
   const [isNewNode, setIsNewNode] = useState(false)
-  const [form] = Form.useForm()
   const [weightValue, setWeightValue] = useState(0.1)
   const [activeTabKey, setActiveTabKey] = useState<OptionModalTab>('settings')
 
@@ -938,6 +987,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   // 确认保存因素：仅更新权重，名称保留为节点原 label
   const handleSaveFactor = useCallback(
     () => {
+      // 锁定期间禁止提交旧表单数据
+      if (warnIfLocked()) return
       if (!editingNode || editingNode.type !== 'factor' || isNewNode) return
 
       const weightChanged = Math.abs(weightValue - initialWeightRef.current) > 1e-6
@@ -999,12 +1050,14 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       const updatedCanvas = buildCanvasData(nextNodes, edgesRef.current)
       onWeightSaveRef.current?.(updatedCanvas)
     },
-    [editingNode, isNewNode, weightValue, setNodes, closeModal],
+    [editingNode, isNewNode, weightValue, setNodes, closeModal, warnIfLocked],
   )
 
   // 处理普通保存：仅更新当前节点（label / scores）
   const handleSaveNormal = useCallback(
     (values: Record<string, unknown>) => {
+      // 锁定期间禁止提交旧表单数据
+      if (warnIfLocked()) return
       if (!editingNode) return
       const label = String(values.label ?? '').trim()
 
@@ -1136,7 +1189,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       setEditingNode(null)
       isEditingFactorRef.current = false
     },
-    [editingNode, isNewNode, weightValue, setNodes],
+    [editingNode, isNewNode, weightValue, setNodes, warnIfLocked],
   )
 
   // 提交表单：新建节点走普通保存；编辑已有因素走统一确认保存
@@ -1156,6 +1209,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   // 仅允许删除 option 节点；弹出确认框而非直接删除
   const handleOptionDeleteClick = useCallback(
     (nodeId: string) => {
+      if (warnIfLocked()) return
       if (nodeId === 'root') return
       const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node || node.type !== 'option') return
@@ -1187,7 +1241,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         rollback()
       })
     },
-    [editingNode?.id, setNodes, setEdges],
+    [editingNode?.id, setNodes, setEdges, warnIfLocked],
   )
 
   // Context value（不含 pros/cons/risks，仅传回调）
@@ -1203,6 +1257,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   // 点击"删除此因素"按钮：权重重分配 + 删除节点和连线 + 保存画布 + 局部重推
   const handleFactorDeleteClick = useCallback(
     (nodeId: string) => {
+      if (warnIfLocked()) return
       const node = nodesRef.current.find((n) => n.id === nodeId)
       if (!node || node.type !== 'factor') return
 
@@ -1245,16 +1300,18 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         rollback()
       })
     },
-    [editingNode?.id, setNodes, setEdges],
+    [editingNode?.id, setNodes, setEdges, warnIfLocked],
   )
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: FlowNode) => {
       if (node.type === 'decision') return
+      // 锁定期间禁止点击节点打开可编辑因素 Modal
+      if (warnIfLocked()) return
       if (node.type === 'option') setActiveTabKey('settings')
       openModal(node, false)
     },
-    [openModal],
+    [openModal, warnIfLocked],
   )
 
   const handleEdgeClick = useCallback(
@@ -1266,6 +1323,10 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
   const handleEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
+      // 锁定期间：丢弃所有会修改 edges 的变更（含删除），不弹窗（避免连续触发）
+      if (isCanvasLocked) {
+        return
+      }
       // 分离 HAS_FACTOR 边的删除操作（需级联删除因素节点）
       const hasFactorRemovals = changes.filter(
         (c): c is Extract<EdgeChange, { type: 'remove' }> =>
@@ -1317,11 +1378,17 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
       setEdges((prev) => applyEdgeChanges(changes, prev) as FlowEdge[])
     },
-    [setEdges, handleFactorDeleteClick],
+    [isCanvasLocked, setEdges, handleFactorDeleteClick],
   )
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
+      // 锁定期间：丢弃所有会修改 nodes 的变更（含拖拽过程中产生 position change），
+      // 仅保留选中/取消选中等不影响数据的视觉变化。
+      if (isCanvasLocked) {
+        // 这里不调用 warnIfLocked，避免拖拽过程中连续产生 position change 时弹窗刷屏
+        return
+      }
       const dragFinishes = changes.filter(c => c.type === 'position' && !c.dragging)
       const nextNodes = applyNodeChanges(changes, nodesRef.current) as FlowNode[]
 
@@ -1340,11 +1407,16 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         setNodes(nextNodes)
       }
     },
-    [setNodes],
+    [isCanvasLocked, setNodes],
   )
 
   const handleConnect = useCallback(
     (connection: Connection) => {
+      // 锁定期间禁止手动连线
+      if (isCanvasLocked) {
+        warnIfLocked()
+        return
+      }
       if (!connection.source || !connection.target) return
       if (connection.source === connection.target) return
 
@@ -1384,19 +1456,21 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         onStructuralChangePendingRef.current?.('FACTOR_OPTION_EDGE_ADDED')
       }
     },
-    [],
+    [isCanvasLocked, warnIfLocked],
   )
 
   const addFactor = useCallback(() => {
+    if (warnIfLocked()) return
     const currentFactors = nodes.filter((n) => n.type === 'factor')
     if (currentFactors.length >= 5) return  // 达到 5 个时静默拦截
     const node = createNode('factor', nodes)
     openModal(node, true)
-  }, [nodes, openModal])
+  }, [nodes, openModal, warnIfLocked])
 
   const MAX_OPTIONS = 5
 
   const addOption = useCallback(() => {
+    if (warnIfLocked()) return
     const currentOptions = nodes.filter((n) => n.type === 'option')
     if (currentOptions.length >= MAX_OPTIONS) {
       message.warning(`候选方案最多 ${MAX_OPTIONS} 个`)
@@ -1405,7 +1479,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     const node = createNode('option', nodes)
     setActiveTabKey('settings')
     openModal(node, true)
-  }, [nodes, openModal])
+  }, [nodes, openModal, warnIfLocked])
 
   // "自动整理布局"：对当前完整 nodes + edges 调用 applyDagreLayout，
   // setNodes 后通过 onCanvasChange 更新 canvasRef，并依赖组件内的脏检测 effect
@@ -1415,6 +1489,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   // ⚠️ 这里绝对不要写 `initialSignature.current = ...`，否则会把脏基线
   // 更新为新布局，让脏检测 effect 把这次点击算成「未变更」，保存按钮会被禁用。
   const autoArrangeLayout = useCallback(() => {
+    if (warnIfLocked()) return
     console.log('[auto-arrange] click', { nodes: nodes.length, edges: edges.length })
     if (nodes.length === 0) return
     const { nodes: layoutedNodes, edges: layoutedEdges } = applyDagreLayout(nodes, edges, {
@@ -1427,7 +1502,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     setEdges(layoutedEdges)
     // 通知父组件画布已变化，触发脏检测和 canvasRef 更新
     onCanvasChangeRef.current?.(buildCanvasData(layoutedNodes, layoutedEdges))
-  }, [nodes, edges])
+  }, [nodes, edges, warnIfLocked])
 
   // pros / cons / risks 只从 editingNode.data 读取（由 toFlowNode 注入）
   // editingNode?.type === 'option' 收窄 editingNode，但三元表达式的收窄不传播到 editingNode.data
@@ -1481,34 +1556,31 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
               <div className="canvas-panel">
                 <div className="canvas-panel__toolbar">
                   <Space>
-                    <Button size="small" icon={<PlusOutlined />} onClick={addFactor} disabled={factorCount >= 5}>
+                    <Button size="small" icon={<PlusOutlined />} onClick={addFactor} disabled={isCanvasLocked || factorCount >= 5}>
                       新增因素
                     </Button>
-                    <Tooltip title={nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS ? `候选方案最多 ${MAX_OPTIONS} 个` : ''}>
+                    <Tooltip title={isCanvasLocked ? '局部推演中，画布暂时锁定' : (nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS ? `候选方案最多 ${MAX_OPTIONS} 个` : '')}>
                       <Button
                         size="small"
                         icon={<PlusOutlined />}
                         onClick={addOption}
-                        disabled={nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS}
+                        disabled={isCanvasLocked || nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS}
                       >
                         新增方案
                       </Button>
                     </Tooltip>
-                    <Tooltip title="自动计算最优布局（不会自动保存，需点击「保存画布」持久化）">
-                      <Button size="small" icon={<MenuOutlined />} onClick={autoArrangeLayout}>
+                    <Tooltip title={isCanvasLocked ? '局部推演中，画布暂时锁定' : '自动计算最优布局（不会自动保存，需点击「保存画布」持久化）'}>
+                      <Button size="small" icon={<MenuOutlined />} onClick={autoArrangeLayout} disabled={isCanvasLocked}>
                         自动整理
                       </Button>
                     </Tooltip>
                   </Space>
-                  <span className="canvas-panel__stats">
-                    因素 {factorCount} · 方案 {optionCount} · AFFECTS {affectsCount}
-                  </span>
                   <span className="canvas-panel__hint">
-                    点击节点编辑 · 选中边按 Delete 删除
+                    {isCanvasLocked ? '局部推演中，画布已锁定' : '点击节点编辑'}
                   </span>
                 </div>
 
-                <div className="canvas-panel__flow">
+                <div className={`canvas-panel__flow${isCanvasLocked ? ' canvas-panel__flow--locked' : ''}`}>
                   <ReactFlow
                     nodes={nodes}
                     edges={edges}
@@ -1522,9 +1594,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     nodeTypes={nodeTypes}
                     edgeTypes={edgeTypes}
                     fitView
-                    nodesDraggable
-                    nodesConnectable
-                    elementsSelectable
+                    nodesDraggable={!isCanvasLocked}
+                    nodesConnectable={!isCanvasLocked}
+                    edgesUpdatable={!isCanvasLocked}
+                    elementsSelectable={!isCanvasLocked}
+                    nodesFocusable={!isCanvasLocked}
+                    edgesFocusable={!isCanvasLocked}
                     colorMode={themeMode === 'eyeCare' ? 'dark' : 'light'}
                     defaultEdgeOptions={{
                       style: {
@@ -1532,13 +1607,35 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           themeMode === 'eyeCare' ? '#b6c4d8' : '#94a3b8',
                         strokeWidth: themeMode === 'eyeCare' ? 2.5 : 1.75,
                       },
-                      selectable: true,
+                      selectable: !isCanvasLocked,
                     }}
                     proOptions={{ hideAttribution: true }}
                   >
                     <Background gap={18} size={1} color={dotColor} />
                     <Controls showInteractive={false} />
                   </ReactFlow>
+
+                  {isCanvasLocked && (
+                    <>
+                      <div
+                        className="canvas-panel__lock-overlay"
+                        aria-hidden="true"
+                        onClick={(e) => {
+                          // 拦截画布上的点击，避免穿透到 ReactFlow / 节点
+                          e.stopPropagation()
+                          warnIfLocked()
+                        }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                        }}
+                      />
+                      <div className="canvas-panel__lock-banner" role="status">
+                        <Spin size="small" indicator={<LoadingOutlined spin />} />
+                        <span className="canvas-panel__lock-banner-title">局部推演中，画布已锁定</span>
+                        <span className="canvas-panel__lock-banner-hint">正在重新计算受影响的决策节点</span>
+                      </div>
+                    </>
+                  )}
 
                   <div className="canvas-legend">
                     <span className="canvas-legend__item">
@@ -1554,14 +1651,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                       候选方案
                     </span>
                     <span className="canvas-legend__separator" />
-                    <span className="canvas-legend__item">
-                      <span className="canvas-legend__arrow canvas-legend__arrow--has-factor" />
-                      包含因素
-                    </span>
-                    <span className="canvas-legend__item">
-                      <span className="canvas-legend__arrow canvas-legend__arrow--affects" />
-                      影响方案
-                    </span>
                   </div>
                 </div>
 
@@ -1898,7 +1987,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                               {/* 已有方案：只读，底部只保留删除操作 */}
                               {(() => {
                                 const optionCount = nodesRef.current.filter((n) => n.type === 'option').length
-                                const canDelete = optionCount > 2
+                                const canDelete = optionCount > 2 && !isCanvasLocked
                                 return (
                                   <Popconfirm
                                     title={canDelete
@@ -1928,14 +2017,14 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                             /* 新增方案：显示确认添加 */
                             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
                               <Button onClick={closeModal}>取消</Button>
-                              <Button type="primary" onClick={submitForm}>
+                              <Button type="primary" onClick={submitForm} disabled={isCanvasLocked}>
                                 确认添加
                               </Button>
                             </Space>
                           ) : editingNode.type === 'factor' && !isNewNode ? (
                             (() => {
                               const factorCount = nodesRef.current.filter((n) => n.type === 'factor').length
-                              const canDelete = factorCount > 2
+                              const canDelete = factorCount > 2 && !isCanvasLocked
                               return (
                                 <>
                                   <Popconfirm
@@ -1955,6 +2044,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                                     <Button onClick={closeModal}>取消</Button>
                                     <Button
                                       type="primary"
+                                      disabled={isCanvasLocked}
                                       onClick={() => {
                                         // 数据层使用小数；算法层（rebalanceEditedFactor）会自行 snap 到 5% 步长
                                         // 并保证其他因素满足 5%–80% 边界，此处无需动态范围校验
@@ -1970,7 +2060,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                           ) : editingNode.type === 'factor' && isNewNode ? (
                             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
                               <Button onClick={closeModal}>取消</Button>
-                              <Button type="primary" onClick={submitForm}>
+                              <Button type="primary" onClick={submitForm} disabled={isCanvasLocked}>
                                 确认添加
                               </Button>
                             </Space>

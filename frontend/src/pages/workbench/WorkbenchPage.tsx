@@ -129,6 +129,17 @@ export function WorkbenchPage() {
   const restoringInterruptedCanvasRef = useRef<string | null>(null)
   /** 已完成回滚的决策 id，防止重复 PUT */
   const revertedInterruptedCanvasRef = useRef<Set<string>>(new Set())
+  /**
+   * 等最新 canvas 同步完成后解除锁定的待办。
+   * onResultReady 收到局部任务 result_ready 时设置；
+   * canvasQuery.data 已更新到最新版本（forceSyncKey 对应 analysisResultId）后清除，
+   * 此时再清掉 partialAnalysisInfo → 画布锁定解除。
+   */
+  const pendingUnlockPartialRef = useRef<{
+    decisionId: string
+    taskId: string
+    analysisResultId: string
+  } | null>(null)
 
   const capturePartialCanvasSnapshot = useCallback(
     (decisionId: string, attemptedCanvas: Canvas) => {
@@ -246,21 +257,34 @@ export function WorkbenchPage() {
     }
   }, [])
 
+  /**
+   * 锁定提示节流：避免每次鼠标操作都连续弹 message。
+   * 注意：必须放在所有 early return 之前，否则第一次渲染分支不同会导致
+   * "Rendered more hooks than during the previous render"。
+   */
+  const lockMessageShownRef = useRef(false)
+  const warnLocked = useCallback(() => {
+    if (lockMessageShownRef.current) return
+    lockMessageShownRef.current = true
+    message.warning('局部推演中，画布暂时锁定，请等待推演完成')
+    window.setTimeout(() => {
+      lockMessageShownRef.current = false
+    }, 1500)
+  }, [])
+
   const { steps, connectionStatus, toolCalls, retryable, failedStepId, stepGroups } = useAnalysisStream({
     taskId: streamTaskId,
     refreshKey: streamRefreshKey,
     decisionId: decision ? id : undefined,
     runType: partialAnalysisInfo ? 'PARTIAL' : 'FULL',
     onResultReady: async (event) => {
-      setPartialAnalysisInfo((prev) =>
-        prev?.decisionId === event.decisionId ? null : prev,
-      )
-      setInterruptedPartialByDecision((prev) => {
-        if (!prev[event.decisionId]) return prev
-        const next = { ...prev }
-        delete next[event.decisionId]
-        return next
-      })
+      // 收到当前 decisionId 的局部推演 result_ready 时：
+      //   1. 不要立刻清掉 partialAnalysisInfo（画布锁定继续保留）
+      //   2. 先刷新 detail / analysis result / canvas
+      //   3. canvas 数据同步完成后，再清掉 partialAnalysisInfo 解除锁定
+      // 切换走中断的局部推演（interruptedPartial）不锁，可以立即清理。
+      const isPartialForCurrent = partialAnalysisInfoRef.current?.decisionId === event.decisionId
+
       clearPartialCanvasSnapshot(event.decisionId)
       revertedInterruptedCanvasRef.current.delete(event.decisionId)
       releasePartialAnalysisLock(event.decisionId)
@@ -282,7 +306,28 @@ export function WorkbenchPage() {
       })
 
       // 仅当用户正在查看该决策页时更新本地 UI
-      if (viewingDecisionIdRef.current !== event.decisionId) return
+      if (viewingDecisionIdRef.current !== event.decisionId) {
+        // 不在当前决策页：直接清掉状态（不影响锁定 UI）
+        setPartialAnalysisInfo((prev) =>
+          prev?.decisionId === event.decisionId ? null : prev,
+        )
+        setInterruptedPartialByDecision((prev) => {
+          if (!prev[event.decisionId]) return prev
+          const next = { ...prev }
+          delete next[event.decisionId]
+          return next
+        })
+        return
+      }
+
+      // 标记"等最新画布同步完成后解除锁定"
+      pendingUnlockPartialRef.current = isPartialForCurrent
+        ? {
+          decisionId: event.decisionId,
+          taskId: event.taskId,
+          analysisResultId: event.analysisResultId,
+        }
+        : null
 
       setActiveResultId(event.analysisResultId)
       setActiveCanvas(undefined)
@@ -297,6 +342,11 @@ export function WorkbenchPage() {
         return null
       })
       if (!failedDecisionId) return
+
+      // 失败：立刻清除 pending unlock，避免画布永远卡在锁定态
+      if (pendingUnlockPartialRef.current?.decisionId === failedDecisionId) {
+        pendingUnlockPartialRef.current = null
+      }
 
       releasePartialAnalysisLock(failedDecisionId)
       if (viewingDecisionIdRef.current === failedDecisionId) {
@@ -328,6 +378,10 @@ export function WorkbenchPage() {
   useEffect(() => {
     const prevId = routeDecisionIdRef.current
     if (prevId !== id) {
+      // 切换决策页：清理可能残留的「等画布同步完成后解除锁定」待办
+      if (pendingUnlockPartialRef.current?.decisionId === prevId) {
+        pendingUnlockPartialRef.current = null
+      }
       const info = partialAnalysisInfoRef.current
       if (info?.decisionId === prevId) {
         setInterruptedPartialByDecision((map) => ({
@@ -562,6 +616,33 @@ export function WorkbenchPage() {
       return prev
     })
   }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id, interruptedPartial?.baselineCanvas])
+
+  /**
+   * 解除画布锁定：等当前 decisionId 的局部推演 result_ready 后，
+   * canvasQuery 数据已更新到最新版本时再清掉 partialAnalysisInfo。
+   * 顺序保证：result_ready → invalidate → 新 canvas 到位 → 解除锁定，
+   * 避免用户基于旧画布继续操作。
+   */
+  useEffect(() => {
+    const pending = pendingUnlockPartialRef.current
+    if (!pending) return
+    if (pending.decisionId !== id) return
+    if (!canvasQuery.data) return
+    // 等一个微任务，确保 canvasQuery.data 是 result_ready 触发的 invalidate 后返回的新数据
+    if (canvasQuery.dataUpdatedAt < idSwitchTimeRef.current) return
+
+    console.log('[WorkbenchPage] unlocking canvas after partial result_ready + canvas sync')
+    pendingUnlockPartialRef.current = null
+    setPartialAnalysisInfo((prev) =>
+      prev?.decisionId === pending.decisionId ? null : prev,
+    )
+    setInterruptedPartialByDecision((prev) => {
+      if (!prev[pending.decisionId]) return prev
+      const next = { ...prev }
+      delete next[pending.decisionId]
+      return next
+    })
+  }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id])
 
   const canvasForView = activeCanvas ?? canvasQuery.data
   const viewModel =
@@ -1182,6 +1263,17 @@ export function WorkbenchPage() {
     connectionStatus === 'connected' ||
     connectionStatus === 'reconnecting'
 
+  /**
+   * 画布锁定：仅当前 decisionId 的局部推演任务生效。
+   * 满足任一条件即锁定：
+   *   1. currentPartialInfo 非空 → 局部推演已成功发起
+   *   2. decision.status === 'PARTIAL_ANALYZING' → 服务端确认的局部推演状态
+   * 切换走中断的局部推演（interruptedPartial）不锁，因为父级已主动放弃重连。
+   */
+  const isCanvasLocked =
+    currentPartialInfo !== null ||
+    (decision.status === 'PARTIAL_ANALYZING' && interruptedPartial === null)
+
   const isCanvasDataPending =
     canvasQuery.isLoading ||
     (canvasQuery.isFetching && !canvasForView)
@@ -1238,6 +1330,10 @@ export function WorkbenchPage() {
             </Button>
             <Button
               onClick={() => {
+                if (isCanvasLocked) {
+                  warnLocked()
+                  return
+                }
                 if (!canvasRef.current) {
                   message.error('画布数据尚未准备好，请稍后重试')
                   return
@@ -1246,7 +1342,7 @@ export function WorkbenchPage() {
               }}
               loading={saveMutation.isPending || startPartialAnalysisMutation.isPending}
               disabled={(() => {
-                const disabled = !isDirty || saveMutation.isPending || saveForPartialMutation.isPending || saveForEdgeDeleteMutation.isPending || saveForOptionDeleteMutation.isPending || saveForFactorDeleteMutation.isPending || startPartialAnalysisMutation.isPending
+                const disabled = isCanvasLocked || !isDirty || saveMutation.isPending || saveForPartialMutation.isPending || saveForEdgeDeleteMutation.isPending || saveForOptionDeleteMutation.isPending || saveForFactorDeleteMutation.isPending || startPartialAnalysisMutation.isPending
                 console.log('[save-button]', { isDirty, savePending: saveMutation.isPending, disabled })
                 return disabled
               })()}
@@ -1351,6 +1447,7 @@ export function WorkbenchPage() {
           partialAnalysisInfo={currentPartialInfo}
           partialSteps={steps}
           forceSyncKey={forceSyncKey}
+          isCanvasLocked={isCanvasLocked}
         />
 
         {hasPendingStructuralChange && (
@@ -1364,12 +1461,17 @@ export function WorkbenchPage() {
               <Button
                 type="primary"
                 onClick={() => {
+                  if (isCanvasLocked) {
+                    warnLocked()
+                    return
+                  }
                   if (!canvasRef.current) return
                   setActiveCanvas(undefined)
                   saveMutation.mutate(canvasRef.current)
                 }}
                 loading={saveMutation.isPending || startPartialAnalysisMutation.isPending}
                 disabled={
+                  isCanvasLocked ||
                   !canvasRef.current ||
                   saveMutation.isPending ||
                   startPartialAnalysisMutation.isPending ||

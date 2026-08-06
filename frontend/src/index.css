@@ -1747,6 +1747,52 @@ body.is-resizing .resize-handle::before {
   box-shadow: 0 0 0 2px var(--partial-border) !important;
 }
 
+/* —— 局部推演期间画布锁定 —— */
+.canvas-panel__flow--locked {
+  cursor: not-allowed;
+}
+
+.canvas-panel__lock-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  /* 让 overlay 不阻挡自身 children 的视觉，但阻挡其下 ReactFlow 的交互 */
+  pointer-events: auto;
+}
+
+.canvas-panel__lock-banner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--partial-bg);
+  border: 1px solid var(--partial-border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  color: var(--text-primary);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.canvas-panel__lock-banner-title {
+  font-weight: 600;
+}
+
+.canvas-panel__lock-banner-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* 悬停高亮：相关节点轻微高亮 */
 .canvas-node--hovered {
   box-shadow: 0 0 0 2px var(--decision) !important;
