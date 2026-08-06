@@ -22,7 +22,9 @@ public class PartialAnalysisPlanner {
         Map<String, String> nodeTypes = indexNodeTypes(canvas, currentResult);
         Set<String> affected = new LinkedHashSet<>(changedNodeIds);
         Set<String> oldOptionIds = optionIds(currentResult);
+        Set<String> oldFactorIds = factorIds(currentResult);
         Set<String> optionIdsToEnrich = new LinkedHashSet<>();
+        Set<String> factorIdsToEnrich = new LinkedHashSet<>();
 
         boolean factorChanged = false;
         boolean optionChanged = false;
@@ -31,6 +33,9 @@ public class PartialAnalysisPlanner {
             String type = nodeTypes.get(changedNodeId);
             if ("factor".equals(type)) {
                 factorChanged = true;
+                if (!oldFactorIds.contains(changedNodeId) && isCanvasFactor(canvas, changedNodeId)) {
+                    factorIdsToEnrich.add(changedNodeId);
+                }
             } else if ("option".equals(type)) {
                 optionChanged = true;
                 if (!oldOptionIds.contains(changedNodeId) && isCanvasOption(canvas, changedNodeId)) {
@@ -45,6 +50,9 @@ public class PartialAnalysisPlanner {
         if (fullAnalysisRequired) {
             startNode = "UNDERSTAND";
             affected.addAll(nodeTypes.keySet());
+        } else if (!factorIdsToEnrich.isEmpty()) {
+            startNode = "ENRICH_FACTORS";
+            optionIdsToEnrich.clear();
         } else if (factorChanged) {
             startNode = "REEVALUATE_OPTIONS";
             optionIdsToEnrich.clear();
@@ -56,7 +64,8 @@ public class PartialAnalysisPlanner {
             startNode = "UNDERSTAND";
             affected.addAll(nodeTypes.keySet());
         }
-        return new Plan(startNode, new ArrayList<>(affected), new ArrayList<>(optionIdsToEnrich));
+        return new Plan(startNode, new ArrayList<>(affected),
+                new ArrayList<>(factorIdsToEnrich), new ArrayList<>(optionIdsToEnrich));
     }
 
     private Set<String> optionIds(AnalysisResultDto result) {
@@ -67,6 +76,23 @@ public class PartialAnalysisPlanner {
             }
         }
         return ids;
+    }
+
+    private Set<String> factorIds(AnalysisResultDto result) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (result != null && result.getFactors() != null) {
+            for (Factor factor : result.getFactors()) {
+                if (factor != null && factor.getId() != null) ids.add(factor.getId());
+            }
+        }
+        return ids;
+    }
+
+    private boolean isCanvasFactor(Canvas canvas, String nodeId) {
+        if (canvas == null || canvas.getNodes() == null) return false;
+        return canvas.getNodes().stream().anyMatch(node -> node != null
+                && nodeId.equals(node.getId())
+                && "factor".equalsIgnoreCase(node.getType()));
     }
 
     private boolean isCanvasOption(Canvas canvas, String nodeId) {
@@ -98,5 +124,6 @@ public class PartialAnalysisPlanner {
         return types;
     }
 
-    public record Plan(String startNode, List<String> affectedNodeIds, List<String> optionIdsToEnrich) {}
+    public record Plan(String startNode, List<String> affectedNodeIds,
+                       List<String> factorIdsToEnrich, List<String> optionIdsToEnrich) {}
 }

@@ -178,6 +178,7 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
                 latestCanvas
         );
         Map<String, Object> partialStateData = new HashMap<>(baseState.data());
+        partialStateData.put("factorIdsToEnrich", partialPlan.factorIdsToEnrich());
         partialStateData.put("optionIdsToEnrich", partialPlan.optionIdsToEnrich());
         DecisionState currentState = new DecisionState(partialStateData);
 
@@ -440,6 +441,23 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
     private void markEnrichmentRetryMetadata(
             Long taskId, PartialAnalysisPlanner.Plan plan, LocalDateTime now) {
+        if ("ENRICH_FACTORS".equals(plan.startNode())) {
+            AnalysisStep step = stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
+                    .eq(AnalysisStep::getRunId, taskId)
+                    .eq(AnalysisStep::getStepName, "EXTRACT_FACTORS")
+                    .last("LIMIT 1"));
+            if (step == null) return;
+            try {
+                step.setOutputData(objectMapper.writeValueAsString(Map.of(
+                        "workflowStartNode", plan.startNode(),
+                        "factorIdsToEnrich", plan.factorIdsToEnrich())));
+                step.setUpdatedAt(now);
+                stepMapper.updateById(step);
+            } catch (JacksonException exception) {
+                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "新增因素重试信息保存失败");
+            }
+            return;
+        }
         if (!"ENRICH_OPTIONS".equals(plan.startNode()) && !"REEVALUATE_OPTIONS".equals(plan.startNode())) return;
         AnalysisStep step = stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
                 .eq(AnalysisStep::getRunId, taskId)
@@ -461,7 +479,9 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
         JsonNode metadata = readStepMetadata(step);
         if (metadata != null) {
             String workflowStartNode = metadata.path("workflowStartNode").asText();
-            if ("ENRICH_OPTIONS".equals(workflowStartNode) || "REEVALUATE_OPTIONS".equals(workflowStartNode)) {
+            if ("ENRICH_FACTORS".equals(workflowStartNode)
+                    || "ENRICH_OPTIONS".equals(workflowStartNode)
+                    || "REEVALUATE_OPTIONS".equals(workflowStartNode)) {
                 return workflowStartNode;
             }
         }
@@ -470,6 +490,16 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
 
     private DecisionState addEnrichmentTargets(
             DecisionState state, AnalysisStep step, String retryStartNode) {
+        if ("ENRICH_FACTORS".equals(retryStartNode)) {
+            JsonNode metadata = readStepMetadata(step);
+            List<String> factorIds = new ArrayList<>();
+            if (metadata != null && metadata.path("factorIdsToEnrich").isArray()) {
+                metadata.path("factorIdsToEnrich").forEach(node -> factorIds.add(node.asText()));
+            }
+            Map<String, Object> data = new HashMap<>(state.data());
+            data.put("factorIdsToEnrich", factorIds);
+            return new DecisionState(data);
+        }
         if (!"ENRICH_OPTIONS".equals(retryStartNode)) return state;
         JsonNode metadata = readStepMetadata(step);
         List<String> ids = new ArrayList<>();
@@ -635,7 +665,10 @@ public class AnalysisTaskServiceImpl implements AnalysisTaskService {
             String startNode,
             LocalDateTime now) {
         List<String> reusedStepNames;
-        if ("GENERATE_OPTIONS".equals(startNode) || "ENRICH_OPTIONS".equals(startNode)
+        if ("ENRICH_FACTORS".equals(startNode)) {
+            // 因素补全映射到 EXTRACT_FACTORS 步骤，由事件驱动，不预标记为复用
+            reusedStepNames = List.of("UNDERSTAND");
+        } else if ("GENERATE_OPTIONS".equals(startNode) || "ENRICH_OPTIONS".equals(startNode)
                 || "REEVALUATE_OPTIONS".equals(startNode)) {
             reusedStepNames = List.of(
                     "UNDERSTAND",

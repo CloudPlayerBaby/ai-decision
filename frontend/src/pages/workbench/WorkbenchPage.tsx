@@ -17,8 +17,8 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useBlocker } from 'react-router'
 import type { BlockerFunction } from 'react-router'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DecisionCanvasPanel } from '@/components/workbench/DecisionCanvasPanel'
 import { AnalysisChatPanel } from '@/features/analysis/AnalysisChatPanel'
@@ -237,6 +237,7 @@ export function WorkbenchPage() {
   const streamTaskId = interruptedPartial
     ? null
     : currentPartialInfo?.taskId ?? taskId
+  const [streamRefreshKey, setStreamRefreshKey] = useState(0)
 
   const releasePartialAnalysisLock = useCallback((decisionId: string) => {
     if (partialAnalysisLockDecisionRef.current === decisionId) {
@@ -247,7 +248,8 @@ export function WorkbenchPage() {
 
   const { steps, connectionStatus, toolCalls, retryable, failedStepId, stepGroups } = useAnalysisStream({
     taskId: streamTaskId,
-    decisionId: id,
+    refreshKey: streamRefreshKey,
+    decisionId: decision ? id : undefined,
     runType: partialAnalysisInfo ? 'PARTIAL' : 'FULL',
     onResultReady: async (event) => {
       setPartialAnalysisInfo((prev) =>
@@ -305,6 +307,17 @@ export function WorkbenchPage() {
         }
       }
     },
+    onTaskSucceeded: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.detail(id),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.analysisResult(id, pendingResultId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.decisions.canvas(id),
+      })
+    },
   })
 
   useEffect(() => {
@@ -347,6 +360,12 @@ export function WorkbenchPage() {
     // 简化的 enabled 条件：只需要 id 和 effectiveResultId 非空
     enabled: Boolean(id) && Boolean(effectiveResultId),
     staleTime: 0,
+    retry: (count, error) => {
+      if (error instanceof ApiError && error.code === BusinessCode.NotFound) {
+        return false
+      }
+      return count < 1
+    },
   })
 
   console.log('[WorkbenchPage] resultQuery.data:', resultQuery.data)
@@ -356,6 +375,37 @@ export function WorkbenchPage() {
   const displayOptions = resultQuery.data?.options ?? []
   const displayRecommendation = resultQuery.data?.recommendation ?? null
   const displayAnalysisResultId = resultQuery.data?.id ?? ''
+  const historyResultIds = useMemo(
+    () => [
+      ...new Set(
+        stepGroups
+          .filter((group) => !group.isCurrent && group.analysisResultId)
+          .map((group) => group.analysisResultId as string),
+      ),
+    ],
+    [stepGroups],
+  )
+  const historyResultQueries = useQueries({
+    queries: historyResultIds.map((resultId) => ({
+      queryKey: queryKeys.decisions.analysisResult(id, resultId),
+      queryFn: () => getAnalysisResult(id, resultId),
+      enabled: Boolean(id && resultId),
+      staleTime: 0,
+      retry: (count: number, error: unknown) => {
+        if (error instanceof ApiError && error.code === BusinessCode.NotFound) {
+          return false
+        }
+        return count < 1
+      },
+    })),
+  })
+  const historyResultsById = useMemo(() => {
+    const resultMap: Record<string, NonNullable<typeof historyResultQueries[number]['data']> | null | undefined> = {}
+    historyResultIds.forEach((resultId, index) => {
+      resultMap[resultId] = historyResultQueries[index]?.data
+    })
+    return resultMap
+  }, [historyResultIds, historyResultQueries])
 
   const startMutation = useMutation({
     mutationFn: () => startFullAnalysis(id),
@@ -971,13 +1021,18 @@ export function WorkbenchPage() {
   }
 
   const retryMutation = useMutation({
-    mutationFn: (stepId: string) =>
-      retryFailedStep(streamTaskId!, stepId),
-    onSuccess: async () => {
+    mutationFn: (stepId: string) => {
+      if (!streamTaskId) {
+        throw new Error('缺少任务 ID，无法重试')
+      }
+      return retryFailedStep(streamTaskId, stepId)
+    },
+    onSuccess: async (data) => {
       message.success('步骤已重新入队，请等待推演更新')
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.analysisTasks.detail(streamTaskId!),
+        queryKey: queryKeys.analysisTasks.detail(data.taskId),
       })
+      setStreamRefreshKey((key) => key + 1)
     },
     onError: () => {
       message.error('重试失败，请稍后重试')
@@ -1117,6 +1172,30 @@ export function WorkbenchPage() {
     !isLocalPartialAnalyzing &&
     (decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM')
 
+  const hasCanvasBusinessNodes =
+    viewModel?.canvas.nodes.some(
+      (node) => node.type === 'factor' || node.type === 'option',
+    ) ?? false
+
+  const isStreamActive =
+    connectionStatus === 'connecting' ||
+    connectionStatus === 'connected' ||
+    connectionStatus === 'reconnecting'
+
+  const isCanvasDataPending =
+    canvasQuery.isLoading ||
+    (canvasQuery.isFetching && !canvasForView)
+
+  /** 画布在出现 factor/option 节点前持续显示生成动画 */
+  const isCanvasGenerating =
+    !hasCanvasBusinessNodes &&
+    (startMutation.isPending ||
+      analyzing ||
+      isStreamActive ||
+      decision.status === 'ANALYZING' ||
+      decision.status === 'PARTIAL_ANALYZING' ||
+      (isCanvasDataPending && decision.status !== 'PENDING'))
+
   return (
     <div className="workbench">
       <PageHeader
@@ -1212,7 +1291,7 @@ export function WorkbenchPage() {
         <DecisionCanvasPanel
           key={id}
           viewModel={viewModel}
-          isCanvasGenerating={decision.status === 'ANALYZING' && !animCompleted}
+          isCanvasGenerating={isCanvasGenerating}
           onDirtyChange={(dirty) => {
             console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
             if (!dirty) {
@@ -1312,6 +1391,7 @@ export function WorkbenchPage() {
                 options={displayOptions}
                 recommendation={displayRecommendation}
                 analysisResultId={displayAnalysisResultId}
+                groupResultsById={historyResultsById}
                 selectedOptionId={selectedOptionId}
                 retryable={retryable}
                 failedStepId={failedStepId}

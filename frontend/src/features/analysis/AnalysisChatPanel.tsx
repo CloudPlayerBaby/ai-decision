@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { Button, Divider, Empty, Result, Space, Spin, Typography } from 'antd'
 import { CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type {
+  AnalysisResult,
   AnalysisStep,
   DecisionOption,
   Recommendation,
@@ -17,8 +18,10 @@ import '../../styles/AnalysisChatPanel.css'
 const { Text } = Typography
 
 interface RenderedGroup {
+  taskId?: string
   label: string
   isCurrent: boolean
+  analysisResultId?: string | null
   steps: AnalysisStep[]
 }
 
@@ -30,6 +33,7 @@ interface Props {
   options: DecisionOption[]
   recommendation: Recommendation | null
   analysisResultId: string
+  groupResultsById?: Record<string, AnalysisResult | null | undefined>
   selectedOptionId?: string | null
   isHistory?: boolean
   retryable?: boolean
@@ -50,7 +54,9 @@ export function AnalysisChatPanel({
   connectionStatus,
   options,
   recommendation,
+  analysisResultId,
   selectedOptionId,
+  groupResultsById = {},
   isHistory = false,
   retryable = false,
   failedStepId = null,
@@ -86,8 +92,10 @@ export function AnalysisChatPanel({
           .filter((s): s is AnalysisStep => s !== undefined)
           .filter((s) => s.status !== 'WAITING')
         return {
+          taskId: group.taskId,
           label: group.label,
           isCurrent: group.isCurrent,
+          analysisResultId: group.analysisResultId,
           steps: groupSteps,
         }
       })
@@ -101,17 +109,33 @@ export function AnalysisChatPanel({
   )
   const analysisCompleted =
     currentSteps.length > 0 && currentSteps.every((step) => step.status === 'SUCCEEDED')
+  const hasRenderedGroupedResults = renderedGroups.some(
+    (group) =>
+      Boolean(
+        group.analysisResultId &&
+          ((group.analysisResultId === analysisResultId && hasResultData) ||
+            groupResultsById[group.analysisResultId]),
+      ),
+  )
 
-  const lastNewRunningCountRef = useRef(0)
+  const scrolledRef = useRef(false)
+  const prevCurrentTaskIdRef = useRef<string | null>(null)
   const newRunningCount = currentSteps.filter((s) => s.status === 'RUNNING').length
 
+  // 新轮次开始时重置滚动锁
+  const currentTaskId = stepGroupsProp.find((g) => g.isCurrent)?.taskId ?? null
+  if (currentTaskId !== prevCurrentTaskIdRef.current) {
+    prevCurrentTaskIdRef.current = currentTaskId
+    scrolledRef.current = false
+  }
+
   useEffect(() => {
-    if (newRunningCount > 0 && lastNewRunningCountRef.current === 0) {
+    if (newRunningCount > 0 && !scrolledRef.current) {
+      scrolledRef.current = true
       requestAnimationFrame(() => {
         currentGroupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
     }
-    lastNewRunningCountRef.current = newRunningCount
   }, [newRunningCount])
 
   const onCompletedRef = useRef(onAllStepsCompleted)
@@ -158,7 +182,7 @@ export function AnalysisChatPanel({
           />
         )}
 
-        {!connectionInterrupted && connectionStatus === 'idle' && !hasHistoryData && (
+        {!connectionInterrupted && connectionStatus === 'idle' && !hasHistoryData && steps.length === 0 && (
           <Empty
             image={
               <ThunderboltOutlined style={{ fontSize: 48, color: '#1677ff' }} />
@@ -191,54 +215,74 @@ export function AnalysisChatPanel({
               </div>
             )}
 
-            {renderedGroups.map((group, groupIndex) => (
-              <div
-                key={group.isCurrent ? 'current-group' : `history-group-${groupIndex}`}
-                ref={group.isCurrent ? currentGroupRef : undefined}
-              >
-                {/* 多轮推演时每组显示标签，首组也显示 */}
-                {hasMultipleRuns && group.label && (
-                  <Divider plain style={{ fontSize: 12, color: group.isCurrent ? '#1677ff' : '#999', margin: groupIndex === 0 ? '0 0 8px' : '16px 0 8px' }}>
-                    {group.label}
-                  </Divider>
-                )}
+            {renderedGroups.map((group, groupIndex) => {
+              const groupResult =
+                group.analysisResultId && group.analysisResultId === analysisResultId && recommendation
+                  ? {
+                      options,
+                      recommendation,
+                    }
+                  : group.analysisResultId
+                    ? groupResultsById[group.analysisResultId]
+                    : null
 
-                {group.steps.map((step) => (
-                  <div key={step.id}>
-                    <StepLogCard
-                      step={step}
-                      animate={!isHistory && group.isCurrent && step.status !== 'FAILED'}
-                      onRetry={
-                        retryable && step.id === failedStepId
-                          ? onRetryStep
-                          : undefined
-                      }
+              return (
+                <div
+                  key={group.isCurrent ? 'current-group' : `history-group-${groupIndex}`}
+                  ref={group.isCurrent ? currentGroupRef : undefined}
+                >
+                  {/* 多轮推演时每组显示标签，首组也显示 */}
+                  {hasMultipleRuns && group.label && (
+                    <Divider plain style={{ fontSize: 12, color: group.isCurrent ? '#1677ff' : '#999', margin: groupIndex === 0 ? '0 0 8px' : '16px 0 8px' }}>
+                      {group.label}
+                    </Divider>
+                  )}
+
+                  {group.steps.map((step) => (
+                    <div key={step.id}>
+                      <StepLogCard
+                        step={step}
+                        animate={!isHistory && group.isCurrent && step.status !== 'FAILED'}
+                        onRetry={
+                          retryable && step.id === failedStepId
+                            ? onRetryStep
+                            : undefined
+                        }
+                      />
+                      {toolCalls
+                        .filter((toolCall) => toolCall.stepId === step.id)
+                        .map((toolCall) => (
+                          <ToolCallCard
+                            key={`${step.id}-${toolCall.toolName}`}
+                            toolCall={toolCall}
+                          />
+                        ))}
+                    </div>
+                  ))}
+
+                  {/* 当前组末尾：进行中提示 / 完成提示 */}
+                  {group.isCurrent && hasMultipleRuns && !analysisCompleted && (
+                    <div className="analysis-panel__loading" style={{ marginBottom: 8 }}>
+                      <Spin size="small" />
+                      <span>{isPartial ? '正在局部推演，生成新结果...' : '正在重新推演...'}</span>
+                    </div>
+                  )}
+                  {group.isCurrent && hasMultipleRuns && analysisCompleted && (
+                    <Divider plain style={{ fontSize: 12, color: '#52c41a', margin: '8px 0 12px' }}>
+                      本轮推演完成
+                    </Divider>
+                  )}
+
+                  {groupResult && (
+                    <OptionComparison
+                      options={groupResult.options}
+                      recommendation={groupResult.recommendation}
+                      selectedOptionId={selectedOptionId}
                     />
-                    {toolCalls
-                      .filter((toolCall) => toolCall.stepId === step.id)
-                      .map((toolCall) => (
-                        <ToolCallCard
-                          key={`${step.id}-${toolCall.toolName}`}
-                          toolCall={toolCall}
-                        />
-                      ))}
-                  </div>
-                ))}
-
-                {/* 当前组末尾：进行中提示 / 完成提示 */}
-                {group.isCurrent && hasMultipleRuns && !analysisCompleted && (
-                  <div className="analysis-panel__loading" style={{ marginBottom: 8 }}>
-                    <Spin size="small" />
-                    <span>{isPartial ? '正在局部推演，生成新结果...' : '正在重新推演...'}</span>
-                  </div>
-                )}
-                {group.isCurrent && hasMultipleRuns && analysisCompleted && (
-                  <Divider plain style={{ fontSize: 12, color: '#52c41a', margin: '8px 0 12px' }}>
-                    本轮推演完成
-                  </Divider>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              )
+            })}
 
             {/* 没有 stepId 的工具调用：单独渲染 */}
             {toolCalls
@@ -250,7 +294,7 @@ export function AnalysisChatPanel({
                 />
               ))}
 
-            {(analysisCompleted || hasHistoryData) && hasResultData && (
+            {!hasRenderedGroupedResults && (analysisCompleted || hasHistoryData) && hasResultData && (
               <OptionComparison
                 options={options}
                 recommendation={recommendation}

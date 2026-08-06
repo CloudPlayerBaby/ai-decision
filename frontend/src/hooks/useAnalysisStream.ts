@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAnalysisTask, createSseTicket, getTaskHistory } from '@/services/analysis.service';
 import type {
+  AnalysisResultStatus,
   AnalysisStep,
   ToolCallEvent,
   ResultReadyEvent,
@@ -14,8 +15,18 @@ export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'reconnecti
 
 /** 步骤分组信息，用于 AnalysisChatPanel 渲染分隔和标签 */
 export interface StepGroupInfo {
+  /** 推演任务 ID */
+  taskId?: string
   /** 展示标签：首次推演 / 重新推演结果 / 局部推演结果 */
   label: string
+  /** 推演类型：FULL / PARTIAL */
+  runType?: TaskRunType
+  /** 任务状态：RUNNING / SUCCEEDED / FAILED */
+  taskStatus?: string
+  /** 该轮推演产出的分析结果 ID，仅成功任务有值 */
+  analysisResultId?: string | null
+  /** 该轮分析结果状态 */
+  resultStatus?: AnalysisResultStatus | null
   /** 该组步骤的 ID 集合 */
   stepIds: string[]
   /** 是否是当前正在运行的 task */
@@ -24,12 +35,15 @@ export interface StepGroupInfo {
 
 interface UseAnalysisStreamOptions {
   taskId: string | null;
+  /** 外部触发重新拉取任务并重建 SSE，例如失败步骤重试后 taskId 不变 */
+  refreshKey?: number;
   /** 决策 ID，用于加载历史推演记录（刷新页面不丢失历史步骤） */
   decisionId?: string;
   /** 当前 task 的推演类型（WorkbenchPage 传入），用于确定分隔标签 */
   runType?: TaskRunType;
   onResultReady?: (event: ResultReadyEvent) => void;
   onTaskFailed?: (event: TaskFailedEvent) => void;
+  onTaskSucceeded?: (taskId: string) => void;
 }
 
 export interface UseAnalysisStreamReturn {
@@ -75,14 +89,28 @@ function deriveRunLabel(runType: TaskRunType, existingFullCount: number): string
 }
 
 /**
- * 将新任务的步骤追加到历史步骤末尾。
- * 旧步骤保持原有顺序不动；新步骤内部按标准顺序排列。
+ * 将任务步骤合并到历史步骤末尾。
+ * 已有步骤用 REST 最新快照覆盖；新步骤内部按标准顺序排列。
  */
 function mergeSteps(
   prevSteps: AnalysisStep[],
   newSteps: AnalysisStep[],
 ): AnalysisStep[] {
+  const nextById = new Map(newSteps.map((step) => [step.id, step]));
   const existingIds = new Set(prevSteps.map((s) => s.id));
+  const updatedPrev = prevSteps.map((step) => {
+    const next = nextById.get(step.id);
+    if (!next) return step;
+
+    return {
+      ...step,
+      ...next,
+      name: next.name || step.name,
+      displayName: next.displayName || step.displayName,
+      summary: next.summary ?? step.summary,
+      content: mergeStepContent(step.content, next.content),
+    };
+  });
   const added = newSteps.filter((s) => !existingIds.has(s.id));
 
   const sortedNew = [...added].sort((a, b) => {
@@ -91,15 +119,17 @@ function mergeSteps(
     return orderA - orderB;
   });
 
-  return [...prevSteps, ...sortedNew];
+  return [...updatedPrev, ...sortedNew];
 }
 
 export function useAnalysisStream({
   taskId,
+  refreshKey = 0,
   decisionId,
   runType,
   onResultReady,
   onTaskFailed,
+  onTaskSucceeded,
 }: UseAnalysisStreamOptions): UseAnalysisStreamReturn {
   const [steps, setSteps] = useState<AnalysisStep[]>([]);
   const [toolCalls, setToolCalls] = useState<ToolCallEvent[]>([]);
@@ -109,8 +139,12 @@ export function useAnalysisStream({
   const [progress, setProgress] = useState(0);
   const [retryable, setRetryable] = useState(false);
   const [failedStepId, setFailedStepId] = useState<string | null>(null);
+  const failedStepIdRef = useRef<string | null>(null);
+  failedStepIdRef.current = failedStepId;
   const retryCountRef=useRef(0);
   const prevStepsRef = useRef<AnalysisStep[]>([]);
+  const latestStepsRef = useRef<AnalysisStep[]>([]);
+  latestStepsRef.current = steps;
   /** 步骤分组信息：每轮推演的标签 + 步骤 ID 集合 */
   const [stepGroups, setStepGroups] = useState<StepGroupInfo[]>([]);
   /** 当前 SSE 连接的 taskId，用于标记 isCurrent */
@@ -126,6 +160,8 @@ export function useAnalysisStream({
   onResultReadyRef.current = onResultReady;
   const onTaskFailedRef = useRef(onTaskFailed);
   onTaskFailedRef.current = onTaskFailed;
+  const onTaskSucceededRef = useRef(onTaskSucceeded);
+  onTaskSucceededRef.current = onTaskSucceeded;
 
   const closeEventSource = useCallback(() => {
     if (esRef.current) {
@@ -151,6 +187,12 @@ export function useAnalysisStream({
       return;
     }
 
+    // 切换决策时立刻清空，避免 WorkbenchPage 用新 decisionId + 旧 resultId 发请求
+    prevStepsRef.current = [];
+    setSteps([]);
+    setStepGroups([]);
+    historyLoadedRef.current = false;
+
     let cancelled = false;
 
     getTaskHistory(decisionId).then((historyItems) => {
@@ -161,12 +203,22 @@ export function useAnalysisStream({
       const groups: StepGroupInfo[] = [];
       let fullCount = 0;
 
-      for (const item of historyItems) {
+      const historyItemsForDisplay = historyItems.filter(
+        (item) => item.taskId !== taskId || item.taskStatus !== 'RUNNING',
+      );
+      const historyTaskIds = new Set(historyItemsForDisplay.map((item) => item.taskId));
+
+      for (const item of historyItemsForDisplay) {
         const label = deriveRunLabel(item.runType, fullCount);
         if (item.runType === 'FULL') fullCount++;
         allHistorySteps.push(...item.steps);
         groups.push({
+          taskId: item.taskId,
           label,
+          runType: item.runType,
+          taskStatus: item.taskStatus,
+          analysisResultId: item.analysisResultId,
+          resultStatus: item.resultStatus,
           stepIds: item.steps.map((s) => s.id),
           isCurrent: false,
         });
@@ -180,7 +232,12 @@ export function useAnalysisStream({
       });
       setStepGroups((prev) => {
         // 保留已有当前 task group
-        const currentGroups = prev.filter((g) => g.isCurrent);
+        const currentGroups = prev
+          .filter((g) => g.isCurrent && !historyTaskIds.has(g.taskId ?? ''))
+          .map((group) => ({
+            ...group,
+            label: deriveRunLabel(runType ?? 'FULL', fullCount),
+          }));
         return [...groups, ...currentGroups];
       });
       prevStepsRef.current = allHistorySteps;
@@ -195,7 +252,7 @@ export function useAnalysisStream({
       cancelled = true;
       historyLoadedRef.current = false;
     };
-  }, [decisionId]);
+  }, [decisionId, taskId, runType]);
 
   // ── SSE 连接 ──────────────────────────────────────────────
   useEffect(() => {
@@ -218,7 +275,7 @@ export function useAnalysisStream({
     }
 
     // taskId 变化：保存旧步骤快照，标记旧 group 为历史
-    prevStepsRef.current = steps;
+    prevStepsRef.current = latestStepsRef.current;
     currentTaskIdRef.current = taskId;
     // 新 task 的 label 先记为占位，等 REST 拿到 runType 后修正
     setStepGroups((prev) => prev.map((g) => ({ ...g, isCurrent: false })));
@@ -255,7 +312,7 @@ export function useAnalysisStream({
       setProgress(task.progress);
 
       // 添加本轮 group（标签从当前分组状态实时计算，不用 ref 避免不同步）
-      if (task.steps.length > 0) {
+      if (task.steps.length > 0 && task.status !== 'SUCCEEDED') {
         setStepGroups((prev) => {
           const withoutCurrent = prev.filter((g) => !g.isCurrent);
           const fullCount = withoutCurrent.filter((g) => g.label !== '局部推演结果').length;
@@ -263,7 +320,10 @@ export function useAnalysisStream({
           return [
             ...withoutCurrent,
             {
+              taskId: task.id,
               label,
+              runType: runType ?? 'FULL',
+              taskStatus: task.status,
               stepIds: task.steps.map((s) => s.id),
               isCurrent: true,
             },
@@ -284,6 +344,17 @@ export function useAnalysisStream({
         setFailedStepId(failedEvent.failedStepId ?? null);
         setConnectionStatus('idle');
         onTaskFailedRef.current?.(failedEvent);
+        return;
+      }
+
+      setTaskFailed(null);
+      setRetryable(false);
+      setFailedStepId(null);
+
+      if (task.status === 'SUCCEEDED') {
+        setStepGroups((prev) => prev.filter((group) => group.taskId !== task.id));
+        setConnectionStatus('idle');
+        onTaskSucceededRef.current?.(task.id);
         return;
       }
 
@@ -348,6 +419,12 @@ export function useAnalysisStream({
           return [...prev, updated];
         });
 
+        // 重试成功：失败步骤恢复为 RUNNING 后清除重试标记
+        if (data.status === 'RUNNING' && data.stepId === failedStepIdRef.current) {
+          setRetryable(false)
+          setFailedStepId(null)
+        }
+
         if (data.progress !== undefined) {
           setProgress(data.progress);
         }
@@ -385,7 +462,34 @@ export function useAnalysisStream({
         }
 
         setResultReady(data);
-        onResultReadyRef.current?.(data);
+        setStepGroups((prev) =>
+          prev.map((group) =>
+            group.taskId === data.taskId
+              ? {
+                  ...group,
+                  taskStatus: 'SUCCEEDED',
+                  analysisResultId: data.analysisResultId,
+                  resultStatus: data.resultStatus,
+                }
+              : group,
+          ),
+        );
+        getAnalysisTask(data.taskId)
+          .then((latestTask) => {
+            if (!mountedRef.current) return;
+            setSteps((prev) => mergeSteps(prev, latestTask.steps));
+            setProgress(latestTask.progress);
+          })
+          .catch(() => {
+            if (!mountedRef.current) return;
+            setProgress(100);
+          })
+          .finally(() => {
+            if (!mountedRef.current) return;
+            setConnectionStatus('idle');
+            closeEventSource();
+            onResultReadyRef.current?.(data);
+          });
       });
 
       es.addEventListener('task_failed', (event: MessageEvent) => {
@@ -401,6 +505,7 @@ export function useAnalysisStream({
         onTaskFailedRef.current?.(data);
         setRetryable(data.retryable);
         setFailedStepId(data.failedStepId ?? null);
+        setConnectionStatus('idle');
         closeEventSource();
       });
 
@@ -431,7 +536,7 @@ export function useAnalysisStream({
       closeEventSource();
       clearTimer();
     };
-  }, [taskId, closeEventSource, clearTimer]);
+  }, [taskId, refreshKey, decisionId, runType, closeEventSource, clearTimer]);
 
   return {
     steps,
