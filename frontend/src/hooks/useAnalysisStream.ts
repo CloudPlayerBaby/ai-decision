@@ -501,12 +501,51 @@ export function useAnalysisStream({
           return;
         }
 
-        setTaskFailed(data);
-        onTaskFailedRef.current?.(data);
-        setRetryable(data.retryable);
-        setFailedStepId(data.failedStepId ?? null);
+        const failedTaskId = data.taskId ?? taskId!;
+        const failedEvent: TaskFailedEvent = {
+          ...data,
+          taskId: failedTaskId,
+        };
+
+        // task_failed 可能先于 FAILED step_update 到达。这里先落失败状态，避免
+        // 关闭 EventSource 后丢失后续 step_update，导致重试按钮没有渲染条件。
+        if (failedEvent.failedStepId) {
+          setSteps((prev) =>
+            prev.map((step) =>
+              step.id === failedEvent.failedStepId
+                ? { ...step, status: 'FAILED' }
+                : step,
+            ),
+          );
+        }
+        setStepGroups((prev) =>
+          prev.map((group) =>
+            group.taskId === failedTaskId
+              ? { ...group, taskStatus: 'FAILED' }
+              : group,
+          ),
+        );
+        setTaskFailed(failedEvent);
+        onTaskFailedRef.current?.(failedEvent);
+        setRetryable(failedEvent.retryable);
+        setFailedStepId(failedEvent.failedStepId ?? null);
         setConnectionStatus('idle');
         closeEventSource();
+
+        // SSE 只负责通知；失败后的最终步骤内容以持久化任务快照为准。
+        getAnalysisTask(failedTaskId)
+          .then((latestTask) => {
+            if (cancelled || !mountedRef.current) return;
+            setSteps((prev) => mergeSteps(prev, latestTask.steps));
+            setProgress(latestTask.progress);
+            setRetryable(latestTask.error?.retryable ?? failedEvent.retryable);
+            setFailedStepId(
+              latestTask.error?.failedStepId ?? failedEvent.failedStepId ?? null,
+            );
+          })
+          .catch(() => {
+            // 即时失败状态已由 task_failed 恢复，快照失败不影响用户重试。
+          });
       });
 
       es.addEventListener('ping', () => {});

@@ -72,9 +72,6 @@ export function AnalysisChatPanel({
   const isPartial = decisionStatus === 'PARTIAL_ANALYZING'
   const hasMultipleRuns = stepGroupsProp.length > 1
 
-  // 自动滚动到当前 task 区域
-  const currentGroupRef = useRef<HTMLDivElement>(null)
-
   // 将 stepGroups 映射到实际步骤列表
   const renderedGroups = useMemo<RenderedGroup[]>(() => {
     if (stepGroupsProp.length === 0) {
@@ -109,6 +106,9 @@ export function AnalysisChatPanel({
   )
   const analysisCompleted =
     currentSteps.length > 0 && currentSteps.every((step) => step.status === 'SUCCEEDED')
+  const hasFailedStep = steps.some((step) => step.status === 'FAILED')
+  const hasAnalysisContent =
+    steps.length > 0 || hasHistoryData || connectionStatus !== 'idle'
   const hasRenderedGroupedResults = renderedGroups.some(
     (group) =>
       Boolean(
@@ -118,25 +118,53 @@ export function AnalysisChatPanel({
       ),
   )
 
-  const scrolledRef = useRef(false)
-  const prevCurrentTaskIdRef = useRef<string | null>(null)
-  const newRunningCount = currentSteps.filter((s) => s.status === 'RUNNING').length
-
-  // 新轮次开始时重置滚动锁
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const hasAutoScrolledRef = useRef(false)
+  const shouldFollowBottomRef = useRef(true)
   const currentTaskId = stepGroupsProp.find((g) => g.isCurrent)?.taskId ?? null
-  if (currentTaskId !== prevCurrentTaskIdRef.current) {
-    prevCurrentTaskIdRef.current = currentTaskId
-    scrolledRef.current = false
-  }
 
+  // 切换决策或推演轮次后，下一批可展示内容默认定位到最底部。
   useEffect(() => {
-    if (newRunningCount > 0 && !scrolledRef.current) {
-      scrolledRef.current = true
-      requestAnimationFrame(() => {
-        currentGroupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    hasAutoScrolledRef.current = false
+    shouldFollowBottomRef.current = true
+  }, [currentTaskId, userMessage])
+
+  // 历史恢复首次直接到底；后续内容仅在用户仍靠近底部时自动跟随。
+  useEffect(() => {
+    const hasScrollableContent =
+      renderedGroups.length > 0 || toolCalls.length > 0 || hasResultData
+    if (!hasScrollableContent) return
+
+    const isInitialScroll = !hasAutoScrolledRef.current
+    if (!isInitialScroll && !shouldFollowBottomRef.current) return
+
+    hasAutoScrolledRef.current = true
+    const frameId = requestAnimationFrame(() => {
+      const body = bodyRef.current
+      if (!body) return
+      body.scrollTo({
+        top: body.scrollHeight,
+        behavior: isInitialScroll ? 'auto' : 'smooth',
       })
-    }
-  }, [newRunningCount])
+    })
+
+    return () => cancelAnimationFrame(frameId)
+  }, [
+    analysisResultId,
+    currentTaskId,
+    hasResultData,
+    renderedGroups.length,
+    steps,
+    toolCalls,
+    userMessage,
+  ])
+
+  const handleBodyScroll = () => {
+    const body = bodyRef.current
+    if (!body) return
+    const distanceToBottom = body.scrollHeight - body.scrollTop - body.clientHeight
+    shouldFollowBottomRef.current = distanceToBottom <= 64
+  }
 
   const onCompletedRef = useRef(onAllStepsCompleted)
   onCompletedRef.current = onAllStepsCompleted
@@ -152,7 +180,7 @@ export function AnalysisChatPanel({
     if (isHistory) return '历史记录'
     switch (connectionStatus) {
       case 'idle':
-        return '等待推演'
+        return hasFailedStep ? '推演失败' : '等待推演'
       case 'connecting':
         return '连接中...'
       case 'connected':
@@ -166,7 +194,11 @@ export function AnalysisChatPanel({
     <div className="analysis-panel">
       <div className="analysis-panel__header">推演对话</div>
 
-      <div className="analysis-panel__body">
+      <div
+        ref={bodyRef}
+        className="analysis-panel__body"
+        onScroll={handleBodyScroll}
+      >
         {connectionInterrupted && (
           <Result
             status="warning"
@@ -203,12 +235,15 @@ export function AnalysisChatPanel({
           </div>
         )}
 
-        {!connectionInterrupted && (connectionStatus !== 'idle' || hasHistoryData) && (
+        {!connectionInterrupted && hasAnalysisContent && (
           <>
             <ChatMessage content={userMessage} />
 
             {/* 首次推演 / 无历史时的加载提示 */}
-            {!analysisCompleted && !isHistory && !hasMultipleRuns && (
+            {!analysisCompleted &&
+              !isHistory &&
+              !hasMultipleRuns &&
+              connectionStatus !== 'idle' && (
               <div className="analysis-panel__loading">
                 <Spin size="small" />
                 <span>正在推演...</span>
@@ -229,7 +264,6 @@ export function AnalysisChatPanel({
               return (
                 <div
                   key={group.isCurrent ? 'current-group' : `history-group-${groupIndex}`}
-                  ref={group.isCurrent ? currentGroupRef : undefined}
                 >
                   {/* 多轮推演时每组显示标签，首组也显示 */}
                   {hasMultipleRuns && group.label && (
@@ -261,7 +295,10 @@ export function AnalysisChatPanel({
                   ))}
 
                   {/* 当前组末尾：进行中提示 / 完成提示 */}
-                  {group.isCurrent && hasMultipleRuns && !analysisCompleted && (
+                  {group.isCurrent &&
+                    hasMultipleRuns &&
+                    !analysisCompleted &&
+                    connectionStatus !== 'idle' && (
                     <div className="analysis-panel__loading" style={{ marginBottom: 8 }}>
                       <Spin size="small" />
                       <span>{isPartial ? '正在局部推演，生成新结果...' : '正在重新推演...'}</span>
