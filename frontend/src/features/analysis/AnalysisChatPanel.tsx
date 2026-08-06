@@ -272,17 +272,29 @@ export function AnalysisChatPanel({
                     </Divider>
                   )}
 
-                  {group.steps.map((step) => (
-                    <div key={step.id}>
-                      <StepLogCard
-                        step={step}
-                        animate={!isHistory && group.isCurrent && step.status !== 'FAILED'}
-                        onRetry={
-                          retryable && step.id === failedStepId
-                            ? onRetryStep
-                            : undefined
-                        }
-                      />
+                  {group.steps.map((step) => {
+                    // 修正：对于非当前分组的卡住步骤，强制视为失败以停止动画
+                    let displayStep =
+                      !group.isCurrent && (step.status === 'RUNNING' || step.status === 'WAITING')
+                        ? { ...step, status: 'FAILED' as const }
+                        : step
+                    
+                    // 如果步骤最终是失败状态，并且内容停留在了初始的“思考中...”，则将其替换为更明确的失败提示
+                    if (displayStep.status === 'FAILED' && (!displayStep.content || displayStep.content.trim() === '思考中...')) {
+                      displayStep = { ...displayStep, content: '推演失败' }
+                    }
+
+                    return (
+                      <div key={step.id}>
+                        <StepLogCard
+                          step={displayStep}
+                          animate={!isHistory && group.isCurrent && displayStep.status !== 'FAILED'}
+                          onRetry={
+                            retryable && step.id === failedStepId
+                              ? onRetryStep
+                              : undefined
+                          }
+                        />
                       {toolCalls
                         .filter((toolCall) => toolCall.stepId === step.id)
                         .map((toolCall) => (
@@ -292,7 +304,8 @@ export function AnalysisChatPanel({
                           />
                         ))}
                     </div>
-                  ))}
+                  )
+                })}
 
                   {/* 当前组末尾：进行中提示 / 完成提示 */}
                   {group.isCurrent &&
