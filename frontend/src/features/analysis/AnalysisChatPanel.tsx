@@ -410,13 +410,6 @@ export function AnalysisChatPanel({
                 <Result
                   icon={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
                   title="方案已确认"
-                  subTitle={
-                    <Space orientation="vertical" size={4}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        已选择方案: <Text strong>{selectedOptionId}</Text>
-                      </Text>
-                    </Space>
-                  }
                 />
               </div>
             )}
