@@ -10,7 +10,7 @@ import {
   BulbFilled,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
 import { LAYOUT_LIMITS, useLayoutStore } from '@/stores/layoutStore'
 import { ResizeHandle } from '@/components/layout/ResizeHandle'
@@ -23,6 +23,7 @@ const { Text, Title } = Typography
 export function MainLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
   const clearSession = useAuthStore((state) => state.clearSession)
   const leftCollapsed = useLayoutStore((state) => state.leftCollapsed)
@@ -67,6 +68,8 @@ export function MainLayout() {
   }
 
   const handleLogout = () => {
+    void queryClient.cancelQueries()
+    queryClient.clear()
     clearSession()
     navigate('/login', { replace: true })
   }

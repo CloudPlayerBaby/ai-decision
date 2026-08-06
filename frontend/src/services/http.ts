@@ -34,6 +34,45 @@ function isAuthPublicRequest(config: InternalAxiosRequestConfig): boolean {
   return url.includes('/auth/login') || url.includes('/auth/register')
 }
 
+function isAuthPage(): boolean {
+  const path = window.location.pathname
+  return path.startsWith('/login') || path.startsWith('/register')
+}
+
+/**
+ * 退出登录 / 重新登录后，上一页（如工作台）发出的请求仍会返回。
+ * 这类过期请求不应再弹全局 toast。
+ */
+function isStaleSessionRequest(config?: InternalAxiosRequestConfig): boolean {
+  if (!config || isAuthPublicRequest(config)) return false
+
+  const reqAuth = config.headers?.Authorization
+  const currentToken = useAuthStore.getState().token
+
+  if (typeof reqAuth === 'string') {
+    return !currentToken || reqAuth !== `Bearer ${currentToken}`
+  }
+
+  return !currentToken || isAuthPage()
+}
+
+function rejectApiError(
+  messageText: string,
+  options: {
+    code: BusinessCode
+    httpStatus?: number
+    data?: unknown
+  },
+) {
+  return Promise.reject(
+    new ApiError(messageText, {
+      code: options.code,
+      httpStatus: options.httpStatus,
+      data: options.data,
+    }),
+  )
+}
+
 function handleUnauthorized(
   messageText: string,
   config?: InternalAxiosRequestConfig,
@@ -41,41 +80,31 @@ function handleUnauthorized(
 ) {
   // 账号密码错误等：只提示，不清会话、不整页跳转
   if (config && isAuthPublicRequest(config)) {
-    return Promise.reject(
-      new ApiError(messageText, {
-        code: BusinessCode.Unauthorized,
-        httpStatus: 401,
-        data,
-      }),
-    )
-  }
-
-  // 过期请求：发出时用的是旧 Token，登录后已换新 Token，忽略此次 401
-  const reqAuth = config?.headers?.Authorization
-  const currentToken = useAuthStore.getState().token
-  if (
-    currentToken &&
-    typeof reqAuth === 'string' &&
-    reqAuth !== `Bearer ${currentToken}`
-  ) {
-    return Promise.reject(
-      new ApiError(messageText, {
-        code: BusinessCode.Unauthorized,
-        httpStatus: 401,
-        data,
-      }),
-    )
-  }
-
-  message.error(messageText)
-  redirectToLogin()
-  return Promise.reject(
-    new ApiError(messageText, {
+    return rejectApiError(messageText, {
       code: BusinessCode.Unauthorized,
       httpStatus: 401,
       data,
-    }),
-  )
+    })
+  }
+
+  // 过期请求：退出登录、token 轮换后返回的 401，静默忽略
+  if (isStaleSessionRequest(config)) {
+    return rejectApiError(messageText, {
+      code: BusinessCode.Unauthorized,
+      httpStatus: 401,
+      data,
+    })
+  }
+
+  if (!isAuthPage()) {
+    message.error(messageText)
+  }
+  redirectToLogin()
+  return rejectApiError(messageText, {
+    code: BusinessCode.Unauthorized,
+    httpStatus: 401,
+    data,
+  })
 }
 
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
@@ -123,14 +152,15 @@ http.interceptors.response.use(
       )
     }
 
-    message.error(payload.message || '请求失败')
-    return Promise.reject(
-      new ApiError(payload.message || '请求失败', {
-        code: payload.code,
-        httpStatus: response.status,
-        data: payload.data,
-      }),
-    )
+    const messageText = payload.message || '请求失败'
+    if (!isStaleSessionRequest(response.config)) {
+      message.error(messageText)
+    }
+    return rejectApiError(messageText, {
+      code: payload.code,
+      httpStatus: response.status,
+      data: payload.data,
+    })
   },
   (error: unknown) => {
     // 用户主动取消请求：不弹错误
@@ -156,16 +186,16 @@ http.interceptors.response.use(
           : payload?.message ||
             error.message ||
             (status ? `请求失败（HTTP ${status}）` : '网络异常，请稍后重试')
-      if (status !== 401) {
+      if (status !== 401 && !isStaleSessionRequest(error.config)) {
         message.error(text)
       }
-      return Promise.reject(
-        new ApiError(text, {
-          code: payload?.code ?? (status === 404 ? BusinessCode.NotFound : BusinessCode.ServerError),
-          httpStatus: status,
-          data: payload?.data,
-        }),
-      )
+      return rejectApiError(text, {
+        code:
+          payload?.code ??
+          (status === 404 ? BusinessCode.NotFound : BusinessCode.ServerError),
+        httpStatus: status,
+        data: payload?.data,
+      })
     }
 
     message.error('网络异常，请稍后重试')

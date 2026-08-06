@@ -6,7 +6,7 @@ import { useLayoutStore } from '@/stores/layoutStore'
 import { ThemeDocumentSync } from '@/components/layout/ThemeDocumentSync'
 import { LayoutViewportSync } from '@/components/layout/LayoutViewportSync'
 //全局默认配置
-const queryClient = new QueryClient({
+export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,

@@ -2,6 +2,7 @@ import { Button, Card, Form, Input, Space, Typography, message, Tooltip } from '
 import { BulbFilled, BulbOutlined, LockOutlined, UserOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/stores/authStore'
 import { useLayoutStore } from '@/stores/layoutStore'
 import { login } from '@/services/auth.service'
@@ -19,6 +20,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
+  const queryClient = useQueryClient()
   const setSession = useAuthStore((state) => state.setSession)
   const clearSession = useAuthStore((state) => state.clearSession)
   const themeMode = useLayoutStore((state) => state.themeMode)
@@ -26,10 +28,12 @@ export function LoginPage() {
   const isEyeCare = themeMode === 'eyeCare'
   const [submitting, setSubmitting] = useState(false)
 
-  // 进入登录页时清掉本地坏掉的 token，避免干扰重新登录
+  // 进入登录页时清掉本地 token 和上一会话的查询缓存，避免旧请求回包弹错
   useEffect(() => {
+    void queryClient.cancelQueries()
+    queryClient.clear()
     clearSession()
-  }, [clearSession])
+  }, [clearSession, queryClient])
 
   const fromState = (location.state as { from?: string } | null)?.from
   const fromQuery = searchParams.get('from')
