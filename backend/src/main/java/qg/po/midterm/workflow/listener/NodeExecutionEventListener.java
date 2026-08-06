@@ -158,6 +158,10 @@ public class NodeExecutionEventListener {
                     Map<String, Object> toolData = objectMapper.readValue(event.getOutputData(), Map.class);
                     Map<String, Object> sseData = new LinkedHashMap<>();
                     sseData.put("taskId", "t_" + task.getId());
+                    AnalysisStep currentStep = findCurrentStep(task);
+                    if (currentStep != null) {
+                        sseData.put("stepId", "s_" + currentStep.getId());
+                    }
                     sseData.put("toolName", toolData.get("toolName"));
                     sseData.put("status", event.getStatus());
                     sseData.put("inputSummary", toolData.get("inputSummary"));
@@ -276,6 +280,16 @@ public class NodeExecutionEventListener {
         }
 
         sendAfterCommit(() -> eventService.sendTaskFailed("t_" + task.getId(), data));
+    }
+
+    private AnalysisStep findCurrentStep(AnalysisTask task) {
+        if (task.getCurrentStep() == null) {
+            return null;
+        }
+        return stepMapper.selectOne(new LambdaQueryWrapper<AnalysisStep>()
+                .eq(AnalysisStep::getRunId, task.getId())
+                .eq(AnalysisStep::getStepOrder, task.getCurrentStep())
+                .last("LIMIT 1"));
     }
 
     private AnalysisStep resolveFailureStep(AnalysisTask task, Exception exception) {
