@@ -187,6 +187,12 @@ export function useAnalysisStream({
       return;
     }
 
+    // 切换决策时立刻清空，避免 WorkbenchPage 用新 decisionId + 旧 resultId 发请求
+    prevStepsRef.current = [];
+    setSteps([]);
+    setStepGroups([]);
+    historyLoadedRef.current = false;
+
     let cancelled = false;
 
     getTaskHistory(decisionId).then((historyItems) => {

@@ -27,7 +27,7 @@ function redirectToLogin() {
     window.location.assign(`/login?${search.toString()}`)
   }
 }
-
+// 先判断是不是公开的登录和注册页面
 /** 登录/注册不携带旧 Token，避免坏掉的 accessToken 干扰重新登录 */
 function isAuthPublicRequest(config: InternalAxiosRequestConfig): boolean {
   const url = config.url ?? ''
@@ -37,6 +37,12 @@ function isAuthPublicRequest(config: InternalAxiosRequestConfig): boolean {
 function isAuthPage(): boolean {
   const path = window.location.pathname
   return path.startsWith('/login') || path.startsWith('/register')
+}
+
+/** 历史分析结果缺失时由页面自行处理，避免切换决策时刷屏 */
+function isQuietNotFoundRequest(config?: InternalAxiosRequestConfig): boolean {
+  const url = config?.url ?? ''
+  return url.includes('/analysis-result')
 }
 
 /**
@@ -106,7 +112,7 @@ function handleUnauthorized(
     data,
   })
 }
-
+// 避免 localStorage 里还有旧 token 时，登录请求也带上坏 token，干扰重新登录。
 http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (isAuthPublicRequest(config)) {
     delete config.headers.Authorization
@@ -153,7 +159,11 @@ http.interceptors.response.use(
     }
 
     const messageText = payload.message || '请求失败'
-    if (!isStaleSessionRequest(response.config)) {
+    const suppressToast =
+      isStaleSessionRequest(response.config) ||
+      (payload.code === BusinessCode.NotFound &&
+        isQuietNotFoundRequest(response.config))
+    if (!suppressToast) {
       message.error(messageText)
     }
     return rejectApiError(messageText, {
@@ -186,7 +196,11 @@ http.interceptors.response.use(
           : payload?.message ||
             error.message ||
             (status ? `请求失败（HTTP ${status}）` : '网络异常，请稍后重试')
-      if (status !== 401 && !isStaleSessionRequest(error.config)) {
+      if (
+        status !== 401 &&
+        !isStaleSessionRequest(error.config) &&
+        !(status === 404 && isQuietNotFoundRequest(error.config))
+      ) {
         message.error(text)
       }
       return rejectApiError(text, {

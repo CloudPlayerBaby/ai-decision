@@ -360,6 +360,12 @@ export function WorkbenchPage() {
     // 简化的 enabled 条件：只需要 id 和 effectiveResultId 非空
     enabled: Boolean(id) && Boolean(effectiveResultId),
     staleTime: 0,
+    retry: (count, error) => {
+      if (error instanceof ApiError && error.code === BusinessCode.NotFound) {
+        return false
+      }
+      return count < 1
+    },
   })
 
   console.log('[WorkbenchPage] resultQuery.data:', resultQuery.data)
@@ -385,6 +391,12 @@ export function WorkbenchPage() {
       queryFn: () => getAnalysisResult(id, resultId),
       enabled: Boolean(id && resultId),
       staleTime: 0,
+      retry: (count: number, error: unknown) => {
+        if (error instanceof ApiError && error.code === BusinessCode.NotFound) {
+          return false
+        }
+        return count < 1
+      },
     })),
   })
   const historyResultsById = useMemo(() => {
@@ -1160,6 +1172,30 @@ export function WorkbenchPage() {
     !isLocalPartialAnalyzing &&
     (decision.status === 'COMPLETED' || decision.status === 'WAITING_CONFIRM')
 
+  const hasCanvasBusinessNodes =
+    viewModel?.canvas.nodes.some(
+      (node) => node.type === 'factor' || node.type === 'option',
+    ) ?? false
+
+  const isStreamActive =
+    connectionStatus === 'connecting' ||
+    connectionStatus === 'connected' ||
+    connectionStatus === 'reconnecting'
+
+  const isCanvasDataPending =
+    canvasQuery.isLoading ||
+    (canvasQuery.isFetching && !canvasForView)
+
+  /** 画布在出现 factor/option 节点前持续显示生成动画 */
+  const isCanvasGenerating =
+    !hasCanvasBusinessNodes &&
+    (startMutation.isPending ||
+      analyzing ||
+      isStreamActive ||
+      decision.status === 'ANALYZING' ||
+      decision.status === 'PARTIAL_ANALYZING' ||
+      (isCanvasDataPending && decision.status !== 'PENDING'))
+
   return (
     <div className="workbench">
       <PageHeader
@@ -1255,7 +1291,7 @@ export function WorkbenchPage() {
         <DecisionCanvasPanel
           key={id}
           viewModel={viewModel}
-          isCanvasGenerating={decision.status === 'ANALYZING' && !animCompleted}
+          isCanvasGenerating={isCanvasGenerating}
           onDirtyChange={(dirty) => {
             console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
             if (!dirty) {

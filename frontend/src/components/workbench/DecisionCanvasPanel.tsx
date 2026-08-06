@@ -62,7 +62,6 @@ const EdgeDeleteContext = createContext<{
 } | null>(null)
 
 // ── 节点组件 Props 窄类型 ──────────────────────────────────────
-// NodeProps 接受 Node<NodeData>，传 FlowNode 具名类型满足约束
 
 type DecisionNodeProps = NodeProps<DecisionFlowNode>
 type FactorNodeProps = NodeProps<FactorFlowNode>
