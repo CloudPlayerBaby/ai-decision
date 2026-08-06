@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Button, Divider, Empty, Result, Space, Spin, Typography } from 'antd'
+import { Button, Divider, Empty, Result, Spin, Typography } from 'antd'
 import { CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type {
   AnalysisResult,
