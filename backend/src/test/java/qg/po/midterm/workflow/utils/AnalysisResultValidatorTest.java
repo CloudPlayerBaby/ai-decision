@@ -192,6 +192,26 @@ class AnalysisResultValidatorTest {
     }
 
     @Test
+    void ensureRelativeFactorStripsBracketsFromModelOutput() {
+        List<Factor> factors = List.of(new Factor("f_high", "关键因素", "描述", 0.6));
+
+        Option bracketed = new Option();
+        bracketed.setId("opt_1");
+        bracketed.setName("带括号");
+        bracketed.setRelativeFactor("[f_high]");
+
+        Option invalid = new Option();
+        invalid.setId("opt_2");
+        invalid.setName("无效值");
+        invalid.setRelativeFactor("not_a_factor");
+
+        AnalysisResultValidator.ensureRelativeFactor(List.of(bracketed, invalid), factors);
+
+        assertEquals("f_high", bracketed.getRelativeFactor());
+        assertEquals("f_high", invalid.getRelativeFactor());
+    }
+
+    @Test
     void validateRejectsBlankRelativeFactor() {
         AnalysisResultDto dto = validDto();
         dto.getOptions().get(0).setRelativeFactor(null);
