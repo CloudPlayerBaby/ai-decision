@@ -366,6 +366,8 @@ export interface DecisionCanvasPanelProps {
    * 不污染下一次结构变更状态。父组件负责在成功后清除 pendingAutoLayout。
    */
   onPersistLayoutOnly?: (canvas: CanvasData) => void
+  /** 整轮推演进行中且画布尚无业务节点时，显示「画布正在生成中」 */
+  isCanvasGenerating?: boolean
 }
 
 // ── 辅助函数 ─────────────────────────────────────────────────
@@ -465,6 +467,25 @@ function DecisionCanvasPanelEmpty() {
     <div className="canvas-panel">
       <div className="canvas-panel__empty">
         <span>暂无画布数据</span>
+      </div>
+    </div>
+  )
+}
+
+function DecisionCanvasPanelGenerating() {
+  return (
+    <div className="canvas-panel">
+      <div className="canvas-panel__generating">
+        <div className="canvas-panel__generating-visual" aria-hidden="true">
+          <span className="canvas-panel__generating-node canvas-panel__generating-node--decision" />
+          <span className="canvas-panel__generating-node canvas-panel__generating-node--factor" />
+          <span className="canvas-panel__generating-node canvas-panel__generating-node--option" />
+          <span className="canvas-panel__generating-line canvas-panel__generating-line--1" />
+          <span className="canvas-panel__generating-line canvas-panel__generating-line--2" />
+        </div>
+        <Spin indicator={<LoadingOutlined spin />} size="large" />
+        <p className="canvas-panel__generating-text">画布正在生成中</p>
+        <p className="canvas-panel__generating-hint">AI 推演完成后将自动展示决策结构</p>
       </div>
     </div>
   )
@@ -1219,7 +1240,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     onFactorDeleteRef.current?.(updatedCanvas, rollback).catch(() => {
       rollback()
     })
-  }, [pendingFactorDelete, setNodes, setEdges])
+  }, [pendingFactorDelete, editingNode?.id, setNodes, setEdges])
 
   // 取消删除因素：恢复快照
   const cancelFactorDelete = useCallback(() => {
@@ -1301,7 +1322,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
       setEdges((prev) => applyEdgeChanges(changes, prev) as FlowEdge[])
     },
-    [setEdges],
+    [setEdges, initiateFactorDelete],
   )
 
   const handleNodesChange = useCallback(
@@ -1998,6 +2019,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     </Button>
                   </Space>
                 </Modal>
+
               </div>
             </NodeHoverContext.Provider>
           </EdgeFocusContext.Provider>
@@ -2009,6 +2031,15 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
 
 // ── 出口组件：根据 viewModel 有无决定渲染空状态还是完整画布 ──────
 export function DecisionCanvasPanel(props: DecisionCanvasPanelProps) {
+  const hasBusinessNodes =
+    props.viewModel?.canvas.nodes.some(
+      (node) => node.type === 'factor' || node.type === 'option',
+    ) ?? false
+  const showGenerating = Boolean(props.isCanvasGenerating) && !hasBusinessNodes
+
+  if (showGenerating) {
+    return <DecisionCanvasPanelGenerating />
+  }
   if (!props.viewModel) {
     return <DecisionCanvasPanelEmpty />
   }

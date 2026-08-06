@@ -1212,6 +1212,7 @@ export function WorkbenchPage() {
         <DecisionCanvasPanel
           key={id}
           viewModel={viewModel}
+          isCanvasGenerating={decision.status === 'ANALYZING' && !animCompleted}
           onDirtyChange={(dirty) => {
             console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
             if (!dirty) {
