@@ -37,6 +37,7 @@ import {
   retryFailedStep,
   startPartialAnalysis,
 } from '@/services/analysis.service'
+import { getAnalysisTask } from '@/services/analysis.service'
 import { getCanvas, saveCanvas } from '@/services/canvas.service'
 import { buildCanvasViewModel, toFlowNodes } from '@/utils/canvasMapper'
 import { applyDagreLayout } from '@/utils/canvasLayout'
@@ -140,6 +141,44 @@ export function WorkbenchPage() {
     taskId: string
     analysisResultId: string
   } | null>(null)
+
+  // ── 失败重试状态（按 decisionId 隔离，刷新可恢复） ─────────
+  /**
+   * 当前决策在 FAILED 后等待用户在右侧聊天框点击「请重试」。
+   * 触发来源（任一即可）：
+   *   1. SSE task_failed 事件（taskId 已知且指向当前决策）；
+   *   2. useAnalysisStream 在 connect 时通过 getAnalysisTask 拉到 status=FAILED；
+   *   3. getTaskHistory 历史步骤中有 taskStatus=FAILED 的任务；
+   *   4. decision.status === 'FAILED'，再通过 decision.latestTaskId 查到任务详情。
+   * 不锁画布的情况：发起 POST 推演请求本身在网络层失败/参数校验失败，
+   * 后端没有创建任务，前端只弹普通错误提示。
+   */
+  type RetryRequiredTask = {
+    taskId: string
+    taskType: 'ANALYSIS' | 'PARTIAL_ANALYSIS' | string
+    failedStepId?: string
+    failureMessage?: string
+    retryable: boolean
+  } | null
+  const [retryRequiredByDecision, setRetryRequiredByDecision] = useState<
+    Record<string, RetryRequiredTask>
+  >({})
+  /** 当前路由决策的失败任务（切换画布时按 id 取值） */
+  const retryRequiredTask = retryRequiredByDecision[id] ?? null
+  /** 重试按钮防重入锁 */
+  const retryButtonLockRef = useRef<string | null>(null)
+
+  // ── 重新推演 STARTING 锁定 ──────────────────────────────────
+  /**
+   * 用户点击「重新推演」后立即同步进入锁定态，避免请求往返期间画布仍可编辑。
+   * - 用 state 驱动 isCanvasLocked，让中间画布整体锁住。
+   * - 用同步 ref 拦截连点（setState 有渲染延迟挡不住）。
+   * - 后端返回 taskId 后由 startMutation.onSuccess 自然过渡到 FULL/RUNNING 锁定（decision.status 更新）。
+   * - 请求失败或 409 时清除 STARTING，允许用户继续编辑画布。
+   */
+  const [fullAnalysisStarting, setFullAnalysisStarting] = useState(false)
+  const fullAnalysisStartingRef = useRef(false)
+  fullAnalysisStartingRef.current = fullAnalysisStarting
 
   const capturePartialCanvasSnapshot = useCallback(
     (decisionId: string, attemptedCanvas: Canvas) => {
@@ -329,31 +368,87 @@ export function WorkbenchPage() {
         }
         : null
 
+      // 重试成功后，清理对应 decisionId 上的失败重试态。
+      // 注意：必须在 result_ready 时清，否则画布会锁到下一次切画布。
+      setRetryRequiredByDecision((prev) => {
+        if (!prev[event.decisionId]) return prev
+        const next = { ...prev }
+        delete next[event.decisionId]
+        return next
+      })
+
       setActiveResultId(event.analysisResultId)
       setActiveCanvas(undefined)
       setForceSyncKey(event.analysisResultId)
     },
     onTaskFailed: (event) => {
       let failedDecisionId: string | null = null
+      let matchedPartial = false
       setPartialAnalysisInfo((prev) => {
         if (!prev) return prev
         if (event.taskId && prev.taskId !== event.taskId) return prev
         failedDecisionId = prev.decisionId
+        matchedPartial = true
         return null
       })
-      if (!failedDecisionId) return
+      // 注意：FULL 推演失败时，partialAnalysisInfo 为空，需要通过 taskId/diffEvent 推断 decisionId。
+      // 通常 failedStepId 存在时已属可重试；详见下方 fallback。
+      const taskIdForUpdate =
+        event.taskId ?? currentPartialInfo?.taskId ?? null
 
       // 失败：立刻清除 pending unlock，避免画布永远卡在锁定态
-      if (pendingUnlockPartialRef.current?.decisionId === failedDecisionId) {
+      const decisionToClear =
+        failedDecisionId ?? (taskIdForUpdate && taskId === taskIdForUpdate ? id : null)
+      if (
+        decisionToClear &&
+        pendingUnlockPartialRef.current?.decisionId === decisionToClear
+      ) {
         pendingUnlockPartialRef.current = null
       }
 
-      releasePartialAnalysisLock(failedDecisionId)
-      if (viewingDecisionIdRef.current === failedDecisionId) {
+      // 释放 partial 锁（仅当确实是 partialAnalysis 触发的失败）
+      if (matchedPartial && failedDecisionId) {
+        releasePartialAnalysisLock(failedDecisionId)
+      }
+
+      // 处理失败任务：仅在 retryable=true（API 7.4：失败步骤可单独重试）时设置重试态。
+      // 切换决策时（viewingDecisionIdRef !== failedDecisionId）同样记录，供用户切回时仍能恢复。
+      if (taskIdForUpdate) {
+        const candidateDecisionId = failedDecisionId ?? id
         if (event.retryable) {
-          message.warning(`局部推演失败: ${event.message}`)
+          setRetryRequiredByDecision((prev) => ({
+            ...prev,
+            [candidateDecisionId]: {
+              taskId: taskIdForUpdate,
+              taskType: currentPartialInfo ? 'PARTIAL_ANALYSIS' : 'ANALYSIS',
+              failedStepId: event.failedStepId,
+              failureMessage: event.message,
+              retryable: true,
+            },
+          }))
         } else {
-          message.error(`局部推演失败: ${event.message}`)
+          // 不可重试：清掉残留（虽然产品需求是「只要 FAILED 都允许重试」，但严格按 API retryable 字段判断）
+          setRetryRequiredByDecision((prev) => {
+            if (!prev[candidateDecisionId]) return prev
+            const next = { ...prev }
+            delete next[candidateDecisionId]
+            return next
+          })
+        }
+      }
+
+      if (failedDecisionId) {
+        if (viewingDecisionIdRef.current === failedDecisionId) {
+          if (event.retryable) {
+            message.warning(`局部推演失败: ${event.message}`)
+          } else {
+            message.error(`局部推演失败: ${event.message}`)
+          }
+        }
+      } else if (event.retryable && taskIdForUpdate === taskId) {
+        // FULL 推演失败且当前正在查看该决策
+        if (viewingDecisionIdRef.current === id) {
+          message.warning(`推演失败: ${event.message}`)
         }
       }
     },
@@ -463,16 +558,29 @@ export function WorkbenchPage() {
 
   const startMutation = useMutation({
     mutationFn: () => startFullAnalysis(id),
+    onMutate: () => {
+      // 同步进入 STARTING 锁定：避免请求往返期间画布仍可编辑
+      fullAnalysisStartingRef.current = true
+      setFullAnalysisStarting(true)
+    },
     onSuccess: async (data) => {
       message.success('已开始整轮推演')
+      // FULL/RUNNING 锁定由 decision.status === 'ANALYZING' 接管（detail invalidate 后更新）
+      // 保留 STARTING 一帧，避免 invalidate 完成前出现短暂解锁
       await queryClient.invalidateQueries({
         queryKey: queryKeys.decisions.detail(id),
       })
       await queryClient.invalidateQueries({
         queryKey: queryKeys.analysisTasks.detail(data.taskId),
       })
+      // detail 已 invalidate：decision.status 会变成 ANALYZING，isCanvasLocked 走 RUNNING 分支
+      fullAnalysisStartingRef.current = false
+      setFullAnalysisStarting(false)
     },
     onError: (error) => {
+      // 请求失败：清除 STARTING，恢复画布可编辑
+      fullAnalysisStartingRef.current = false
+      setFullAnalysisStarting(false)
       if (error instanceof ApiError && error.code === BusinessCode.Conflict) {
         message.error('已有运行中的推演任务，请勿重复提交')
       }
@@ -642,7 +750,61 @@ export function WorkbenchPage() {
       delete next[pending.decisionId]
       return next
     })
+      // result_ready + canvas 已同步：清除失败重试态（兜底；onResultReady 中也已清理）
+      setRetryRequiredByDecision((prev) => {
+        if (!prev[pending.decisionId]) return prev
+        const next = { ...prev }
+        delete next[pending.decisionId]
+        return next
+      })
   }, [canvasQuery.data, canvasQuery.dataUpdatedAt, id])
+
+  /**
+   * 失败任务恢复（刷新后）：
+   * - decision.status === 'FAILED' 是后端对该决策明确的失败标记（API 3.1）。
+   * - 通过 decision.latestTaskId 查任务详情，确认是否 retryable。
+   * - getTaskHistory 的 stepGroups 也可能包含 FAILED 任务；如果 hook 已通过
+   *   task_failed SSE 处理则这里会跳过（避免重复设置）。
+   *
+   * 注意：必须在所有 early return 之前调用，否则会破坏 hooks 顺序。
+   */
+  useEffect(() => {
+    if (!id) return
+    // 如果 hook 已经把 retryRequiredByDecision[id] 填好，无需重复设置
+    if (retryRequiredByDecision[id]) return
+    if (!decision) return
+    if (decision.status !== 'FAILED') return
+    // FAILED 但没有 latestTaskId：交给后端查询；此处先打个标记，detail 加载后会自动恢复
+    const taskId = decision.latestTaskId
+    if (!taskId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const task = await getAnalysisTask(taskId)
+        if (cancelled) return
+        // 任务非失败态：以决策 status 为准也允许用户重试一次（latestTaskId 可能是 SUCCEEDED 状态，
+        // 但决策失败可能发生在确认阶段；保守起见按 retryable=true 显示重试按钮，让用户主动决定）。
+        const retryable = task.error?.retryable ?? true
+        if (retryable && task.status !== 'SUCCEEDED') {
+          setRetryRequiredByDecision((prev) => ({
+            ...prev,
+            [id]: {
+              taskId: task.id,
+              taskType: task.error ? 'ANALYSIS' : 'ANALYSIS',
+              failedStepId: task.error?.failedStepId,
+              failureMessage: task.error?.message,
+              retryable: true,
+            },
+          }))
+        }
+      } catch {
+        // GET 任务失败时不做处理；用户仍可通过 detail 拿到 FAILED 状态，但前端不会硬锁死画布
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [decision?.status, decision?.latestTaskId, id])
 
   const canvasForView = activeCanvas ?? canvasQuery.data
   const viewModel =
@@ -1120,6 +1282,49 @@ export function WorkbenchPage() {
     },
   })
 
+  /**
+   * 重试失败任务（来自失败重试态）的专用入口。
+   * - 只接受传入 taskId，而不是依赖 streamTaskId，避免 page refresh 后 streamTaskId 为空。
+   * - 防重入：retryButtonLockRef 同步锁 + retryRequiredTaskPending 状态。
+   * - 成功后只刷新任务订阅，retryRequiredByDecision 由 onResultReady / 任务恢复 effect 在
+   *   result_ready + canvas sync 后清理，禁止此处立刻清空，避免：
+   *     a. 重试请求还在路上就解锁画布；
+   *     b. 任务又被后端立即标 FAILED 时，因已清空导致再次锁不上。
+   * - 失败时保持 retryRequiredByDecision 不变。
+   */
+  const [retryRequiredTaskPending, setRetryRequiredTaskPending] = useState(false)
+  const handleRetryTask = useCallback(
+    async (taskId: string, failedStepId?: string) => {
+      if (!taskId) {
+        message.error('缺少任务 ID，无法重试')
+        return
+      }
+      if (retryButtonLockRef.current === taskId) return
+      retryButtonLockRef.current = taskId
+      setRetryRequiredTaskPending(true)
+      try {
+        // 复用现有 retry 接口（API 7.3：POST /analysis-tasks/{taskId}/steps/{stepId}/retry）
+        const stepIdToRetry = failedStepId ?? 'all'
+        await retryFailedStep(taskId, stepIdToRetry)
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.analysisTasks.detail(taskId),
+        })
+        // 触发 useAnalysisStream 重连以重新订阅任务进度
+        setStreamRefreshKey((key) => key + 1)
+        // 注意：此处不清 retryRequiredByDecision。
+        // 真正解锁由 useEffect 在 result_ready + canvas 同步完成后执行（保证画布与新 task 同步后再解锁）。
+        message.info('重试已发起，请等待推演更新')
+      } catch {
+        message.error('重试失败，请稍后重试')
+        // 保留 retryRequiredByDecision，UI 仍显示「请重试」，画布继续锁住
+      } finally {
+        retryButtonLockRef.current = null
+        setRetryRequiredTaskPending(false)
+      }
+    },
+    [queryClient],
+  )
+
   /** 局部重推 mutation */
   const startPartialAnalysisMutation = useMutation({
     mutationFn: (changedNodeIds: string[]) =>
@@ -1196,6 +1401,35 @@ export function WorkbenchPage() {
     saveForPartialMutation,
   ])
 
+  const isAnalysisRunning =
+    currentPartialInfo !== null ||
+    (decision?.status === 'PARTIAL_ANALYZING' && interruptedPartial === null) ||
+    decision?.status === 'ANALYZING' ||
+    // 重新推演 STARTING：请求往返期间也必须保持锁定
+    fullAnalysisStarting
+
+  const isRetryRequired = retryRequiredTask !== null
+
+  const isCanvasLocked = isAnalysisRunning || isRetryRequired
+  const isCanvasLockedByRetry = isCanvasLocked && isRetryRequired && !isAnalysisRunning
+
+  /**
+   * 「重新推演」按钮 handler：
+   * 1. 立即进入 STARTING 锁定（防连点 + 锁画布）
+   * 2. 调用 mutation；mutation.onMutate 再补一次 setState 确保渲染到位
+   * 3. mutation.onSuccess / onError 各自清理 STARTING
+   */
+  const handleRestartAnalysis = useCallback(() => {
+    if (fullAnalysisStartingRef.current || startMutation.isPending) return
+    if (isCanvasLocked) {
+      warnLocked()
+      return
+    }
+    fullAnalysisStartingRef.current = true
+    setFullAnalysisStarting(true)
+    startMutation.mutate()
+  }, [isCanvasLocked, warnLocked, startMutation])
+
   if (detailQuery.isError) {
     const err = detailQuery.error
     const is404 =
@@ -1263,17 +1497,6 @@ export function WorkbenchPage() {
     connectionStatus === 'connected' ||
     connectionStatus === 'reconnecting'
 
-  /**
-   * 画布锁定：仅当前 decisionId 的局部推演任务生效。
-   * 满足任一条件即锁定：
-   *   1. currentPartialInfo 非空 → 局部推演已成功发起
-   *   2. decision.status === 'PARTIAL_ANALYZING' → 服务端确认的局部推演状态
-   * 切换走中断的局部推演（interruptedPartial）不锁，因为父级已主动放弃重连。
-   */
-  const isCanvasLocked =
-    currentPartialInfo !== null ||
-    (decision.status === 'PARTIAL_ANALYZING' && interruptedPartial === null)
-
   const isCanvasDataPending =
     canvasQuery.isLoading ||
     (canvasQuery.isFetching && !canvasForView)
@@ -1320,13 +1543,17 @@ export function WorkbenchPage() {
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
-              loading={startMutation.isPending}
+              loading={startMutation.isPending || fullAnalysisStarting}
               disabled={
-                !canStartAnalysis || startMutation.isPending || analyzing
+                !canStartAnalysis ||
+                startMutation.isPending ||
+                analyzing ||
+                fullAnalysisStarting ||
+                isCanvasLocked
               }
-              onClick={() => startMutation.mutate()}
+              onClick={handleRestartAnalysis}
             >
-              {analyzing ? '推演中…' : decision.status === 'WAITING_CONFIRM' || decision.status === 'COMPLETED' ? '重新推演' : '开始推演'}
+              {analyzing || fullAnalysisStarting ? '推演中…' : decision.status === 'WAITING_CONFIRM' || decision.status === 'COMPLETED' ? '重新推演' : '开始推演'}
             </Button>
             <Button
               onClick={() => {
@@ -1448,6 +1675,18 @@ export function WorkbenchPage() {
           partialSteps={steps}
           forceSyncKey={forceSyncKey}
           isCanvasLocked={isCanvasLocked}
+          lockBannerTitle={
+            isCanvasLockedByRetry
+              ? '推演失败，画布已锁定，请在右侧聊天框点击「请重试」'
+              : isRetryRequired
+                ? '推演失败，画布已锁定，请在右侧聊天框点击「请重试」'
+                : '局部推演中，画布已锁定'
+          }
+          lockBannerHint={
+            isCanvasLockedByRetry
+              ? '推演失败后必须由右侧聊天框的重试按钮恢复'
+              : '正在重新计算受影响的决策节点'
+          }
         />
 
         {hasPendingStructuralChange && (
@@ -1522,6 +1761,21 @@ export function WorkbenchPage() {
                 onRetryInterrupted={handleRetryInterruptedPartial}
                 onAllStepsCompleted={() => setAnimCompleted(true)}
                 onRetryStep={(stepId) => retryMutation.mutate(stepId)}
+                retryRequiredTask={
+                  retryRequiredTask
+                    ? {
+                        taskId: retryRequiredTask.taskId,
+                        taskType: retryRequiredTask.taskType,
+                        failedStepId: retryRequiredTask.failedStepId,
+                        failureMessage: retryRequiredTask.failureMessage,
+                        retryable: retryRequiredTask.retryable,
+                      }
+                    : null
+                }
+                onRetryTask={(taskId, failedStepId) =>
+                  handleRetryTask(taskId, failedStepId)
+                }
+                retryTaskPending={retryRequiredTaskPending}
               />
             </div>
           </>

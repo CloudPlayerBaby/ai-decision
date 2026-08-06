@@ -45,6 +45,25 @@ interface Props {
   onRetryInterrupted?: () => void
   onAllStepsCompleted?: () => void
   onRetryStep?: (stepId: string) => void
+  /**
+   * 失败待重试任务（来自 WorkbenchPage）。
+   * 非空时在聊天框顶部展示「请重试」按钮，强制让用户必须通过此入口恢复。
+   * 触发条件：SSE task_failed / getAnalysisTask 拉到 FAILED / decision.status === 'FAILED'。
+   */
+  retryRequiredTask?: {
+    taskId: string
+    taskType?: string
+    failedStepId?: string
+    failureMessage?: string
+    retryable: boolean
+  } | null
+  /** 点击「请重试」的回调 */
+  onRetryTask?: (
+    taskId: string,
+    failedStepId: string | undefined,
+  ) => void | Promise<void>
+  /** 重试请求进行中（用于禁用按钮） */
+  retryTaskPending?: boolean
 }
 
 export function AnalysisChatPanel({
@@ -66,6 +85,9 @@ export function AnalysisChatPanel({
   onRetryInterrupted,
   onAllStepsCompleted,
   onRetryStep,
+  retryRequiredTask = null,
+  onRetryTask,
+  retryTaskPending = false,
 }: Props) {
   const hasResultData = options.length > 0 && recommendation !== null
   const hasHistoryData = isHistory && hasResultData
@@ -199,6 +221,37 @@ export function AnalysisChatPanel({
         className="analysis-panel__body"
         onScroll={handleBodyScroll}
       >
+        {retryRequiredTask && (
+          <Result
+            status="error"
+            icon={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
+            title="推演失败，画布已锁定"
+            subTitle={
+              <>
+                请通过下方按钮重新发起该任务；画布在重试成功前不会解锁。
+                {retryRequiredTask.failureMessage ? (
+                  <span style={{ display: 'block', marginTop: 6, color: '#999' }}>
+                    {retryRequiredTask.failureMessage}
+                  </span>
+                ) : null}
+              </>
+            }
+            extra={
+              onRetryTask ? (
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  loading={retryTaskPending}
+                  disabled={retryTaskPending}
+                  onClick={() => onRetryTask(retryRequiredTask.taskId, retryRequiredTask.failedStepId)}
+                >
+                  请重试
+                </Button>
+              ) : null
+            }
+          />
+        )}
+
         {connectionInterrupted && (
           <Result
             status="warning"

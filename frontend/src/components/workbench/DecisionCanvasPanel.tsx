@@ -374,6 +374,14 @@ export interface DecisionCanvasPanelProps {
    * 不锁定右侧聊天面板。
    */
   isCanvasLocked?: boolean
+  /**
+   * 锁定横幅标题。
+   * - 默认："局部推演中，画布已锁定"
+   * - 失败待重试时："推演失败，画布已锁定，请在右侧聊天框点击「请重试」"
+   */
+  lockBannerTitle?: string
+  /** 锁定横幅副标题（默认："正在重新计算受影响的决策节点"） */
+  lockBannerHint?: string
 }
 
 // ── 辅助函数 ─────────────────────────────────────────────────
@@ -472,7 +480,8 @@ function DecisionCanvasPanelEmpty() {
   return (
     <div className="canvas-panel">
       <div className="canvas-panel__empty">
-        <span>暂无画布数据</span>
+        <div>尚未生成决策画布</div>
+        <span>请点击开始推演，由系统生成初始决策结构</span>
       </div>
     </div>
   )
@@ -516,6 +525,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     autoLayoutReason,
     onPersistLayoutOnly,
     isCanvasLocked = false,
+    lockBannerTitle,
+    lockBannerHint,
   } = props
 
   const vm = viewModel as import('../../types/canvas').CanvasViewModel
@@ -1459,17 +1470,28 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     [isCanvasLocked, warnIfLocked],
   )
 
+  const MAX_OPTIONS = 5
+  const EMPTY_CANVAS_MESSAGE = '请先开始推演，生成初始决策画布后再添加节点'
+  const hasCanvasNodes = nodes.length > 0
+  const canAddNodes = hasCanvasNodes && !isCanvasLocked
+
   const addFactor = useCallback(() => {
+    if (!hasCanvasNodes) {
+      message.warning(EMPTY_CANVAS_MESSAGE)
+      return
+    }
     if (warnIfLocked()) return
     const currentFactors = nodes.filter((n) => n.type === 'factor')
     if (currentFactors.length >= 5) return  // 达到 5 个时静默拦截
     const node = createNode('factor', nodes)
     openModal(node, true)
-  }, [nodes, openModal, warnIfLocked])
-
-  const MAX_OPTIONS = 5
+  }, [hasCanvasNodes, nodes, openModal, warnIfLocked])
 
   const addOption = useCallback(() => {
+    if (!hasCanvasNodes) {
+      message.warning(EMPTY_CANVAS_MESSAGE)
+      return
+    }
     if (warnIfLocked()) return
     const currentOptions = nodes.filter((n) => n.type === 'option')
     if (currentOptions.length >= MAX_OPTIONS) {
@@ -1479,7 +1501,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     const node = createNode('option', nodes)
     setActiveTabKey('settings')
     openModal(node, true)
-  }, [nodes, openModal, warnIfLocked])
+  }, [hasCanvasNodes, nodes, openModal, warnIfLocked])
 
   // "自动整理布局"：对当前完整 nodes + edges 调用 applyDagreLayout，
   // setNodes 后通过 onCanvasChange 更新 canvasRef，并依赖组件内的脏检测 effect
@@ -1522,17 +1544,9 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     AFFECTS: AffectsEdge,
   }
 
-  // 派生局部推演状态：取最近 3 个非 WAITING 步骤
-  const recentSteps = (partialSteps ?? [])
-    .filter((s) => s.status !== 'WAITING')
-    .slice(-3)
-  const currentStep = partialSteps?.find((s) => s.status === 'RUNNING')
-  const partialFailed = partialSteps?.some((s) => s.status === 'FAILED')
-
   // 计算统计信息
   const factorCount = nodes.filter((n) => n.type === 'factor').length
   const optionCount = nodes.filter((n) => n.type === 'option').length
-  const affectsCount = edges.filter((e) => e.relation === 'AFFECTS').length
 
   // 悬停处理（仅更新局部状态，不触发持久化）
   const handleNodeMouseEnter = useCallback((_: React.MouseEvent, node: FlowNode) => {
@@ -1556,27 +1570,31 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
               <div className="canvas-panel">
                 <div className="canvas-panel__toolbar">
                   <Space>
-                    <Button size="small" icon={<PlusOutlined />} onClick={addFactor} disabled={isCanvasLocked || factorCount >= 5}>
-                      新增因素
-                    </Button>
-                    <Tooltip title={isCanvasLocked ? '局部推演中，画布暂时锁定' : (nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS ? `候选方案最多 ${MAX_OPTIONS} 个` : '')}>
+                    <Tooltip title={!hasCanvasNodes ? EMPTY_CANVAS_MESSAGE : isCanvasLocked ? (lockBannerTitle ?? '局部推演中，画布暂时锁定') : factorCount >= 5 ? '影响因素最多 5 个' : ''}>
+                      <Button size="small" icon={<PlusOutlined />} onClick={addFactor} disabled={!canAddNodes || factorCount >= 5}>
+                        新增因素
+                      </Button>
+                    </Tooltip>
+                    <Tooltip title={!hasCanvasNodes ? EMPTY_CANVAS_MESSAGE : isCanvasLocked ? (lockBannerTitle ?? '局部推演中，画布暂时锁定') : optionCount >= MAX_OPTIONS ? `候选方案最多 ${MAX_OPTIONS} 个` : ''}>
                       <Button
                         size="small"
                         icon={<PlusOutlined />}
                         onClick={addOption}
-                        disabled={isCanvasLocked || nodes.filter((n) => n.type === 'option').length >= MAX_OPTIONS}
+                        disabled={!canAddNodes || optionCount >= MAX_OPTIONS}
                       >
                         新增方案
                       </Button>
                     </Tooltip>
-                    <Tooltip title={isCanvasLocked ? '局部推演中，画布暂时锁定' : '自动计算最优布局（不会自动保存，需点击「保存画布」持久化）'}>
+                    <Tooltip title={isCanvasLocked ? (lockBannerTitle ?? '局部推演中，画布暂时锁定') : '自动计算最优布局（不会自动保存，需点击「保存画布」持久化）'}>
                       <Button size="small" icon={<MenuOutlined />} onClick={autoArrangeLayout} disabled={isCanvasLocked}>
                         自动整理
                       </Button>
                     </Tooltip>
                   </Space>
                   <span className="canvas-panel__hint">
-                    {isCanvasLocked ? '局部推演中，画布已锁定' : '点击节点编辑'}
+                    {isCanvasLocked
+                      ? lockBannerTitle ?? '局部推演中，画布已锁定'
+                      : '点击节点编辑'}
                   </span>
                 </div>
 
@@ -1596,7 +1614,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     fitView
                     nodesDraggable={!isCanvasLocked}
                     nodesConnectable={!isCanvasLocked}
-                    edgesUpdatable={!isCanvasLocked}
                     elementsSelectable={!isCanvasLocked}
                     nodesFocusable={!isCanvasLocked}
                     edgesFocusable={!isCanvasLocked}
@@ -1615,6 +1632,13 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     <Controls showInteractive={false} />
                   </ReactFlow>
 
+                  {!hasCanvasNodes && !isCanvasLocked && (
+                    <div className="canvas-panel__empty-state" role="status">
+                      <div>尚未生成决策画布</div>
+                      <span>请点击开始推演，由系统生成初始决策结构</span>
+                    </div>
+                  )}
+
                   {isCanvasLocked && (
                     <>
                       <div
@@ -1631,8 +1655,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                       />
                       <div className="canvas-panel__lock-banner" role="status">
                         <Spin size="small" indicator={<LoadingOutlined spin />} />
-                        <span className="canvas-panel__lock-banner-title">局部推演中，画布已锁定</span>
-                        <span className="canvas-panel__lock-banner-hint">正在重新计算受影响的决策节点</span>
+                        <span className="canvas-panel__lock-banner-title">
+                          {lockBannerTitle ?? '局部推演中，画布已锁定'}
+                        </span>
+                        <span className="canvas-panel__lock-banner-hint">
+                          {lockBannerHint ?? '正在重新计算受影响的决策节点'}
+                        </span>
                       </div>
                     </>
                   )}
@@ -1653,36 +1681,6 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
                     <span className="canvas-legend__separator" />
                   </div>
                 </div>
-
-                {/* 局部推演状态面板 */}
-                {partialAnalysisInfo && (
-                  <div className="canvas-partial-status">
-                    <div className="canvas-partial-status__header">
-                      <Spin size="small" indicator={<LoadingOutlined spin />} />
-                      <span className="canvas-partial-status__title">
-                        {partialFailed ? '局部推演失败' : '局部推演中'}
-                      </span>
-                      <span className="canvas-partial-status__nodes">
-                        影响节点：{partialAnalysisInfo.affectedNodeIds.join(', ')}
-                      </span>
-                    </div>
-                    {currentStep && (
-                      <div className="canvas-partial-status__current">
-                        当前步骤：{currentStep.displayName}
-                      </div>
-                    )}
-                    {recentSteps.length > 0 && (
-                      <div className="canvas-partial-status__recent">
-                        {recentSteps.map((step) => (
-                          <div key={step.id} className="canvas-partial-status__step">
-                            <span className={`canvas-partial-status__step-dot canvas-partial-status__step-dot--${step.status.toLowerCase()}`} />
-                            <span>{step.displayName}: {step.summary ?? step.status}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* 节点上下文栏 */}
                 {editingNode && modalOpen && (
