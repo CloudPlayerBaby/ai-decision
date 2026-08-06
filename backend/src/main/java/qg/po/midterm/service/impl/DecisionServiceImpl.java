@@ -418,6 +418,10 @@ public class DecisionServiceImpl implements DecisionService {
             }
         }
 
+        // 前端增删节点后，只存不改会保留脏坐标，导致局部推演后刷新布局混乱。
+        // 这里对受影响列重新计算坐标，并把新坐标返回给前端。
+        CanvasLayoutPlanner.relayoutOnStructuralChange(newCanvas, oldCanvas);
+
         // 计算变更节点
         List<String> changedNodeIds = computeChangedNodeIds(oldCanvas, newCanvas);
 

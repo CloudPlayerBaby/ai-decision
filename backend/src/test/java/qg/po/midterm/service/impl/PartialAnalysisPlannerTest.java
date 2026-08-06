@@ -3,6 +3,7 @@ package qg.po.midterm.service.impl;
 import org.junit.jupiter.api.Test;
 import qg.po.midterm.dto.result.AnalysisResultDto;
 import qg.po.midterm.dto.result.Canvas;
+import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
 
 import java.util.List;
@@ -25,8 +26,47 @@ class PartialAnalysisPlannerTest {
 
         PartialAnalysisPlanner.Plan plan = planner.plan(canvas, new AnalysisResultDto(), List.of("tmp_1"));
 
-        assertEquals("REEVALUATE_OPTIONS", plan.startNode());
+        assertEquals("ENRICH_FACTORS", plan.startNode());
         assertEquals(List.of("tmp_1"), plan.affectedNodeIds());
+        assertEquals(List.of("tmp_1"), plan.factorIdsToEnrich());
+    }
+
+    @Test
+    void routesNewFactorToEnrichFactors() {
+        AnalysisResultDto result = new AnalysisResultDto();
+        Factor existingFactor = new Factor();
+        existingFactor.setId("factor_existing");
+        result.setFactors(List.of(existingFactor));
+
+        Canvas canvas = new Canvas(List.of(
+                node("root", "decision"),
+                node("factor_existing", "factor"),
+                node("factor_new", "factor")
+        ), List.of());
+
+        PartialAnalysisPlanner.Plan plan = planner.plan(canvas, result, List.of("factor_new"));
+
+        assertEquals("ENRICH_FACTORS", plan.startNode());
+        assertEquals(List.of("factor_new"), plan.factorIdsToEnrich());
+        assertTrue(plan.optionIdsToEnrich().isEmpty());
+    }
+
+    @Test
+    void existingFactorWeightChangeRoutesToReevaluate() {
+        AnalysisResultDto result = new AnalysisResultDto();
+        Factor existingFactor = new Factor();
+        existingFactor.setId("factor_1");
+        result.setFactors(List.of(existingFactor));
+
+        Canvas canvas = new Canvas(List.of(
+                node("root", "decision"),
+                node("factor_1", "factor")
+        ), List.of());
+
+        PartialAnalysisPlanner.Plan plan = planner.plan(canvas, result, List.of("factor_1"));
+
+        assertEquals("REEVALUATE_OPTIONS", plan.startNode());
+        assertTrue(plan.factorIdsToEnrich().isEmpty());
     }
 
     @Test
@@ -94,7 +134,8 @@ class PartialAnalysisPlannerTest {
         PartialAnalysisPlanner.Plan plan = planner.plan(
                 canvas, result, List.of("factor_1", "option_new"));
 
-        assertEquals("REEVALUATE_OPTIONS", plan.startNode());
+        assertEquals("ENRICH_FACTORS", plan.startNode());
+        assertEquals(List.of("factor_1"), plan.factorIdsToEnrich());
         assertTrue(plan.optionIdsToEnrich().isEmpty());
     }
 

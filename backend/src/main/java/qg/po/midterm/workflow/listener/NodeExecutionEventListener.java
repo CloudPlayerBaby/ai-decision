@@ -462,7 +462,7 @@ public class NodeExecutionEventListener {
     private String getStepName(String nodeName) {
         return switch (nodeName) {
             case "RequirementAnalysis" -> "UNDERSTAND";
-            case "FactorAnalysis" -> "EXTRACT_FACTORS";
+            case "FactorAnalysis", "FactorEnrichment" -> "EXTRACT_FACTORS";
             case "OptionGeneration" -> "GENERATE_OPTIONS";
             case "OptionEnrichment", "OptionReevaluation" -> "GENERATE_OPTIONS";
             case "RiskAnalysis" -> "COMPARE_OPTIONS";
