@@ -35,7 +35,8 @@ class OptionReevaluationNodeTest {
 
         List<Option> merged = OptionReevaluationNode.merge(List.of(option), List.of(update));
 
-        assertEquals("新名称", merged.getFirst().getName());
+        // 方案名是身份字段，重评分保持原值，不随模型输出改变
+        assertEquals("旧名称", merged.getFirst().getName());
         assertEquals("新描述", merged.getFirst().getDescription());
         assertEquals(List.of("新优点"), merged.getFirst().getPros());
         assertEquals(List.of("新缺点"), merged.getFirst().getCons());

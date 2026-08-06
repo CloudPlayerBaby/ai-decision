@@ -187,12 +187,45 @@ public final class AnalysisResultValidator {
         for (int i = 0; i < options.size(); i++) {
             Option option = options.get(i);
             if (option == null || isBlank(option.getRelativeFactor())) {
+                errors.add("options[" + i + "].relativeFactor (不可为空，必须指向一个关键因素)");
                 continue;
             }
             if (!factorIds.contains(option.getRelativeFactor())) {
                 errors.add("options[" + i + "].relativeFactor (未指向任何关键因素)");
             }
         }
+    }
+
+    /**
+     * 确保每个方案的 relativeFactor 非空：为空时默认绑定权重最高的因素。
+     *
+     * <p>agent 的 prompt 已要求总是输出 relativeFactor，此处作为兜底，保证
+     * 前端永远能根据 relativeFactor 渲染出高亮连线。</p>
+     */
+    public static void ensureRelativeFactor(List<Option> options, List<Factor> factors) {
+        if (options == null) {
+            return;
+        }
+        String fallbackId = highestWeightFactorId(factors);
+        for (Option option : options) {
+            if (option != null && isBlank(option.getRelativeFactor())) {
+                option.setRelativeFactor(fallbackId);
+            }
+        }
+    }
+
+    private static String highestWeightFactorId(List<Factor> factors) {
+        String id = null;
+        double maxWeight = -1;
+        if (factors != null) {
+            for (Factor factor : factors) {
+                if (factor != null && factor.getId() != null && factor.getWeight() > maxWeight) {
+                    maxWeight = factor.getWeight();
+                    id = factor.getId();
+                }
+            }
+        }
+        return id;
     }
 
     private static void validateScores(Map<String, Integer> scores, String path, List<String> errors) {

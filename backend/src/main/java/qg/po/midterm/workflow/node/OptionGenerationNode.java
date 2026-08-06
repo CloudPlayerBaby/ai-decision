@@ -98,6 +98,9 @@ public class OptionGenerationNode implements NodeAction<DecisionState> {
 
             log.info("<<< 【AI Response】\n{}", result);
 
+            // 兜底：确保每个方案都有非空 relativeFactor，保证前端高亮连线
+            AnalysisResultValidator.ensureRelativeFactor(result.options(), state.getFactors());
+
             // 将大模型结果转换为 JSON 传入状态流，供前端渲染
             String outputData = objectMapper.writeValueAsString(result);
             eventPublisher.publishEvent(new NodeExecutionEvent(this, "OptionGeneration", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, outputData));

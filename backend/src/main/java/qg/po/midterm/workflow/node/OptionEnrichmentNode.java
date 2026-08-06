@@ -73,6 +73,8 @@ public class OptionEnrichmentNode implements NodeAction<DecisionState> {
                     );
 
             List<Option> merged = mergeEnrichedOptions(allOptions, execution.value().options(), targetIds);
+            // 兜底：确保每个方案都有非空 relativeFactor，保证前端高亮连线
+            AnalysisResultValidator.ensureRelativeFactor(merged, state.getFactors());
             List<String> mergedErrors = AnalysisResultValidator.validateOptions(merged);
             if (!mergedErrors.isEmpty()) {
                 throw new IllegalArgumentException("补全后的方案校验失败: " + String.join(", ", mergedErrors));

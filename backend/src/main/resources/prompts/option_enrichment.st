@@ -14,4 +14,4 @@
 3. 为每个方案补充具体的 description、pros、cons、risks。
 4. scores 必须包含 cost、time、benefit、risk、feasibility，分值均为 1-5，5 表示更优；risk=5 表示低风险。
 5. summary 不超过 15 个字，content 简要说明补全依据。
-6. 每个方案必须包含 relativeFactor，值为与该方案关联性最强的因素 id，必须从上方影响因素列表中选择；如果该方案没有特别突出的强相关因素，relativeFactor 可以为空字符串。
+6. 每个方案必须包含 relativeFactor，值为与该方案关联性最强的因素 id，必须从上方影响因素列表中选择；即使相关性不显著，也必须选择最相关的一个因素 id，relativeFactor 不得为空。

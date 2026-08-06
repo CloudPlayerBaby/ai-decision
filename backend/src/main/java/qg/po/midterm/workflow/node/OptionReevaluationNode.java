@@ -13,6 +13,7 @@ import qg.po.midterm.workflow.event.NodeExecutionEvent;
 import qg.po.midterm.workflow.state.DecisionState;
 import qg.po.midterm.workflow.state.Factor;
 import qg.po.midterm.workflow.state.Option;
+import qg.po.midterm.workflow.utils.AnalysisResultValidator;
 import qg.po.midterm.workflow.utils.LlmRetryUtils;
 import tools.jackson.databind.ObjectMapper;
 
@@ -62,6 +63,8 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
                     chatClient, prompt, null, OptionReevaluationResult.class,
                     result -> validate(result, existing, state.getFactors()));
             List<Option> merged = merge(existing, execution.value().options());
+            // 兜底：确保每个方案都有非空 relativeFactor，保证前端高亮连线
+            AnalysisResultValidator.ensureRelativeFactor(merged, state.getFactors());
             String output = objectMapper.writeValueAsString(execution.value());
             eventPublisher.publishEvent(new NodeExecutionEvent(
                     this, "OptionReevaluation", state.getDecisionId(), state.getTaskId(), "SUCCEEDED", null, output));
@@ -121,7 +124,10 @@ public class OptionReevaluationNode implements NodeAction<DecisionState> {
             option.setPros(update.pros());
             option.setCons(update.cons());
             option.setRisks(update.risks());
-            option.setRelativeFactor(update.relativeFactor());
+            // 重评分只在该轮明确给出 relativeFactor 时更新，避免模型返回空串时清空已有绑定
+            if (!isBlank(update.relativeFactor())) {
+                option.setRelativeFactor(update.relativeFactor());
+            }
             option.setScores(update.scores());
         }
         return existing;

@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -70,10 +71,10 @@ class AnalysisResultValidatorTest {
         List<Option> options = new ArrayList<>(dto.getOptions());
         options.add(new Option("opt_kafka", "优先学习 Kafka", "消息队列与异步解耦",
                 List.of("适合异步场景"), List.of("学习成本较高"),
-                List.of("缺少实践经验"), scores(3, 3, 4, 3, 3), null));
+                List.of("缺少实践经验"), scores(3, 3, 4, 3, 3), "f_1"));
         options.add(new Option("opt_k8s", "优先学习 Kubernetes", "容器编排与部署能力",
                 List.of("适合云原生岗位"), List.of("概念较多"),
-                List.of("本地资源有限"), scores(2, 2, 4, 3, 3), null));
+                List.of("本地资源有限"), scores(2, 2, 4, 3, 3), "f_1"));
         dto.setOptions(options);
 
         assertTrue(AnalysisResultValidator.validate(dto).isEmpty());
@@ -85,7 +86,7 @@ class AnalysisResultValidatorTest {
         List<Option> options = new ArrayList<>(dto.getOptions());
         for (int index = 3; index <= 6; index++) {
             options.add(new Option("opt_" + index, "方案" + index, "方案描述" + index,
-                    List.of("优点"), List.of("缺点"), List.of("风险"), scores(3, 3, 3, 3, 3), null));
+                    List.of("优点"), List.of("缺点"), List.of("风险"), scores(3, 3, 3, 3, 3), "f_1"));
         }
         dto.setOptions(options);
 
@@ -168,6 +169,37 @@ class AnalysisResultValidatorTest {
                 "应包含错误: " + path + "，实际: " + errors);
     }
 
+    @Test
+    void ensureRelativeFactorDefaultsToHighestWeightFactor() {
+        List<Factor> factors = List.of(
+                new Factor("f_low", "次要因素", "描述", 0.1),
+                new Factor("f_high", "关键因素", "描述", 0.6));
+
+        Option withValue = new Option();
+        withValue.setId("opt_1");
+        withValue.setName("有绑定");
+        withValue.setRelativeFactor("f_low");
+
+        Option blank = new Option();
+        blank.setId("opt_2");
+        blank.setName("无绑定");
+        blank.setRelativeFactor(null);
+
+        AnalysisResultValidator.ensureRelativeFactor(List.of(withValue, blank), factors);
+
+        assertEquals("f_low", withValue.getRelativeFactor());
+        assertEquals("f_high", blank.getRelativeFactor());
+    }
+
+    @Test
+    void validateRejectsBlankRelativeFactor() {
+        AnalysisResultDto dto = validDto();
+        dto.getOptions().get(0).setRelativeFactor(null);
+
+        assertTrue(AnalysisResultValidator.validate(dto).stream()
+                .anyMatch(error -> error.contains("relativeFactor")));
+    }
+
     private AnalysisResultDto validDto() {
         AnalysisResultDto dto = new AnalysisResultDto();
         dto.setUnderstanding("对问题和目标的理解");
@@ -176,10 +208,10 @@ class AnalysisResultValidatorTest {
         dto.setOptions(List.of(
                 new Option("opt_redis", "优先学习 Redis", "缓存场景与数据结构",
                         List.of("面试高频"), List.of("需理解缓存场景"),
-                        List.of("缺少项目实践"), scores(4, 4, 5, 3, 4), null),
+                        List.of("缺少项目实践"), scores(4, 4, 5, 3, 4), "f_1"),
                 new Option("opt_docker", "优先学习 Docker", "工程化与部署能力",
                         List.of("贴近生产"), List.of("上手门槛高"),
-                        List.of("本地环境受限"), scores(3, 3, 4, 4, 4), null)));
+                        List.of("本地环境受限"), scores(3, 3, 4, 4, 4), "f_1")));
         dto.setRecommendation(new AnalysisResultDto.Recommendation("opt_redis", "面试高频，收益最直接"));
         dto.setNextActions(List.of("完成缓存基础", "做一个缓存穿透演示"));
         return dto;
