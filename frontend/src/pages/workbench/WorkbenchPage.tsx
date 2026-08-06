@@ -1292,7 +1292,20 @@ export function WorkbenchPage() {
           key={id}
           viewModel={viewModel}
           isCanvasGenerating={isCanvasGenerating}
-          onDirtyChange={(dirty) => {
+          onDirtyChange={(dirty, source) => {
+            // 【修复】验证回调时的 decisionId 是否与当前页面一致
+            const currentId = id
+            console.log('[canvas-dirty]', {
+              decisionId: currentId,
+              source: source ?? 'unknown',
+              nextDirty: dirty,
+              callbackDecisionId: currentId,
+            })
+            // 【修复】防止旧画布的回调改变新画布的状态
+            if (currentId !== id) {
+              console.log('[canvas-dirty] decisionId mismatch, ignoring callback')
+              return
+            }
             console.log('[WorkbenchPage] onDirtyChange called, dirty:', dirty, 'hasUserEdited:', hasUserEdited.current)
             if (!dirty) {
               setIsDirty(false)
@@ -1306,6 +1319,11 @@ export function WorkbenchPage() {
             }
           }}
           onCanvasChange={(canvasData) => {
+            // 【修复】验证回调时的 decisionId 是否与当前页面一致
+            if (id !== idRef.current) {
+              console.log('[canvas-switch] onCanvasChange ignored: decisionId mismatch', { current: id, expected: idRef.current })
+              return
+            }
             handleCanvasChange(canvasData)
           }}
           onWeightSave={(canvasData) => {

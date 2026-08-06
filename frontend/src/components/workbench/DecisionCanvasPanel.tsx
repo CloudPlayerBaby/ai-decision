@@ -322,7 +322,8 @@ export interface DecisionCanvasPanelProps {
    * viewModel 缺失时组件显示空状态提示。
    */
   viewModel?: CanvasViewModel
-  onDirtyChange?: (dirty: boolean) => void
+  /** 脏状态变化回调。source 参数标识变化来源，用于调试和决策Id验证 */
+  onDirtyChange?: (dirty: boolean, source?: string) => void
   onCanvasChange?: (canvas: CanvasData) => void
   /** 保存权重：触发保存画布 + 自动局部重推 */
   onWeightSave?: (canvas: CanvasData) => void
@@ -539,6 +540,8 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   const forceSyncKeyRef = useRef<string | null>(null)
   // 跟踪上一次已处理的 autoLayoutRequestKey，确保同一 taskId 只触发一次布局
   const lastAutoLayoutKeyRef = useRef<string | null>(null)
+  // 【修复】服务端同步锁：防止 canvas sync effect 设置 nodes 时，dirty detection effect 误判脏状态
+  const serverSyncingRef = useRef(false)
   const themeMode = useLayoutStore((state) => state.themeMode)
   const dotColor = themeMode === 'eyeCare' ? '#2f3644' : '#d9dee7'
 
@@ -577,12 +580,50 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     forceSyncKeyRef.current = forceSyncKey ?? null
   })
 
+  // ── decisionId 变化时的防御性状态重置 ─────────────────────
+  // 【修复】当切换到新画布时，必须重置所有仅属于旧画布的内部状态
+  // 防止旧画布的数据/状态残留影响新画布
+  const prevDecisionIdRef = useRef<string | undefined>(props.decisionId)
+  // eslint-disable-next-line react-hooks/static-lifecycle
+  useEffect(() => {
+    const prevId = prevDecisionIdRef.current
+    const nextId = props.decisionId
+
+    if (prevId !== nextId) {
+      console.log('[canvas-switch]', {
+        previousDecisionId: prevId ?? 'undefined',
+        nextDecisionId: nextId ?? 'undefined',
+        reason: 'decisionId-changed',
+      })
+
+      // 重置脏状态相关 ref
+      didInitialSync.current = false
+      initialSignature.current = null
+      lastNotifiedDirty.current = false
+      lastServerSignature.current = null
+      lastForceSyncKey.current = null
+      serverSyncingRef.current = false
+      lastAutoLayoutKeyRef.current = null
+
+      // 重置 nodes/edges（让 canvas sync effect 在新数据到达时重新初始化）
+      setNodes([])
+      setEdges([])
+      nodesRef.current = []
+      edgesRef.current = []
+
+      prevDecisionIdRef.current = nextId
+    }
+  }, [props.decisionId])
+
   // ── 用户编辑 → 脏检测 effect ───────────────────────────────
   // 仅在用户实际拖动/编辑节点时触发脏检测。
   // 服务端同步（canvas/factorsDetail 等变化）不会触发脏检测。
   // initialSignature 在以下情况被更新：保存成功、forceSyncKey 触发同步。
+  // 【修复】使用 serverSyncingRef 防止 canvas sync effect 触发 dirty detection
   useEffect(() => {
     if (!didInitialSync.current) return
+    // 【修复】服务端同步期间跳过脏检测，避免 setNodes 触发脏误判
+    if (serverSyncingRef.current) return
 
     const currentSig = buildDirtySig(nodes, edges)
     const isDirty = initialSignature.current !== null && currentSig !== initialSignature.current
@@ -592,7 +633,11 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
     }
     if (isDirty !== lastNotifiedDirty.current) {
       lastNotifiedDirty.current = isDirty
-      console.log('[dirty-to-parent]', isDirty, { currentSig: currentSig.length, baseSig: initialSignature.current?.length })
+      console.log('[canvas-dirty]', {
+        decisionId: props.decisionId ?? 'unknown',
+        source: 'user-drag',
+        nextDirty: isDirty,
+      })
       onDirtyChangeRef.current?.(isDirty)
     }
   }, [nodes, edges])
@@ -603,6 +648,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
   //   2. 只在首次初始化（nodes 为空）且存在无 position 节点时，才用 applyDagreLayout 补全；
   //   3. 保存后刷新、forceSyncKey 触发时，直接用服务端 position，不覆盖；
   //   4. 同步后更新 initialSignature，使脏状态与服务端对齐。
+  // 【修复】使用 serverSyncingRef 防止 setNodes 触发 dirty detection effect 误判脏状态
   useEffect(() => {
     // 同步最新的 forceSyncKey（保持与组件 prop 同步）
     const currentForceSyncKey = forceSyncKey ?? null
@@ -704,8 +750,20 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
       }
     }
 
+    // 【修复】设置服务端同步锁，防止 dirty detection effect 在同步期间误判脏状态
+    serverSyncingRef.current = true
+    console.log('[canvas-dirty]', {
+      decisionId: props.decisionId ?? 'unknown',
+      source: 'server-sync',
+      nextDirty: false,
+    })
     setNodes(nodesToSet)
     setEdges(edgesToSet)
+    // 【修复】在下一个事件循环中重置锁，允许 dirty detection effect 继续工作
+    // 使用 setTimeout 确保 setNodes/setEdges 的 DOM 更新已完成
+    setTimeout(() => {
+      serverSyncingRef.current = false
+    }, 0)
   }, [canvas, factorsDetail, optionsDetail, recommendedOptionId, decisionInfo, forceSyncKey])
 
   // ── 自动布局 effect ────────────────────────────────────────
@@ -1021,7 +1079,7 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
           // 5) onCanvasChange
           onCanvasChangeRef.current?.(completeCanvas)
           // 6) 标记 dirty
-          onDirtyChangeRef.current?.(true)
+          onDirtyChangeRef.current?.(true, 'factor-add')
           // 7) FACTOR_ADDED 结构变更通知（由父组件决定后续 partial-analysis）
           onStructuralChangePendingRef.current?.('FACTOR_ADDED')
 
@@ -1272,8 +1330,12 @@ function DecisionCanvasPanelInner(props: DecisionCanvasPanelProps) {
         nodesRef.current = nextNodes
         setNodes(nextNodes)
         onCanvasChangeRef.current?.(buildCanvasData(nextNodes, edgesRef.current))
-        console.log('[dirty-to-parent]', true)
-        onDirtyChangeRef.current?.(true)
+        console.log('[canvas-dirty]', {
+          decisionId: props.decisionId ?? 'unknown',
+          source: 'user-drag',
+          nextDirty: true,
+        })
+        onDirtyChangeRef.current?.(true, 'user-drag')
       } else {
         setNodes(nextNodes)
       }

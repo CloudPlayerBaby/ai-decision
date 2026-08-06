@@ -6,7 +6,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios'
 import { message } from 'antd'
-import { ApiError, BusinessCode, type ApiResponse } from '@/types/api'
+import { ApiError, BusinessCode, type BusinessCodeValue, type ApiResponse } from '@/types/api'
 import { useAuthStore } from '@/stores/authStore'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
@@ -65,7 +65,7 @@ function isStaleSessionRequest(config?: InternalAxiosRequestConfig): boolean {
 function rejectApiError(
   messageText: string,
   options: {
-    code: BusinessCode
+    code: BusinessCodeValue
     httpStatus?: number
     data?: unknown
   },
@@ -167,7 +167,7 @@ http.interceptors.response.use(
       message.error(messageText)
     }
     return rejectApiError(messageText, {
-      code: payload.code,
+      code: payload.code as BusinessCodeValue,
       httpStatus: response.status,
       data: payload.data,
     })
@@ -205,7 +205,7 @@ http.interceptors.response.use(
       }
       return rejectApiError(text, {
         code:
-          payload?.code ??
+          (payload?.code as BusinessCodeValue) ??
           (status === 404 ? BusinessCode.NotFound : BusinessCode.ServerError),
         httpStatus: status,
         data: payload?.data,
