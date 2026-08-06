@@ -511,9 +511,11 @@ public class DecisionServiceImpl implements DecisionService {
             Map<String, Object> optionData = new HashMap<>();
             optionData.put("scores", o.getScores() != null
                     ? o.getScores() : Collections.emptyMap());
-            nodes.add(createNode(o.getId(), "option", o.getName(),
+            Canvas.CanvasNode optionNode = createNode(o.getId(), "option", o.getName(),
                     new Canvas.Position(CanvasLayoutPlanner.columnX("option"),
-                            CanvasLayoutPlanner.distributeY(i, optionCount)), optionData));
+                            CanvasLayoutPlanner.distributeY(i, optionCount)), optionData);
+            optionNode.setRelativeFactor(o.getRelativeFactor());
+            nodes.add(optionNode);
         }
 
         edges.addAll(CanvasTopologyBuilder.buildEdges(factors, options));
