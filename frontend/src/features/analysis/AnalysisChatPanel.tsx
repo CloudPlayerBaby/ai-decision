@@ -180,7 +180,7 @@ export function AnalysisChatPanel({
     if (isHistory) return '历史记录'
     switch (connectionStatus) {
       case 'idle':
-        return hasFailedStep ? '推演失败' : '等待推演'
+        return hasFailedStep ? '推演失败请重试' : '等待推演'
       case 'connecting':
         return '连接中...'
       case 'connected':
@@ -279,9 +279,9 @@ export function AnalysisChatPanel({
                         ? { ...step, status: 'FAILED' as const }
                         : step
                     
-                    // 如果步骤最终是失败状态，并且内容停留在了初始的“思考中...”，则将其替换为更明确的失败提示
-                    if (displayStep.status === 'FAILED' && (!displayStep.content || displayStep.content.trim() === '思考中...')) {
-                      displayStep = { ...displayStep, content: '推演失败' }
+                    // 失败步骤：不再展示后端推送的具体错误信息，统一显示"推演失败请重试"
+                    if (displayStep.status === 'FAILED') {
+                      displayStep = { ...displayStep, content: '推演失败请重试' }
                     }
 
                     return (
