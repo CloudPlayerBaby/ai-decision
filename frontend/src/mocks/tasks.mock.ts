@@ -70,6 +70,8 @@ export const MOCK_TASK_HISTORY: TaskHistoryItem[] = [
     taskId: 't_30001',
     runType: 'FULL',
     taskStatus: 'SUCCEEDED',
+    analysisResultId: 'ar_40001',
+    resultStatus: 'PENDING_CONFIRM',
     startedAt: '2026-07-31T09:00:00+08:00',
     finishedAt: '2026-07-31T09:02:34+08:00',
     steps: [

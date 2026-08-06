@@ -43,6 +43,13 @@ export function StepLogCard({ step, onRetry, animate = true }: Props) {
       timerRef.current = null
     }
 
+    // 步骤失败：停止打字机，重置锁，直接显示已输出的内容
+    if (step.status === 'FAILED') {
+      startedRef.current = false
+      setDisplayedContent(targetContent)
+      return
+    }
+
     if (!animate && !startedRef.current) {
       setDisplayedContent(targetContent)
       return
@@ -74,7 +81,7 @@ export function StepLogCard({ step, onRetry, animate = true }: Props) {
         timerRef.current = null
       }
     }
-  }, [targetContent, animate])
+  }, [targetContent, animate, step.status])
 
   const isTyping = (animate || startedRef.current) && displayedContent.length < targetContent.length
   const cursorStyle: CSSProperties = {
