@@ -314,7 +314,9 @@ export function useAnalysisStream({
       // 添加本轮 group（标签从当前分组状态实时计算，不用 ref 避免不同步）
       if (task.steps.length > 0 && task.status !== 'SUCCEEDED') {
         setStepGroups((prev) => {
-          const withoutCurrent = prev.filter((g) => !g.isCurrent);
+          const withoutCurrent = prev.filter(
+            (group) => !group.isCurrent && group.taskId !== task.id,
+          );
           const fullCount = withoutCurrent.filter((g) => g.label !== '局部推演结果').length;
           const label = deriveRunLabel(runType ?? 'FULL', fullCount);
           return [
